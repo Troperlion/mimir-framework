@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <unordered_map>
+#include <unordered_set>
 
 // PonyXLDDPMModel (PonyXL SDXL-like):
 // - Entraînement diffusion en espace latent: image -> VAE(mu) = x0, puis
@@ -23,9 +25,19 @@ public:
         int max_vocab = 32000;  // taille max vocab tokenizer (français: recommandé >= 32k)
 
         // Texte/latents: entrée attendue
-        // Pour des prompts très longs (ex: ~1300 mots), il faut un ctx_len élevé.
-        // NOTE: 1300 mots peuvent produire >1300 tokens selon le tokenizer.
-        int text_ctx_len = 1300;
+        // Format cible: CLIP-like avec ctx_len court (typiquement 77).
+        // NOTE: ce modèle consomme des IDs (`text_ids`) et tronque/pad à `text_ctx_len`.
+        int text_ctx_len = 77;
+
+        // Si true: rend l'encodeur texte plus proche d'un CLIP text encoder:
+        // - self-attention causale
+        // - layernorm final
+        bool text_clip_like = true;
+
+        // Tokens de contexte global (appris) injectés après <BOS>.
+        // Objectif: permettre au modèle d'encoder un prior “dataset global” indépendamment du prompt.
+        // NOTE: réduit d'autant le budget de tokens disponibles pour le texte (car on garde <BOS>/<EOS>).
+        int global_ctx_tokens = 4;
 
         // Compression du contexte texte pour mieux gérer les prompts très longs.
         // Si activé, on transforme la séquence (text_ctx_len) en un seul token contexte (mean-pool)
@@ -42,19 +54,32 @@ public:
         // Conditionnement temporel (diffusion-like): si true, le modèle attend une entrée float
         // nommée "timestep" (scalaire) et l’injecte via un petit MLP dans les tokens latents.
         bool sdxl_time_cond = true;
-        // Par défaut: plus de blocs pour éviter un stub trop peu profond.
+
+        // Représentation du timestep injectée quand sdxl_time_cond=true.
+        // - "log_snr" (défaut): utilise logSNR=log(alpha_bar/(1-alpha_bar)), compressé via tanh pour être ~[-1,1].
+        //   C'est généralement mieux conditionné que t_norm linéaire.
+        // - "t_norm": utilise t normalisé dans [0,1] (comportement historique).
+        // - "t_norm_centered": 2*t_norm-1 dans [-1,1].
+        std::string timestep_cond = "log_snr";
+        // Par défaut: texte réduit, image renforcée.
         int unet_layers = 16;
-        int text_layers = 8;
+        int text_layers = 4;
         int mlp_hidden = 1024;
 
         // UNet 2D (multi-échelle)
         int latent_h = 0;     // 0 = auto (inféré de latent_seq_len)
         int latent_w = 0;     // 0 = auto
-        int unet_depth = 3;   // nombre de niveaux down/up
+        int unet_depth = 4;   // nombre de niveaux down/up
+
+        // Nombre de blocs (conv/conv + cross-attn) par niveau UNet (down et up).
+        // 1 = comportement historique.
+        int unet_blocks_per_level = 2;
+        // Nombre de blocs au bottleneck.
+        int unet_bottleneck_blocks = 2;
 
         // Image (RGB) - dimensions attendues côté dataset loader
-        int image_w = 64;
-        int image_h = 64;
+        int image_w = 512;
+        int image_h = 512;
         int image_c = 3;       // 3 canaux (PNG)
 
         // Diffusion schedule (DDPM)
@@ -66,16 +91,40 @@ public:
         // Valeurs supportées (voir Model::computeLoss): "mse", "mae", "huber"/"smoothl1", "charbonnier", "gaussian_nll".
         std::string recon_loss = "mse";
 
+        // === KL regularization (distribution eps_pred) ===
+        // Optionnel: pénalise la divergence de eps_pred vers N(0,1) en se basant
+        // sur les moments (mean/var) du vecteur eps_pred courant.
+        // Objectif: stabiliser l'amplitude/variance de la prédiction et éviter
+        // les sorties trop "écrasées" ou trop explosives.
+        // Même logique que VAEConv: warmup linéaire de beta sur kl_warmup_steps.
+        float kl_beta = 0.0f;
+        int kl_warmup_steps = 0;
+        // Clip de log-variance (log(var)) utilisé dans ce KL (sécurité numérique)
+        float logvar_clip_min = -10.0f;
+        float logvar_clip_max = 10.0f;
+
+        // Pondération de loss en fonction du timestep: loss = w(t) * recon_loss(...)
+        // - "none" (défaut): w(t)=1
+        // - "min_snr": w(t)=min(SNR(t), gamma) / SNR(t) (stabilise l'entraînement en évitant de sur-pondérer les timesteps à très haut SNR)
+        // où SNR(t)=alpha_bar/(1-alpha_bar).
+        std::string loss_weighting = "none";
+        float min_snr_gamma = 5.0f;
+
+        // Activation de sortie du prédicteur eps.
+        // - "linear" (défaut): sortie non bornée (Linear + Identity)
+        // - "tanh": borne la sortie dans [-1,1]
+        // NOTE: en diffusion, une sortie non bornée est standard; tanh est un mode de stabilisation optionnel.
+        std::string output_activation = "linear";
+
         // Nombre d'updates diffusion par image ("par étapes" au sens entraînement).
         // 1 = standard DDPM (un timestep aléatoire par image).
         int ddpm_steps_per_image = 1;
 
-        // Bruit "Peltier" (thermal / capteur) approximé: bruit gaussien avec composante floutée
-        // (corrélée spatialement) pour apprendre à débruiter des artefacts "soft".
-        bool peltier_noise = true;
-        // Mix [0..1]: 0 => blanc, 1 => uniquement flouté
+        // Bruit "Peltier" (ancien): historiquement on mixait un bruit corrélé (blur) au bruit blanc.
+        // Désormais DÉPRÉCIÉ/IGNORÉ: PonyXL-DDPM se comporte comme un DDPM latent standard
+        // avec eps ~ N(0, I). Les champs restent pour compatibilité des anciens checkpoints/config.
+        bool peltier_noise = false;
         float peltier_mix = 0.65f;
-        // Rayon du box blur (2 => kernel 5x5). 0 => pas de flou.
         int peltier_blur_radius = 2;
 
         // === VAE (Stable Diffusion-like) ===
@@ -104,6 +153,7 @@ public:
         //   --- MENTALITÉ ---
         //   ...
         //   --- TEXTE (langue...) ---
+        //   --- DESCRIPTION --- (alias accepté pour compatibilité captioners)
         //   ...
         // Si aucune balise n'est détectée, le prompt est utilisé tel quel.
         bool caption_structured_enable = true;
@@ -117,12 +167,45 @@ public:
         float caption_mentalite_dropout_prob = 0.0f;
         float caption_texte_dropout_prob = 0.0f;
 
+        // === Captions key/value (format simple) ===
+        // Supporte le format:
+        //   caption: ...
+        //   theme: ...
+        //   keywords: ...
+        //   tokens: ...
+        // Utilisé si aucune balise "--- SECTION ---" n'est détectée.
+        bool caption_kv_enable = true;
+
+        // === Majoration des termes fréquents (conditioning) ===
+        // Objectif: renforcer la corrélation texte-image en sur-représentant
+        // les termes les plus fréquents du dataset pendant l'entraînement.
+        // Implémentation: répétition contrôlée de certains tokens avant padding/troncature.
+        bool term_freq_boost_enable = true;
+        // Source: on préfère compter les termes explicites de `tokens:` / `keywords:` si présents.
+        bool term_freq_boost_use_tokens = true;
+        bool term_freq_boost_use_keywords = true;
+        // Nombre de tokens "top" considérés comme fréquents.
+        int term_freq_boost_top_k = 64;
+        // Nombre de répétitions ajoutées (1 => token apparaît 2 fois).
+        int term_freq_boost_repeat = 1;
+        // Warmup en steps d'optimizer avant d'activer la majoration.
+        int term_freq_boost_start_step = 100;
+        // Recalcule du top-K toutes les N steps.
+        int term_freq_boost_update_every_steps = 200;
+
         // === Viz: séquence DDPM (noising/denoising) ===
         // 0 = désactivé. Sinon: toutes les N steps d'optimizer, on génère quelques frames
         // montrant x_t (noisé) et x0_hat (reconstruit) pour plusieurs timesteps.
         int viz_ddpm_every_steps = 0;
         // Nombre de timesteps affichés (linéairement espacés de 0 à T-1).
         int viz_ddpm_num_steps = 5;
+
+        // === Optional: image-space auxiliary loss (via VAE decoder) ===
+        // Objectif: pousser le modèle de diffusion à produire des latents qui, une fois
+        // décodés, matchent mieux l'image originale (malgré un décodeur VAE imparfait).
+        // Coûteux: nécessite forward+backward dans le décodeur VAE. Désactivé par défaut.
+        float img_loss_weight = 0.0f;
+        int img_loss_every_steps = 0; // 0 = désactivé, sinon appliqué toutes les N steps d'optimizer (sur la dernière inner-step)
     };
 
     struct StepStats {
@@ -132,6 +215,9 @@ public:
 
         // DDPM timestep (normalisé [0..1] quand utilisé, sinon 0)
         float timestep = 0.0f;
+
+        // KL warmup: beta effectif (après warmup)
+        float kl_beta_effective = 0.0f;
 
         float kl_divergence = 0.0f;
         float wasserstein = 0.0f;
@@ -148,6 +234,10 @@ public:
 
     // Permet de modifier l'échelle VAE après création du modèle (ex: calibration auto).
     void setVaeScale(float s) { cfg_.vae_scale = s; }
+
+    // Live tuning: permet de modifier à chaud les paramètres KL.
+    // NOTE: ce modèle lit le KL depuis cfg_ (et non via Model::modelConfig).
+    void setLiveKL(float kl_beta, int kl_warmup_steps);
 
     // Accumule les moments (sum, sumsq, n) sur le vecteur mu du VAE pour une image.
     // mu est extrait du packed output [image || mu || logvar] du VAE.
@@ -216,4 +306,11 @@ private:
 
     // VAE decoder (pour visualizer reconstructions en espace image, lazy-load)
     std::shared_ptr<Model> vae_decode_;
+
+    // Stats de fréquence (incrémentales) pour la majoration pendant l'entraînement.
+    // Clé: token id (dans le tokenizer courant)
+    std::unordered_map<int, uint64_t> term_freq_counts_;
+    std::unordered_set<int> term_freq_top_set_;
+    std::vector<int> term_freq_top_ids_;
+    int64_t term_freq_last_rebuild_step_ = -1;
 };

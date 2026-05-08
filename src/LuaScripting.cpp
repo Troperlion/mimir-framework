@@ -7,6 +7,7 @@
 #include "DynamicTensorAllocator.hpp"
 #include "AsyncMonitor.hpp"
 #include "Models/Diffusion/PonyXLDDPMModel.hpp"
+#include "Helpers.hpp"
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <filesystem>
 #include <iomanip>
+#include <unordered_set>
 
 // ============================================================================
 // Constructeur / Destructeur
@@ -383,6 +385,16 @@ void LuaScripting::registerAPI() {
     lua_setfield(L, -2, "load");
 
     lua_setfield(L, -2, "Database");  // Mimir.Database
+
+    // ========== Sous-table "Mimir.IO" ==========
+    lua_newtable(L);
+
+    lua_pushcfunction(L, lua_readImageRGBU8);
+    lua_setfield(L, -2, "read_image_rgb_u8");
+    lua_pushcfunction(L, lua_readImageRGBU8);
+    lua_setfield(L, -2, "readImageRGBU8");  // alias
+
+    lua_setfield(L, -2, "IO");  // Mimir.IO
     
     // ========== Sous-table "Mimir.Memory" ==========
     lua_newtable(L);
@@ -622,6 +634,81 @@ void LuaScripting::registerAPI() {
 // Implémentation des fonctions Lua
 // ============================================================================
 
+namespace {
+
+// Le registre d'architectures construit `Model::modelConfig` à partir d'un sous-ensemble
+// des champs de config (ceux présents dans les structs Config). Or les boucles d'entraînement
+// (trainStepVAE/optimizerStep/etc.) lisent certains hyperparamètres depuis `model.modelConfig`.
+// On propage donc les clés pertinentes depuis la config Lua (`cfg`) vers `model.modelConfig`.
+//
+// Règles:
+// - Par défaut: n'écrase pas une clé déjà définie par l'architecture.
+// - Certaines clés sont explicitement autorisées à override (hyperparams de loss/grad/kl),
+//   car elles sont attendues comme réglables côté training.
+static void mergeLuaConfigIntoModelConfig(Model& model, const json& cfg) {
+    if (!cfg.is_object()) return;
+
+    static const std::unordered_set<std::string> kOverrideKeys = {
+        // VAE losses/knobs
+        "recon_loss",
+        "kl_beta",
+        "vae_kl_beta",
+        "kl_warmup_steps",
+        "marker_wass_scale",
+        "marker_temp_scale",
+        "marker_scale_max",
+        "marker_warmup_steps",
+        "logvar_clip_min",
+        "logvar_clip_max",
+
+        // Optional additive losses
+        "ssim_weight",
+        "ssim_mode",
+        "ssim_k1",
+        "ssim_k2",
+        "ssim_L",
+        "spectral_weight",
+        "spectral_scales",
+        "perceptual_weight",
+        "perceptual_arch",
+        "perceptual_checkpoint",
+        "perceptual_base_channels",
+
+        // Recon loss params
+        "huber_delta",
+        "smoothl1_delta",
+        "smoothl1_beta",
+        "charbonnier_eps",
+        "nll_sigma",
+        "gaussian_nll_sigma",
+
+        // Text align
+        "align_weight",
+
+        // Optimizer/runtime knobs
+        "grad_clip_norm",
+        "clip_norm",
+        "frozen_layer_prefixes",
+    };
+
+    for (auto it = cfg.begin(); it != cfg.end(); ++it) {
+        const std::string key = it.key();
+        const json& value = it.value();
+
+        if (kOverrideKeys.count(key) > 0) {
+            model.modelConfig[key] = value;
+            continue;
+        }
+
+        // Ne pas écraser les clés déjà définies par l'architecture.
+        if (!model.modelConfig.contains(key)) {
+            model.modelConfig[key] = value;
+        }
+    }
+}
+
+} // namespace
+
 int LuaScripting::lua_createModel(lua_State* L) {
     auto& ctx = LuaContext::getInstance();
     
@@ -642,6 +729,12 @@ int LuaScripting::lua_createModel(lua_State* L) {
 
         // Création + construction via registre (le réseau est défini dans la classe du modèle).
         ctx.currentModel = ModelArchitectures::create(name, config);
+
+        // Important: faire remonter les hyperparams de training (KL, recon_loss, clip, etc.)
+        // dans `model.modelConfig` pour que Model::trainStepVAE/optimizerStep les voient.
+        if (ctx.currentModel) {
+            mergeLuaConfigIntoModelConfig(*ctx.currentModel, config);
+        }
 
         // Propager les assets du contexte (tokenizer/encoder) au modèle.
         if (ctx.currentTokenizer) {
@@ -693,6 +786,12 @@ int LuaScripting::lua_createModelFromConfig(lua_State* L) {
         std::string arch;
         json cfg;
         ctx.currentModel = ModelArchitectures::createFromConfig(full, &cfg, &arch);
+
+        // Même principe que lua_createModel: injecter les clés de config (training) dans
+        // `model.modelConfig` en respectant les overrides autorisés.
+        if (ctx.currentModel) {
+            mergeLuaConfigIntoModelConfig(*ctx.currentModel, cfg);
+        }
 
         // Propager les assets déjà présents.
         if (ctx.currentTokenizer) {
@@ -841,8 +940,10 @@ int LuaScripting::lua_trainModel(lua_State* L) {
         }
 
         // Reprise éventuelle de l'état optimiseur (checkpoint)
-        if (const Optimizer* saved = ctx.currentModel->getSerializedOptimizer()) {
-            opt = *saved;
+        const Optimizer* saved_opt = ctx.currentModel->getSerializedOptimizer();
+        const bool resume_optimizer_loaded = (saved_opt != nullptr);
+        if (saved_opt) {
+            opt = *saved_opt;
             // S'assurer que lr reflète l'argument (opt.initial_lr sert de base au scheduler)
             opt.initial_lr = static_cast<float>(lr);
         }
@@ -890,13 +991,50 @@ int LuaScripting::lua_trainModel(lua_State* L) {
         log_every = std::max(1, log_every);
         autosave_every_epochs = std::max(0, autosave_every_epochs);
 
+        // -----------------------------------------------------------------
+        // Resume epoch offset (UX): si on reprend depuis checkpoint_dir/epoch_XXXX,
+        // afficher/nommer les epochs à partir de l'epoch précédente.
+        // Exemple: reprise à 3 => UI affiche 3 (pas 1) et autosave écrit epoch_0003+.
+        // Active uniquement si un optimizer a été chargé via Serialization.load().
+        // -----------------------------------------------------------------
+        int epoch_offset = 0;          // Ajouté à epoch_1based (boucle) pour affichage + checkpoints
+        if (resume_optimizer_loaded && !checkpoint_dir.empty()) {
+            try {
+                namespace fs = std::filesystem;
+                const fs::path base(checkpoint_dir);
+                int best = -1;
+                if (fs::exists(base) && fs::is_directory(base)) {
+                    for (auto& p : fs::directory_iterator(base)) {
+                        if (!p.is_directory()) continue;
+                        const std::string name = p.path().filename().string();
+                        if (name.rfind("epoch_", 0) != 0) continue;
+                        try {
+                            size_t parsed = 0;
+                            const int e = std::stoi(name.substr(std::string("epoch_").size()), &parsed);
+                            if (parsed == 0) continue;
+                            if (e > best) best = e;
+                        } catch (...) {
+                        }
+                    }
+                }
+                if (best > 0) {
+                    epoch_offset = best - 1;
+                }
+            } catch (...) {
+                // best-effort: pas de resume epoch détectée => offset=0
+            }
+        }
+        const int total_epochs_display = epoch_offset + epochs;
+
         auto do_checkpoint_save = [&](int epoch_1based, const std::string& suffix, std::string* err_out) -> bool {
             if (!ctx.currentModel) return false;
             if (checkpoint_dir.empty()) return false;
 
+            const int epoch_abs = epoch_offset + epoch_1based;
+
             using namespace Mimir::Serialization;
             std::ostringstream name;
-            name << "epoch_" << std::setw(4) << std::setfill('0') << epoch_1based;
+            name << "epoch_" << std::setw(4) << std::setfill('0') << epoch_abs;
             if (!suffix.empty()) name << suffix;
 
             const std::filesystem::path out = std::filesystem::path(checkpoint_dir) / name.str();
@@ -938,6 +1076,118 @@ int LuaScripting::lua_trainModel(lua_State* L) {
 
         int global_step = 0;
 
+        // -----------------------------------------------------------------
+        // Live tuning via Viz (thread UI -> training thread)
+        // -----------------------------------------------------------------
+        uint64_t last_live_ver = 0;
+        bool live_override_active = false;
+
+        // Baselines (pour retour au comportement natif)
+        const float baseline_lr = static_cast<float>(lr);
+        const int baseline_lr_warmup_steps = std::max(0, opt.warmup_steps);
+        float baseline_kl_beta = 0.0f;
+        int baseline_kl_warmup_steps = 0;
+        try {
+            if (ctx.modelConfig.contains("kl_beta")) baseline_kl_beta = ctx.modelConfig["kl_beta"].get<float>();
+            else if (ctx.modelConfig.contains("vae_kl_beta")) baseline_kl_beta = ctx.modelConfig["vae_kl_beta"].get<float>();
+            if (ctx.modelConfig.contains("kl_warmup_steps")) baseline_kl_warmup_steps = ctx.modelConfig["kl_warmup_steps"].get<int>();
+        } catch (...) {
+        }
+        baseline_kl_beta = std::max(0.0f, baseline_kl_beta);
+        baseline_kl_warmup_steps = std::max(0, baseline_kl_warmup_steps);
+
+        float baseline_pony_kl_beta = 0.0f;
+        int baseline_pony_kl_warmup_steps = 0;
+        if (auto* pony = dynamic_cast<PonyXLDDPMModel*>(ctx.currentModel.get())) {
+            const auto& pcfg = pony->getConfig();
+            baseline_pony_kl_beta = std::max(0.0f, pcfg.kl_beta);
+            baseline_pony_kl_warmup_steps = std::max(0, pcfg.kl_warmup_steps);
+        }
+
+        auto poll_viz_live_params = [&]() {
+            if (!ctx.asyncMonitor) return;
+            auto viz = ctx.asyncMonitor->getViz();
+            if (!viz) return;
+
+            const uint64_t ver = viz->liveTrainParamsVersion();
+            if (ver == 0 || ver == last_live_ver) return;
+            last_live_ver = ver;
+
+            const auto p = viz->liveTrainParamsSnapshot();
+            if (p.version == 0) return;
+
+            // Si on repasse en mode natif, restaurer la baseline une fois.
+            if (!p.overrides_enabled) {
+                if (live_override_active) {
+                    live_override_active = false;
+                    opt.initial_lr = std::max(1e-12f, baseline_lr);
+                    opt.warmup_steps = baseline_lr_warmup_steps;
+
+                    ctx.modelConfig["kl_beta"] = baseline_kl_beta;
+                    ctx.modelConfig["kl_warmup_steps"] = baseline_kl_warmup_steps;
+                    if (ctx.currentModel) {
+                        ctx.currentModel->modelConfig["kl_beta"] = baseline_kl_beta;
+                        ctx.currentModel->modelConfig["kl_warmup_steps"] = baseline_kl_warmup_steps;
+                    }
+
+                    if (auto* pony = dynamic_cast<PonyXLDDPMModel*>(ctx.currentModel.get())) {
+                        pony->setLiveKL(baseline_pony_kl_beta, baseline_pony_kl_warmup_steps);
+                    }
+                }
+                return;
+            }
+
+            live_override_active = true;
+
+            if (std::isfinite(p.lr) && p.lr > 0.0f) {
+                opt.initial_lr = std::max(1e-12f, p.lr);
+            }
+            opt.warmup_steps = std::max(0, p.lr_warmup_steps);
+
+            const float kl_beta = (p.kl_enabled ? std::max(0.0f, p.kl_beta) : 0.0f);
+            const int kl_warmup_steps = std::max(0, p.kl_warmup_steps);
+
+            // Propager vers la config runtime (consommée par Model::trainStepVAE, etc.)
+            ctx.modelConfig["kl_beta"] = kl_beta;
+            ctx.modelConfig["kl_warmup_steps"] = kl_warmup_steps;
+            if (ctx.currentModel) {
+                ctx.currentModel->modelConfig["kl_beta"] = kl_beta;
+                ctx.currentModel->modelConfig["kl_warmup_steps"] = kl_warmup_steps;
+            }
+
+            // PonyXLDDPM: KL est lu depuis cfg_ (pas via modelConfig) => setter dédié.
+            if (auto* pony = dynamic_cast<PonyXLDDPMModel*>(ctx.currentModel.get())) {
+                pony->setLiveKL(kl_beta, kl_warmup_steps);
+            }
+        };
+
+        auto step_learning_rate = [&]() -> float {
+            // Avant toute interaction UI, conserver le comportement historique (arg `lr`).
+            return live_override_active ? opt.getCurrentLR() : static_cast<float>(lr);
+        };
+
+        // Perf stats pour la viz: time/mem/bps (best-effort).
+        // - time: ms entre 2 updates successifs (approx temps/batch)
+        // - bps: batches/sec (approx)
+        // - mem: MemoryGuard current bytes en MB
+        std::chrono::steady_clock::time_point last_metrics_ts;
+        bool has_last_metrics_ts = false;
+        auto apply_perf_stats = [&](AsyncMonitor::Metrics& m) {
+            const auto now = std::chrono::steady_clock::now();
+            if (has_last_metrics_ts) {
+                const auto dt_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_metrics_ts).count();
+                if (dt_ms > 0 && dt_ms < 60LL * 60LL * 1000LL) {
+                    m.batch_time_ms = (int)dt_ms;
+                    m.bps = 1000.0f / (float)m.batch_time_ms;
+                }
+            }
+            last_metrics_ts = now;
+            has_last_metrics_ts = true;
+
+            auto& guard = MemoryGuard::instance();
+            m.memory_mb = guard.getCurrentBytes() / 1024 / 1024;
+        };
+
         auto log_step = [&](int global_step, const Model::VAEStepStats& st, const char* prefix) {
             if ((global_step % log_every) != 0) return;
             ctx.addLog(std::string(prefix) +
@@ -953,8 +1203,8 @@ int LuaScripting::lua_trainModel(lua_State* L) {
             if (!ctx.asyncMonitor) return;
 
             AsyncMonitor::Metrics m;
-            m.epoch = epoch_1based;
-            m.total_epochs = epochs;
+            m.epoch = epoch_offset + epoch_1based;
+            m.total_epochs = total_epochs_display;
             m.batch = batch_1based;
             m.total_batches = total_batches;
             m.loss = st.loss;
@@ -978,12 +1228,14 @@ int LuaScripting::lua_trainModel(lua_State* L) {
             m.opt_eps = opt.eps;
             m.opt_weight_decay = opt.weight_decay;
 
+            apply_perf_stats(m);
+
             ctx.asyncMonitor->updateMetrics(m);
         };
 
-        // -------------------------------
+        // -----------------------------------------
         // VAEConv (images) optional text
-        // -------------------------------
+        // -----------------------------------------
         if (model_type == "vae_conv") {
             int image_w = 0, image_h = 0, image_c = 3;
             bool text_cond = false;
@@ -1036,6 +1288,53 @@ int LuaScripting::lua_trainModel(lua_State* L) {
             } catch (...) {
             }
             validate_holdout_frac = std::clamp(validate_holdout_frac, 0.0f, 0.95f);
+
+            // -----------------------------------------------------------------
+            // Détection automatique "VAE backbone prêt" (pour diffusion text→image)
+            // Basée sur la validation: recon (MSE/L1) + KL, et un plateau sur une fenêtre.
+            // Écrit un fichier JSON dans checkpoint_dir quand le critère est satisfait.
+            // -----------------------------------------------------------------
+            bool backbone_ready_enabled = true;
+            bool backbone_ready_stop = false;
+            int backbone_ready_window = 5;              // nb de validations consécutives
+            float backbone_ready_plateau_rel = 0.01f;   // amélioration relative max (1% -> plateau)
+            float backbone_ready_plateau_abs = 1e-4f;   // amélioration absolue max
+            float backbone_ready_recon_target = 0.02f;  // 0 => ignorer seuil absolu
+            float backbone_ready_kl_min = 0.01f;        // évite collapse (KL~0)
+            float backbone_ready_kl_max = 5.0f;         // garde-fou
+            int backbone_ready_min_steps = 0;           // ex: kl_warmup_steps
+            std::string backbone_ready_file = "vae_backbone_ready.json";
+            try {
+                if (ctx.modelConfig.contains("backbone_ready")) backbone_ready_enabled = ctx.modelConfig["backbone_ready"].get<bool>();
+                if (ctx.modelConfig.contains("backbone_ready_enabled")) backbone_ready_enabled = ctx.modelConfig["backbone_ready_enabled"].get<bool>();
+                if (ctx.modelConfig.contains("backbone_ready_stop")) backbone_ready_stop = ctx.modelConfig["backbone_ready_stop"].get<bool>();
+                if (ctx.modelConfig.contains("backbone_ready_window")) backbone_ready_window = std::max(2, ctx.modelConfig["backbone_ready_window"].get<int>());
+                if (ctx.modelConfig.contains("backbone_ready_plateau_rel")) backbone_ready_plateau_rel = std::max(0.0f, ctx.modelConfig["backbone_ready_plateau_rel"].get<float>());
+                if (ctx.modelConfig.contains("backbone_ready_plateau_abs")) backbone_ready_plateau_abs = std::max(0.0f, ctx.modelConfig["backbone_ready_plateau_abs"].get<float>());
+                if (ctx.modelConfig.contains("backbone_ready_recon_target")) backbone_ready_recon_target = std::max(0.0f, ctx.modelConfig["backbone_ready_recon_target"].get<float>());
+                if (ctx.modelConfig.contains("backbone_ready_kl_min")) backbone_ready_kl_min = std::max(0.0f, ctx.modelConfig["backbone_ready_kl_min"].get<float>());
+                if (ctx.modelConfig.contains("backbone_ready_kl_max")) backbone_ready_kl_max = std::max(0.0f, ctx.modelConfig["backbone_ready_kl_max"].get<float>());
+                if (ctx.modelConfig.contains("backbone_ready_min_steps")) backbone_ready_min_steps = std::max(0, ctx.modelConfig["backbone_ready_min_steps"].get<int>());
+                if (ctx.modelConfig.contains("backbone_ready_file")) backbone_ready_file = ctx.modelConfig["backbone_ready_file"].get<std::string>();
+            } catch (...) {
+            }
+            if (backbone_ready_min_steps <= 0) {
+                try {
+                    if (ctx.modelConfig.contains("kl_warmup_steps")) backbone_ready_min_steps = std::max(0, ctx.modelConfig["kl_warmup_steps"].get<int>());
+                } catch (...) {
+                }
+            }
+            if (backbone_ready_file.empty()) backbone_ready_file = "vae_backbone_ready.json";
+
+            // On ne peut pas détecter la "readiness" sans validation.
+            if (validate_every_steps <= 0 || validate_items <= 0) {
+                backbone_ready_enabled = false;
+            }
+
+            bool backbone_ready_written = false;
+            std::deque<float> backbone_recon_hist;
+            std::deque<float> backbone_kl_hist;
+            std::deque<int> backbone_step_hist;
 
             // Filtrer les items utilisables (au moins une image). Sans ça, `max_items` petit
             // peut tomber sur un item texte-only et faire 0 step.
@@ -1151,12 +1450,13 @@ int LuaScripting::lua_trainModel(lua_State* L) {
                 return (float)kl;
             };
 
+            const std::string step_prefix = "[" + model_type + "]";
             bool stopped_by_ui = false;
 
             for (int epoch = 0; epoch < epochs; ++epoch) {
                 std::shuffle(train_indices.begin(), train_indices.end(), rng);
-                ctx.addLog("Epoch " + std::to_string(epoch + 1) + "/" + std::to_string(epochs) +
-                           " (vae_conv) items=" + std::to_string(use_n));
+                ctx.addLog("Epoch " + std::to_string(epoch_offset + (epoch + 1)) + "/" + std::to_string(total_epochs_display) +
+                           " (" + model_type + ") items=" + std::to_string(use_n));
 
                 bool stop_requested = false;
 
@@ -1182,13 +1482,15 @@ int LuaScripting::lua_trainModel(lua_State* L) {
                         std::vector<int> ids = ctx.currentTokenizer->tokenize(prompt);
                         if ((int)ids.size() < seq_len) ids.resize((size_t)seq_len, pad_id);
                         else if ((int)ids.size() > seq_len) ids.resize((size_t)seq_len);
-                        st = ctx.currentModel->trainStepVAEText(x, ids, opt, (float)lr);
+                        poll_viz_live_params();
+                        st = ctx.currentModel->trainStepVAEText(x, ids, opt, step_learning_rate());
                     } else {
-                        st = ctx.currentModel->trainStepVAE(x, opt, (float)lr);
+                        poll_viz_live_params();
+                        st = ctx.currentModel->trainStepVAE(x, opt, step_learning_rate());
                     }
 
                     global_step += 1;
-                    log_step(global_step, st, "[vae_conv]");
+                    log_step(global_step, st, step_prefix.c_str());
                     monitor_step(epoch + 1, k + 1, use_n, st);
 
                     // STOP depuis la Viz (bouton dans le panneau Metrics)
@@ -1296,13 +1598,108 @@ int LuaScripting::lua_trainModel(lua_State* L) {
                         const float final_kl = (done > 0) ? (float)(acc_kl / (double)done) : 0.0f;
                         if (ctx.asyncMonitor) ctx.asyncMonitor->updateValidation(false, global_step, done, total, true, val_ok, final_recon, final_kl, 0.0f);
 
+                        // Backbone readiness: heuristique basée sur validation.
+                        if (backbone_ready_enabled && val_ok && done > 0 && !backbone_ready_written) {
+                            backbone_recon_hist.push_back(final_recon);
+                            backbone_kl_hist.push_back(final_kl);
+                            backbone_step_hist.push_back(global_step);
+                            while ((int)backbone_recon_hist.size() > backbone_ready_window) backbone_recon_hist.pop_front();
+                            while ((int)backbone_kl_hist.size() > backbone_ready_window) backbone_kl_hist.pop_front();
+                            while ((int)backbone_step_hist.size() > backbone_ready_window) backbone_step_hist.pop_front();
+
+                            const bool have_window = ((int)backbone_recon_hist.size() >= backbone_ready_window);
+                            const bool warm_enough = (global_step >= backbone_ready_min_steps);
+
+                            if (have_window && warm_enough) {
+                                const float r0 = backbone_recon_hist.front();
+                                const float r1 = backbone_recon_hist.back();
+                                const float k1 = backbone_kl_hist.back();
+                                const float denom = std::max(1e-12f, std::abs(r0));
+                                const float rel_improve = (r0 - r1) / denom;
+                                const float abs_improve = std::abs(r0 - r1);
+
+                                const bool plateau = (rel_improve >= 0.0f) && (rel_improve <= backbone_ready_plateau_rel) && (abs_improve <= backbone_ready_plateau_abs);
+
+                                bool recon_ok = true;
+                                if (backbone_ready_recon_target > 0.0f) {
+                                    recon_ok = (r1 <= backbone_ready_recon_target);
+                                }
+
+                                bool kl_ok = (k1 >= backbone_ready_kl_min);
+                                if (backbone_ready_kl_max > 0.0f) {
+                                    kl_ok = kl_ok && (k1 <= backbone_ready_kl_max);
+                                }
+
+                                if (plateau && recon_ok && kl_ok) {
+                                    // Écrire un marqueur JSON dans checkpoint_dir.
+                                    try {
+                                        namespace fs = std::filesystem;
+                                        fs::path out_base = checkpoint_dir.empty() ? fs::path(".") : fs::path(checkpoint_dir);
+                                        std::error_code ec;
+                                        fs::create_directories(out_base, ec);
+                                        fs::path out_path = out_base / backbone_ready_file;
+
+                                        json j;
+                                        j["type"] = "vae_backbone_ready";
+                                        j["model_type"] = model_type;
+                                        j["global_step"] = global_step;
+                                        j["epoch"] = epoch_offset + (epoch + 1);
+                                        j["validate_items"] = done;
+                                        j["val_recon"] = final_recon;
+                                        j["val_kl"] = final_kl;
+                                        j["plateau_rel"] = backbone_ready_plateau_rel;
+                                        j["plateau_abs"] = backbone_ready_plateau_abs;
+                                        j["recon_target"] = backbone_ready_recon_target;
+                                        j["kl_min"] = backbone_ready_kl_min;
+                                        j["kl_max"] = backbone_ready_kl_max;
+                                        j["window"] = backbone_ready_window;
+                                        j["min_steps"] = backbone_ready_min_steps;
+                                        j["recon_history"] = backbone_recon_hist;
+                                        j["kl_history"] = backbone_kl_hist;
+                                        j["step_history"] = backbone_step_hist;
+
+                                        // Contexte utile pour diffusion
+                                        try {
+                                            if (ctx.modelConfig.contains("image_w")) j["image_w"] = ctx.modelConfig["image_w"].get<int>();
+                                            if (ctx.modelConfig.contains("image_h")) j["image_h"] = ctx.modelConfig["image_h"].get<int>();
+                                            if (ctx.modelConfig.contains("image_c")) j["image_c"] = ctx.modelConfig["image_c"].get<int>();
+                                            if (ctx.modelConfig.contains("latent_h")) j["latent_h"] = ctx.modelConfig["latent_h"].get<int>();
+                                            if (ctx.modelConfig.contains("latent_w")) j["latent_w"] = ctx.modelConfig["latent_w"].get<int>();
+                                            if (ctx.modelConfig.contains("latent_c")) j["latent_c"] = ctx.modelConfig["latent_c"].get<int>();
+                                            if (ctx.modelConfig.contains("base_channels")) j["base_channels"] = ctx.modelConfig["base_channels"].get<int>();
+                                            if (ctx.modelConfig.contains("stochastic_latent")) j["stochastic_latent"] = ctx.modelConfig["stochastic_latent"].get<bool>();
+                                            if (ctx.modelConfig.contains("kl_beta")) j["kl_beta"] = ctx.modelConfig["kl_beta"].get<float>();
+                                        } catch (...) {
+                                        }
+
+                                        std::ofstream f(out_path);
+                                        f << j.dump(2);
+                                        f.close();
+
+                                        backbone_ready_written = true;
+                                        ctx.addLog("✅ VAE backbone prêt pour diffusion (marqueur: " + out_path.string() + ")");
+                                    } catch (...) {
+                                        // Ne casse pas l'entraînement si l'écriture échoue.
+                                        ctx.addLog("⚠️  VAE backbone readiness: échec écriture marqueur JSON");
+                                    }
+
+                                    if (backbone_ready_stop) {
+                                        ctx.addLog("⛔ backbone_ready_stop=true: arrêt demandé (plateau atteint)");
+                                        stop_requested = true;
+                                        stopped_by_ui = true;
+                                    }
+                                }
+                            }
+                        }
+
                         if (stop_requested) {
                             break;
                         }
                     }
 
-                    // VIZ: pousser le contexte dataset + blocs à CHAQUE step (sinon stale)
-                    if (viz_active && ctx.asyncMonitor && ctx.currentModel && ctx.asyncMonitor->getViz() != nullptr) {
+                    // VIZ: pousser le contexte dataset + blocs uniquement tous les log_every steps
+                    // (réduit le coût; la viz reste “stale” entre deux updates, volontairement)
+                    if (viz_active && ctx.asyncMonitor && ctx.currentModel && ctx.asyncMonitor->getViz() != nullptr && ((global_step % log_every) == 0)) {
                         std::string label = "vae_conv/input/dataset/rgb";
                         label += "/i=" + std::to_string(train_indices[(size_t)k]);
 
@@ -1316,6 +1713,43 @@ int LuaScripting::lua_trainModel(lua_State* L) {
                             std::string(),
                             std::string()
                         );
+
+                        // Important UX:
+                        // Par défaut, on affiche les "taps" en état réel (ceux produits par
+                        // les passes réelles du modèle durant l'entraînement), sans forcer
+                        // un forward additionnel en mode inference/freeze.
+                        //
+                        // Si l'utilisateur veut explicitement un snapshot inference (ex: pour
+                        // rendre la recon plus lisible quand stochastic_latent=true), il peut
+                        // activer `viz_taps_force_inference=true` dans la config.
+                        bool viz_force_inference = false;
+                        try {
+                            if (ctx.modelConfig.contains("viz_taps_force_inference")) {
+                                viz_force_inference = ctx.modelConfig["viz_taps_force_inference"].get<bool>();
+                            }
+                        } catch (...) {
+                        }
+
+                        if (viz_force_inference) {
+                            ctx.currentModel->clearVizTaps();
+                            try {
+                                if (text_cond) {
+                                    std::vector<int> ids = ctx.currentTokenizer ? ctx.currentTokenizer->tokenize(prompt) : std::vector<int>();
+                                    if ((int)ids.size() < seq_len) ids.resize((size_t)seq_len, pad_id);
+                                    else if ((int)ids.size() > seq_len) ids.resize((size_t)seq_len);
+
+                                    std::unordered_map<std::string, std::vector<float>> fin;
+                                    std::unordered_map<std::string, std::vector<int>> iin;
+                                    fin["__input__"] = x;
+                                    iin["text_ids"] = std::move(ids);
+                                    (void)ctx.currentModel->forwardPassNamedView(fin, iin, false);
+                                } else {
+                                    (void)ctx.currentModel->forwardPassView(x, false);
+                                }
+                            } catch (...) {
+                                // best-effort: ne jamais casser le training à cause de la viz
+                            }
+                        }
 
                         auto taps = ctx.currentModel->consumeVizTaps();
                         std::vector<Visualizer::BlockFrame> frames;
@@ -1364,6 +1798,932 @@ int LuaScripting::lua_trainModel(lua_State* L) {
             lua_pushboolean(L, true);
             lua_pushinteger(L, global_step);
             return 2;
+        } else if (model_type == "vgg16_feat") {
+            int image_w = 0, image_h = 0, image_c = 3;
+            int grid = 8;
+            int viz_taps_every_steps = 0;
+            try {
+                if (ctx.modelConfig.contains("image_w")) image_w = ctx.modelConfig["image_w"].get<int>();
+                if (ctx.modelConfig.contains("image_h")) image_h = ctx.modelConfig["image_h"].get<int>();
+                if (ctx.modelConfig.contains("image_c")) image_c = ctx.modelConfig["image_c"].get<int>();
+                if (ctx.modelConfig.contains("pretrain_grid")) grid = ctx.modelConfig["pretrain_grid"].get<int>();
+                if (ctx.modelConfig.contains("viz_taps_every_steps")) viz_taps_every_steps = ctx.modelConfig["viz_taps_every_steps"].get<int>();
+                else if (ctx.modelConfig.contains("viz_every_steps")) viz_taps_every_steps = ctx.modelConfig["viz_every_steps"].get<int>();
+            } catch (...) {
+            }
+            if (image_w <= 0 || image_h <= 0) {
+                // fallback: dataset config
+                try {
+                    if (ctx.currentConfig.contains("dataset")) {
+                        if (ctx.currentConfig["dataset"].contains("target_w")) image_w = ctx.currentConfig["dataset"]["target_w"].get<int>();
+                        if (ctx.currentConfig["dataset"].contains("target_h")) image_h = ctx.currentConfig["dataset"]["target_h"].get<int>();
+                    }
+                } catch (...) {
+                }
+            }
+            image_w = std::max(1, image_w);
+            image_h = std::max(1, image_h);
+            image_c = std::max(1, image_c);
+            grid = std::clamp(grid, 2, 32);
+
+            // Viz taps frequency (best-effort). Default: follow log_every.
+            if (viz_active) {
+                if (viz_taps_every_steps <= 0) viz_taps_every_steps = log_every;
+                viz_taps_every_steps = std::max(1, viz_taps_every_steps);
+            } else {
+                viz_taps_every_steps = 0;
+            }
+
+            auto push_viz_taps = [&]() {
+                if (!viz_active) return;
+                if (!ctx.currentModel || !ctx.asyncMonitor) return;
+                if (ctx.asyncMonitor->getViz() == nullptr) return;
+                auto taps = ctx.currentModel->consumeVizTaps();
+                std::vector<Visualizer::BlockFrame> frames;
+                frames.reserve(taps.size());
+                for (auto& f : taps) {
+                    Visualizer::BlockFrame bf;
+                    bf.pixels = std::move(f.pixels);
+                    bf.w = f.w;
+                    bf.h = f.h;
+                    bf.channels = f.channels;
+                    bf.label = std::move(f.label);
+                    frames.push_back(std::move(bf));
+                }
+                // Important UX: même si aucun tap n'est émis, vider les frames précédentes.
+                ctx.asyncMonitor->setLayerBlockImages(frames);
+            };
+
+            // Filter usable items
+            std::vector<int> indices;
+            indices.reserve(ctx.currentDataset.size());
+            for (size_t i = 0; i < ctx.currentDataset.size(); ++i) {
+                if (!ctx.currentDataset[i].image_file.empty()) indices.push_back((int)i);
+            }
+            if (indices.empty()) {
+                lua_pushboolean(L, false);
+                lua_pushstring(L, "Dataset: aucun item avec image_file (requis pour vgg16_feat)");
+                return 2;
+            }
+            std::shuffle(indices.begin(), indices.end(), rng);
+            if (max_items > 0 && (int)indices.size() > max_items) indices.resize((size_t)max_items);
+
+            const int use_n = (int)indices.size();
+            opt.total_steps = std::max(1, epochs * std::max(1, use_n));
+
+            const size_t expected_u8 = (size_t)image_w * (size_t)image_h * (size_t)image_c;
+            std::vector<float> x;
+            x.resize(expected_u8);
+
+            auto compute_patch_means = [&](const std::vector<float>& src_hwc, int out_dim) -> std::vector<float> {
+                // Features: grid*grid*image_c means (HWC input)
+                const int feat_dim = grid * grid * image_c;
+                std::vector<double> sum((size_t)feat_dim, 0.0);
+                std::vector<int> cnt((size_t)(grid * grid), 0);
+
+                for (int yy = 0; yy < image_h; ++yy) {
+                    const int gy = (yy * grid) / image_h;
+                    for (int xx = 0; xx < image_w; ++xx) {
+                        const int gx = (xx * grid) / image_w;
+                        const int cell = gy * grid + gx;
+                        const int off = cell * image_c;
+                        const size_t pix = (size_t)(yy * image_w + xx) * (size_t)image_c;
+                        for (int cc = 0; cc < image_c; ++cc) {
+                            sum[(size_t)off + (size_t)cc] += (double)src_hwc[pix + (size_t)cc];
+                        }
+                        cnt[(size_t)cell] += 1;
+                    }
+                }
+
+                std::vector<float> feat((size_t)feat_dim, 0.0f);
+                for (int cell = 0; cell < grid * grid; ++cell) {
+                    const int n = std::max(1, cnt[(size_t)cell]);
+                    const int off = cell * image_c;
+                    for (int cc = 0; cc < image_c; ++cc) {
+                        feat[(size_t)off + (size_t)cc] = (float)(sum[(size_t)off + (size_t)cc] / (double)n);
+                    }
+                }
+
+                // Truncate/pad to out_dim
+                out_dim = std::max(1, out_dim);
+                std::vector<float> y((size_t)out_dim, 0.0f);
+                const int m = std::min(out_dim, feat_dim);
+                for (int i = 0; i < m; ++i) y[(size_t)i] = feat[(size_t)i];
+                return y;
+            };
+
+            bool stopped_by_ui = false;
+
+            // Perf stats vgg16_feat -> Viz.
+            std::chrono::steady_clock::time_point last_vgg_metrics_ts;
+            bool has_last_vgg_metrics_ts = false;
+            auto apply_vgg_perf_stats = [&](AsyncMonitor::Metrics& m) {
+                const auto now = std::chrono::steady_clock::now();
+                if (has_last_vgg_metrics_ts) {
+                    const auto dt_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_vgg_metrics_ts).count();
+                    if (dt_ms > 0 && dt_ms < 60LL * 60LL * 1000LL) {
+                        m.batch_time_ms = (int)dt_ms;
+                        m.bps = 1000.0f / (float)m.batch_time_ms;
+                    }
+                }
+                last_vgg_metrics_ts = now;
+                has_last_vgg_metrics_ts = true;
+
+                auto& guard = MemoryGuard::instance();
+                m.memory_mb = guard.getCurrentBytes() / 1024 / 1024;
+            };
+
+            for (int epoch = 0; epoch < epochs; ++epoch) {
+                std::shuffle(indices.begin(), indices.end(), rng);
+                ctx.addLog("Epoch " + std::to_string(epoch_offset + (epoch + 1)) + "/" + std::to_string(total_epochs_display) +
+                           " (vgg16_feat) items=" + std::to_string(use_n));
+
+                bool stop_requested = false;
+
+                for (int k = 0; k < use_n; ++k) {
+                    DatasetItem& item = ctx.currentDataset[(size_t)indices[(size_t)k]];
+                    if (item.image_file.empty()) continue;
+
+                    item.loadImageRGB(image_w, image_h);
+                    if (!item.img_loaded || item.img.size() != expected_u8) {
+                        continue;
+                    }
+
+                    // Normalize u8 -> [-1, 1]
+                    for (size_t i = 0; i < expected_u8; ++i) {
+                        x[i] = (float)((double)item.img[i] / 127.5 - 1.0);
+                    }
+
+                    // Forward
+                    ctx.currentModel->zeroGradients();
+                    const std::vector<float>& pred = ctx.currentModel->forwardPassView(x, true);
+                    const int out_dim = std::max(1, (int)pred.size());
+
+                    // Target is a deterministic downsample summary of the same input.
+                    const std::vector<float> y = compute_patch_means(x, out_dim);
+
+                    // Loss + grad
+                    double loss = 0.0;
+                    std::vector<float> grad;
+                    grad.resize((size_t)out_dim);
+                    const double inv = 1.0 / (double)std::max(1, out_dim);
+                    for (int i = 0; i < out_dim; ++i) {
+                        const double d = (double)pred[(size_t)i] - (double)y[(size_t)i];
+                        loss += d * d;
+                        grad[(size_t)i] = (float)(2.0 * d * inv);
+                    }
+                    loss *= inv;
+
+                    // Backward + step
+                    ctx.currentModel->backwardPass(grad);
+                    poll_viz_live_params();
+                    ctx.currentModel->optimizerStep(opt, step_learning_rate(), nullptr);
+
+                    // Metrics for UI/log
+                    global_step += 1;
+
+                    // Viz taps (throttled)
+                    if (viz_taps_every_steps > 0 && (global_step % viz_taps_every_steps) == 0) {
+                        push_viz_taps();
+                    }
+
+                    if ((global_step % log_every) == 0) {
+                        ctx.addLog(std::string("[vgg16_feat]") +
+                                   " step=" + std::to_string(global_step) +
+                                   " loss=" + std::to_string((float)loss) +
+                                   " lr=" + std::to_string(opt.getCurrentLR()));
+                    }
+                    if (ctx.asyncMonitor) {
+                        AsyncMonitor::Metrics m;
+                        m.epoch = epoch_offset + (epoch + 1);
+                        m.total_epochs = total_epochs_display;
+                        m.batch = k + 1;
+                        m.total_batches = use_n;
+                        m.loss = (float)loss;
+                        m.avg_loss = (float)loss;
+                        m.lr = opt.getCurrentLR();
+                        m.mse = (float)loss;
+                        m.grad_norm = 0.0f;
+                        m.grad_max = 0.0f;
+                        m.params = ctx.currentModel ? ctx.currentModel->totalParamCount() : 0;
+                        m.recon_loss_type = "mse";
+                        m.opt_type = (int)opt.type;
+                        m.opt_step = (int)opt.step;
+                        m.opt_beta1 = opt.beta1;
+                        m.opt_beta2 = opt.beta2;
+                        m.opt_eps = opt.eps;
+                        m.opt_weight_decay = opt.weight_decay;
+
+                        apply_vgg_perf_stats(m);
+                        ctx.asyncMonitor->updateMetrics(m);
+                    }
+
+                    // STOP via Viz
+                    if (ctx.asyncMonitor && ctx.asyncMonitor->consumeStopTrainingRequested()) {
+                        ctx.addLog("⛔ Stop demandé via Viz. Sauvegarde et arrêt...");
+                        stop_requested = true;
+                        stopped_by_ui = true;
+                        break;
+                    }
+                }
+
+                // Autosave per epoch
+                if (!checkpoint_dir.empty() && autosave_every_epochs > 0) {
+                    const int epoch_1based = epoch + 1;
+                    if ((epoch_1based % autosave_every_epochs) == 0) {
+                        std::string save_err;
+                        if (!do_checkpoint_save(epoch_1based, std::string(), &save_err)) {
+                            ctx.addLog("⚠️ Autosave failed: " + save_err);
+                        }
+                    }
+                }
+
+                if (stop_requested) break;
+            }
+
+            // Save optimizer state back into the model for later Serialization.save()
+            if (ctx.currentModel) {
+                Optimizer opt_snapshot = opt;
+                ctx.currentModel->setSerializedOptimizer(std::move(opt_snapshot));
+            }
+
+            if (stopped_by_ui) {
+                lua_pushboolean(L, false);
+                lua_pushstring(L, "STOP_REQUESTED");
+                return 2;
+            }
+
+            lua_pushboolean(L, true);
+            return 1;
+        } else if (model_type == "vgg16" || model_type == "vgg19") {
+            // Multi-label image tag classification.
+            // Dataset items must have image_file + text, where text is dot-separated tags/short phrases.
+            // Requires cfg.tags_vocab (array of strings) to define fixed class indices.
+
+            int image_w = 0, image_h = 0, image_c = 3;
+            int viz_taps_every_steps = 0;
+            bool lowercase_tags = true;
+            float bce_pos_weight = 1.0f;
+
+            // Validation (optional)
+            int validate_every_steps = 0;
+            int validate_every_epochs = 0;
+            int validate_items = 0;
+            float validate_threshold = 0.5f;
+            bool validate_holdout = false;
+            float validate_holdout_frac = 0.0f;
+            int validate_holdout_items = 0;
+            int validate_seed = 12345;
+            try {
+                if (ctx.modelConfig.contains("image_w")) image_w = ctx.modelConfig["image_w"].get<int>();
+                if (ctx.modelConfig.contains("image_h")) image_h = ctx.modelConfig["image_h"].get<int>();
+                if (ctx.modelConfig.contains("image_c")) image_c = ctx.modelConfig["image_c"].get<int>();
+                if (ctx.modelConfig.contains("viz_taps_every_steps")) viz_taps_every_steps = ctx.modelConfig["viz_taps_every_steps"].get<int>();
+                else if (ctx.modelConfig.contains("viz_every_steps")) viz_taps_every_steps = ctx.modelConfig["viz_every_steps"].get<int>();
+                if (ctx.modelConfig.contains("lowercase_tags")) lowercase_tags = ctx.modelConfig["lowercase_tags"].get<bool>();
+
+                if (ctx.modelConfig.contains("pos_weight")) bce_pos_weight = ctx.modelConfig["pos_weight"].get<float>();
+                else if (ctx.modelConfig.contains("bce_pos_weight")) bce_pos_weight = ctx.modelConfig["bce_pos_weight"].get<float>();
+
+                if (ctx.modelConfig.contains("validate_every_steps")) validate_every_steps = std::max(0, ctx.modelConfig["validate_every_steps"].get<int>());
+                else if (ctx.modelConfig.contains("validate_every")) validate_every_steps = std::max(0, ctx.modelConfig["validate_every"].get<int>());
+
+                if (ctx.modelConfig.contains("validate_every_epochs")) validate_every_epochs = std::max(0, ctx.modelConfig["validate_every_epochs"].get<int>());
+                else if (ctx.modelConfig.contains("validate_epochs")) validate_every_epochs = std::max(0, ctx.modelConfig["validate_epochs"].get<int>());
+
+                if (ctx.modelConfig.contains("validate_items")) validate_items = std::max(0, ctx.modelConfig["validate_items"].get<int>());
+                else if (ctx.modelConfig.contains("val_items")) validate_items = std::max(0, ctx.modelConfig["val_items"].get<int>());
+
+                if (ctx.modelConfig.contains("validate_threshold")) validate_threshold = ctx.modelConfig["validate_threshold"].get<float>();
+                else if (ctx.modelConfig.contains("val_threshold")) validate_threshold = ctx.modelConfig["val_threshold"].get<float>();
+
+                if (ctx.modelConfig.contains("validate_holdout")) validate_holdout = ctx.modelConfig["validate_holdout"].get<bool>();
+                else if (ctx.modelConfig.contains("val_holdout")) validate_holdout = ctx.modelConfig["val_holdout"].get<bool>();
+
+                if (ctx.modelConfig.contains("validate_holdout_frac")) validate_holdout_frac = ctx.modelConfig["validate_holdout_frac"].get<float>();
+                else if (ctx.modelConfig.contains("val_holdout_frac")) validate_holdout_frac = ctx.modelConfig["val_holdout_frac"].get<float>();
+
+                if (ctx.modelConfig.contains("validate_holdout_items")) validate_holdout_items = std::max(0, ctx.modelConfig["validate_holdout_items"].get<int>());
+                else if (ctx.modelConfig.contains("val_holdout_items")) validate_holdout_items = std::max(0, ctx.modelConfig["val_holdout_items"].get<int>());
+
+                if (ctx.modelConfig.contains("validate_seed")) validate_seed = ctx.modelConfig["validate_seed"].get<int>();
+                else if (ctx.modelConfig.contains("val_seed")) validate_seed = ctx.modelConfig["val_seed"].get<int>();
+            } catch (...) {
+            }
+
+            bce_pos_weight = std::max(0.0f, bce_pos_weight);
+            validate_threshold = std::clamp(validate_threshold, 0.0f, 1.0f);
+            validate_holdout_frac = std::clamp(validate_holdout_frac, 0.0f, 0.95f);
+
+            image_w = std::max(1, image_w);
+            image_h = std::max(1, image_h);
+            image_c = std::max(1, image_c);
+
+            if (!ctx.modelConfig.contains("tags_vocab") || !ctx.modelConfig["tags_vocab"].is_array()) {
+                lua_pushboolean(L, false);
+                lua_pushstring(L, "vgg16/vgg19 multi-label: cfg.tags_vocab manquant (liste de tags/classes)");
+                return 2;
+            }
+
+            const auto& vocab_json = ctx.modelConfig["tags_vocab"];
+            const int num_classes = (int)vocab_json.size();
+            if (num_classes <= 0) {
+                lua_pushboolean(L, false);
+                lua_pushstring(L, "vgg16/vgg19 multi-label: cfg.tags_vocab vide");
+                return 2;
+            }
+
+            auto trim = [](std::string& s) {
+                auto is_ws = [](unsigned char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+                size_t a = 0;
+                while (a < s.size() && is_ws((unsigned char)s[a])) a++;
+                size_t b = s.size();
+                while (b > a && is_ws((unsigned char)s[b - 1])) b--;
+                if (a != 0 || b != s.size()) s = s.substr(a, b - a);
+            };
+
+            auto trim_punct = [&](std::string& s) {
+                // Retire ponctuation fréquente autour des tags (ex: "tag1," "(tag2)" "tag3\"")
+                auto is_junk = [](unsigned char c) {
+                    switch (c) {
+                        case ' ': case '\t': case '\n': case '\r':
+                        case ',': case ';': case ':':
+                        case '!': case '?':
+                        case '"': case '\'':
+                        case '(': case ')':
+                        case '[': case ']':
+                        case '{': case '}':
+                        case '<': case '>':
+                        case '/': case '\\':
+                        case '|':
+                        case '-':
+                            return true;
+                        default:
+                            return false;
+                    }
+                };
+                size_t a = 0;
+                while (a < s.size() && is_junk((unsigned char)s[a])) a++;
+                size_t b = s.size();
+                while (b > a && is_junk((unsigned char)s[b - 1])) b--;
+                if (a != 0 || b != s.size()) s = s.substr(a, b - a);
+                trim(s);
+            };
+
+            // Build label->class_id map.
+            std::unordered_map<std::string, int> tag_to_id;
+            tag_to_id.reserve((size_t)num_classes * 2ULL);
+            for (int i = 0; i < num_classes; ++i) {
+                try {
+                    std::string t = vocab_json[(size_t)i].get<std::string>();
+                    if (t.empty()) continue;
+                    trim_punct(t);
+                    if (t.empty()) continue;
+                    if (lowercase_tags) {
+                        for (char& ch : t) ch = (char)std::tolower((unsigned char)ch);
+                    }
+                    tag_to_id.emplace(std::move(t), i);
+                } catch (...) {
+                }
+            }
+            if (tag_to_id.empty()) {
+                lua_pushboolean(L, false);
+                lua_pushstring(L, "vgg16/vgg19 multi-label: cfg.tags_vocab invalide (aucun tag utilisable)");
+                return 2;
+            }
+
+            // Viz taps frequency (best-effort). Default: follow log_every.
+            if (viz_active) {
+                if (viz_taps_every_steps <= 0) viz_taps_every_steps = log_every;
+                viz_taps_every_steps = std::max(1, viz_taps_every_steps);
+            } else {
+                viz_taps_every_steps = 0;
+            }
+
+            auto push_viz_taps = [&]() {
+                if (!viz_active) return;
+                if (!ctx.currentModel || !ctx.asyncMonitor) return;
+                if (ctx.asyncMonitor->getViz() == nullptr) return;
+                auto taps = ctx.currentModel->consumeVizTaps();
+                std::vector<Visualizer::BlockFrame> frames;
+                frames.reserve(taps.size());
+                for (auto& f : taps) {
+                    Visualizer::BlockFrame bf;
+                    bf.pixels = std::move(f.pixels);
+                    bf.w = f.w;
+                    bf.h = f.h;
+                    bf.channels = f.channels;
+                    bf.label = std::move(f.label);
+                    frames.push_back(std::move(bf));
+                }
+                ctx.asyncMonitor->setLayerBlockImages(frames);
+            };
+
+            // Filter usable items
+            std::vector<int> indices;
+            indices.reserve(ctx.currentDataset.size());
+            for (size_t i = 0; i < ctx.currentDataset.size(); ++i) {
+                const auto& it = ctx.currentDataset[i];
+                // Note: text is often lazy-loaded. Require a text_file path instead.
+                if (!it.image_file.empty() && !it.text_file.empty()) indices.push_back((int)i);
+            }
+            if (indices.empty()) {
+                lua_pushboolean(L, false);
+                lua_pushstring(L, "Dataset: aucun item avec image_file + text_file (requis pour vgg16/vgg19 multi-label)");
+                return 2;
+            }
+            std::shuffle(indices.begin(), indices.end(), rng);
+            if (max_items > 0 && (int)indices.size() > max_items) indices.resize((size_t)max_items);
+
+            const bool validation_enabled = (validate_items > 0) && ((validate_every_steps > 0) || (validate_every_epochs > 0));
+
+            // Split train/val if requested; default is to validate on train indices (no holdout).
+            std::vector<int> train_indices = indices;
+            std::vector<int> val_indices;
+            if (validation_enabled) {
+                if (validate_holdout && (int)indices.size() >= 2) {
+                    const int n = (int)indices.size();
+                    int val_n = 0;
+                    if (validate_holdout_items > 0) {
+                        val_n = std::clamp(validate_holdout_items, 1, n - 1);
+                    } else if (validate_holdout_frac > 0.0f) {
+                        val_n = (int)std::floor((double)n * (double)validate_holdout_frac);
+                        val_n = std::clamp(val_n, 1, n - 1);
+                    }
+                    if (val_n > 0) {
+                        val_indices.assign(indices.end() - val_n, indices.end());
+                        train_indices.assign(indices.begin(), indices.end() - val_n);
+                    } else {
+                        val_indices = train_indices;
+                    }
+                } else {
+                    val_indices = train_indices;
+                }
+
+                ctx.addLog("Validation: every_steps=" + std::to_string(validate_every_steps) +
+                           " every_epochs=" + std::to_string(validate_every_epochs) +
+                           " items=" + std::to_string(validate_items) +
+                           " threshold=" + std::to_string(validate_threshold) +
+                           " holdout=" + std::string(validate_holdout ? "true" : "false") +
+                           " train=" + std::to_string((int)train_indices.size()) +
+                           " val=" + std::to_string((int)val_indices.size()));
+            }
+
+            const int use_n = (int)train_indices.size();
+
+            opt.total_steps = std::max(1, epochs * std::max(1, use_n));
+            const size_t expected_u8 = (size_t)image_w * (size_t)image_h * (size_t)image_c;
+            std::vector<float> x_chw;
+            x_chw.resize(expected_u8);
+            std::vector<float> y;
+            y.resize((size_t)num_classes);
+
+            auto find_icase = [](const std::string& haystack, const std::string& needle) -> size_t {
+                if (needle.empty()) return 0;
+                if (haystack.size() < needle.size()) return std::string::npos;
+                for (size_t i = 0; i + needle.size() <= haystack.size(); ++i) {
+                    bool ok = true;
+                    for (size_t j = 0; j < needle.size(); ++j) {
+                        const unsigned char a = (unsigned char)haystack[i + j];
+                        const unsigned char b = (unsigned char)needle[j];
+                        if ((char)std::tolower(a) != (char)std::tolower(b)) { ok = false; break; }
+                    }
+                    if (ok) return i;
+                }
+                return std::string::npos;
+            };
+
+            auto extract_tags_section = [&](const std::string& txt) -> std::string {
+                // Supporte un format de caption type:
+                // --- TAGS ---\n tag1.tag2 ... \n--- DESCRIPTION ---\n ...
+                const std::string kTags = "--- TAGS ---";
+                const std::string kDesc = "--- DESCRIPTION ---";
+                size_t a = find_icase(txt, kTags);
+                if (a == std::string::npos) return txt;
+                a += kTags.size();
+                size_t b = find_icase(txt, kDesc);
+                if (b == std::string::npos || b < a) {
+                    return txt.substr(a);
+                }
+                return txt.substr(a, b - a);
+            };
+
+            auto split_tags = [&](const std::string& txt0) {
+                std::vector<std::string> out;
+                out.reserve(16);
+
+                const std::string txt = extract_tags_section(txt0);
+                std::string cur;
+                cur.reserve(txt.size());
+                for (char ch : txt) {
+                    const bool is_sep = (ch == '.' || ch == ',' || ch == ';' || ch == '\n' || ch == '\r' || ch == '\t' || ch == '|');
+                    if (!is_sep) {
+                        cur.push_back(ch);
+                        continue;
+                    }
+
+                    trim_punct(cur);
+                    if (!cur.empty()) {
+                        if (lowercase_tags) {
+                            for (char& c : cur) c = (char)std::tolower((unsigned char)c);
+                        }
+                        out.push_back(cur);
+                    }
+                    cur.clear();
+                }
+
+                trim_punct(cur);
+                if (!cur.empty()) {
+                    if (lowercase_tags) {
+                        for (char& c : cur) c = (char)std::tolower((unsigned char)c);
+                    }
+                    out.push_back(cur);
+                }
+                return out;
+            };
+
+            auto sigmoid = [](double z) {
+                if (z >= 0.0) {
+                    const double ez = std::exp(-z);
+                    return 1.0 / (1.0 + ez);
+                } else {
+                    const double ez = std::exp(z);
+                    return ez / (1.0 + ez);
+                }
+            };
+
+            struct ValStats {
+                int items = 0;
+                double loss = 0.0;
+                double f1_micro = 0.0;
+                double pos_true_rate = 0.0;
+                double pos_pred_rate = 0.0;
+                double avg_prob = 0.0;
+            };
+
+            std::mt19937 val_rng((uint32_t)validate_seed);
+
+            auto run_validation = [&](int step, int epoch_1based) -> ValStats {
+                ValStats st;
+                if (!validation_enabled) return st;
+                if (!ctx.currentModel) return st;
+                if (val_indices.empty()) return st;
+
+                std::vector<int> work = val_indices;
+                std::shuffle(work.begin(), work.end(), val_rng);
+
+                const int want = std::min(validate_items, (int)work.size());
+                if (want <= 0) return st;
+
+                long long tp = 0, fp = 0, fn = 0;
+                long long true_pos = 0;
+                long long pred_pos = 0;
+                double prob_sum = 0.0;
+                double loss_sum = 0.0;
+
+                int done = 0;
+                for (int j = 0; j < (int)work.size() && done < want; ++j) {
+                    DatasetItem& item = ctx.currentDataset[(size_t)work[(size_t)j]];
+                    if (item.image_file.empty() || item.text_file.empty()) continue;
+                    if (!item.loadText() || !item.text.has_value()) continue;
+
+                    item.loadImageRGB(image_w, image_h);
+                    if (!item.img_loaded || item.img.size() != expected_u8) continue;
+
+                    // Labels
+                    std::fill(y.begin(), y.end(), 0.0f);
+                    const std::vector<std::string> tags = split_tags(item.text.value());
+                    for (const auto& t : tags) {
+                        auto it = tag_to_id.find(t);
+                        if (it != tag_to_id.end()) {
+                            const int id = it->second;
+                            if (id >= 0 && id < num_classes) {
+                                y[(size_t)id] = 1.0f;
+                            }
+                        }
+                    }
+
+                    // Image -> CHW
+                    for (int yy = 0; yy < image_h; ++yy) {
+                        for (int xx = 0; xx < image_w; ++xx) {
+                            const size_t pix = (size_t)(yy * image_w + xx) * (size_t)image_c;
+                            for (int cc = 0; cc < image_c; ++cc) {
+                                const float v = (float)((double)item.img[pix + (size_t)cc] / 127.5 - 1.0);
+                                const size_t idx = (size_t)cc * (size_t)(image_h * image_w) + (size_t)(yy * image_w + xx);
+                                x_chw[idx] = v;
+                            }
+                        }
+                    }
+
+                    const std::vector<float>& logits = ctx.currentModel->forwardPassView(x_chw, false);
+                    if ((int)logits.size() != num_classes) continue;
+
+                    double loss = 0.0;
+                    for (int i = 0; i < num_classes; ++i) {
+                        const double z = (double)logits[(size_t)i];
+                        const double yi = (double)y[(size_t)i];
+                        const double sp_pos = std::max(0.0, z) + std::log1p(std::exp(-std::fabs(z)));
+                        const double sp_neg = std::max(0.0, -z) + std::log1p(std::exp(-std::fabs(z)));
+                        const double wpos = (yi >= 0.5) ? (double)bce_pos_weight : 1.0;
+                        loss += (1.0 - yi) * sp_pos + yi * wpos * sp_neg;
+
+                        const double p = sigmoid(z);
+                        prob_sum += p;
+                        const bool y1 = (yi >= 0.5);
+                        const bool p1 = (p >= (double)validate_threshold);
+                        if (y1) true_pos++;
+                        if (p1) pred_pos++;
+                        if (p1 && y1) tp++;
+                        else if (p1 && !y1) fp++;
+                        else if (!p1 && y1) fn++;
+                    }
+                    loss *= (1.0 / (double)std::max(1, num_classes));
+                    loss_sum += loss;
+                    done++;
+                }
+
+                st.items = done;
+                if (done <= 0) return st;
+
+                const double denom = (double)done * (double)std::max(1, num_classes);
+                st.loss = loss_sum / (double)done;
+                st.pos_true_rate = denom > 0 ? (double)true_pos / denom : 0.0;
+                st.pos_pred_rate = denom > 0 ? (double)pred_pos / denom : 0.0;
+                st.avg_prob = denom > 0 ? prob_sum / denom : 0.0;
+                const double f1_den = (2.0 * (double)tp + (double)fp + (double)fn);
+                st.f1_micro = (f1_den > 0.0) ? (2.0 * (double)tp) / f1_den : 0.0;
+
+                ctx.addLog(std::string("[") + model_type + "][val]" +
+                           " step=" + std::to_string(step) +
+                           " epoch=" + std::to_string(epoch_1based) +
+                           " items=" + std::to_string(done) +
+                           " loss=" + std::to_string((float)st.loss) +
+                           " f1_micro=" + std::to_string((float)st.f1_micro) +
+                           " pos_true=" + std::to_string((float)st.pos_true_rate) +
+                           " pos_pred=" + std::to_string((float)st.pos_pred_rate) +
+                           " avg_p=" + std::to_string((float)st.avg_prob));
+
+                if (ctx.asyncMonitor) {
+                    AsyncMonitor::Metrics vm;
+                    vm.epoch = epoch_offset + epoch_1based;
+                    vm.total_epochs = total_epochs_display;
+                    vm.batch = 0;
+                    vm.total_batches = use_n;
+                    vm.loss = 0.0f;
+                    vm.avg_loss = 0.0f;
+                    vm.lr = opt.getCurrentLR();
+                    vm.params = ctx.currentModel ? ctx.currentModel->totalParamCount() : 0;
+                    vm.recon_loss_type = "bce_logits";
+
+                    vm.val_has = true;
+                    vm.val_ok = true;
+                    vm.val_in_progress = false;
+                    vm.val_step = step;
+                    vm.val_items = done;
+                    vm.val_done = done;
+                    vm.val_total = done;
+                    vm.val_recon = (float)st.loss;
+                    vm.val_align = (float)st.f1_micro;
+
+                    vm.opt_type = (int)opt.type;
+                    vm.opt_step = (int)opt.step;
+                    vm.opt_beta1 = opt.beta1;
+                    vm.opt_beta2 = opt.beta2;
+                    vm.opt_eps = opt.eps;
+                    vm.opt_weight_decay = opt.weight_decay;
+
+                    ctx.asyncMonitor->updateMetrics(vm);
+                }
+
+                // Collapse warnings (simple heuristics)
+                if (st.pos_true_rate < 1e-9) {
+                    ctx.addLog("⚠️  Labels: pos_true_rate=0 (aucun tag du texte ne matche tags_vocab). "
+                               "Le modèle va naturellement converger vers des prédictions ~0.");
+                } else if (st.pos_pred_rate < 1e-3 || st.pos_pred_rate > 1.0 - 1e-3) {
+                    ctx.addLog("⚠️  Possible collapse: pos_pred_rate=" + std::to_string((float)st.pos_pred_rate) +
+                               " (pos_true_rate=" + std::to_string((float)st.pos_true_rate) +
+                               ", avg_p=" + std::to_string((float)st.avg_prob) + ")");
+                }
+
+                return st;
+            };
+
+            bool stopped_by_ui = false;
+
+            // Perf stats vgg16_tags_multilabel -> Viz.
+            std::chrono::steady_clock::time_point last_tags_metrics_ts;
+            bool has_last_tags_metrics_ts = false;
+            auto apply_tags_perf_stats = [&](AsyncMonitor::Metrics& m) {
+                const auto now = std::chrono::steady_clock::now();
+                if (has_last_tags_metrics_ts) {
+                    const auto dt_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_tags_metrics_ts).count();
+                    if (dt_ms > 0 && dt_ms < 60LL * 60LL * 1000LL) {
+                        m.batch_time_ms = (int)dt_ms;
+                        m.bps = 1000.0f / (float)m.batch_time_ms;
+                    }
+                }
+                last_tags_metrics_ts = now;
+                has_last_tags_metrics_ts = true;
+
+                auto& guard = MemoryGuard::instance();
+                m.memory_mb = guard.getCurrentBytes() / 1024 / 1024;
+            };
+            bool warned_no_vocab_match = false;
+
+            for (int epoch = 0; epoch < epochs; ++epoch) {
+                std::shuffle(train_indices.begin(), train_indices.end(), rng);
+                ctx.addLog("Epoch " + std::to_string(epoch_offset + (epoch + 1)) + "/" + std::to_string(total_epochs_display) +
+                           " (" + std::string(model_type) + " multi-label) items=" + std::to_string(use_n));
+
+                bool stop_requested = false;
+
+                for (int k = 0; k < use_n; ++k) {
+                    DatasetItem& item = ctx.currentDataset[(size_t)train_indices[(size_t)k]];
+                    if (item.image_file.empty() || item.text_file.empty()) continue;
+
+                    // Lazy-load text on demand (uses DatasetMemoryManager).
+                    if (!item.loadText() || !item.text.has_value()) {
+                        continue;
+                    }
+
+                    item.loadImageRGB(image_w, image_h);
+                    if (!item.img_loaded || item.img.size() != expected_u8) {
+                        continue;
+                    }
+
+                    // Build labels (multi-hot)
+                    std::fill(y.begin(), y.end(), 0.0f);
+                    const std::vector<std::string> tags = split_tags(item.text.value());
+                    int matched_tags = 0;
+                    for (const auto& t : tags) {
+                        auto it = tag_to_id.find(t);
+                        if (it != tag_to_id.end()) {
+                            const int id = it->second;
+                            if (id >= 0 && id < num_classes) {
+                                y[(size_t)id] = 1.0f;
+                                matched_tags++;
+                            }
+                        }
+                    }
+
+                    // Normalize u8 -> [-1, 1] AND permute HWC -> CHW (Conv2d expects CHW)
+                    for (int yy = 0; yy < image_h; ++yy) {
+                        for (int xx = 0; xx < image_w; ++xx) {
+                            const size_t pix = (size_t)(yy * image_w + xx) * (size_t)image_c;
+                            for (int cc = 0; cc < image_c; ++cc) {
+                                const float v = (float)((double)item.img[pix + (size_t)cc] / 127.5 - 1.0);
+                                const size_t idx = (size_t)cc * (size_t)(image_h * image_w) + (size_t)(yy * image_w + xx);
+                                x_chw[idx] = v;
+                            }
+                        }
+                    }
+
+                    // Forward
+                    ctx.currentModel->zeroGradients();
+                    const std::vector<float>& logits = ctx.currentModel->forwardPassView(x_chw, true);
+                    const int out_dim = (int)logits.size();
+                    if (out_dim != num_classes) {
+                        lua_pushboolean(L, false);
+                        lua_pushstring(L, "vgg16/vgg19 multi-label: output_dim != num_classes (cfg.num_classes doit matcher tags_vocab)");
+                        return 2;
+                    }
+
+                    // BCEWithLogits loss + gradient (+ optional positive class reweighting)
+                    double loss = 0.0;
+                    std::vector<float> grad;
+                    grad.resize((size_t)num_classes);
+                    const double inv = 1.0 / (double)std::max(1, num_classes);
+
+                    long long tp = 0, fp = 0, fn = 0;
+                    long long true_pos = 0;
+                    long long pred_pos = 0;
+                    double prob_sum = 0.0;
+                    for (int i = 0; i < num_classes; ++i) {
+                        const double z = (double)logits[(size_t)i];
+                        const double yi = (double)y[(size_t)i];
+                        const double sp_pos = std::max(0.0, z) + std::log1p(std::exp(-std::fabs(z)));
+                        const double sp_neg = std::max(0.0, -z) + std::log1p(std::exp(-std::fabs(z)));
+                        const double wpos = (yi >= 0.5) ? (double)bce_pos_weight : 1.0;
+                        loss += (1.0 - yi) * sp_pos + yi * wpos * sp_neg;
+                        const double p = sigmoid(z);
+                        const double gw = (yi >= 0.5) ? (double)bce_pos_weight : 1.0;
+                        grad[(size_t)i] = (float)((p - yi) * gw * inv);
+
+                        prob_sum += p;
+                        const bool y1 = (yi >= 0.5);
+                        const bool p1 = (p >= (double)validate_threshold);
+                        if (y1) true_pos++;
+                        if (p1) pred_pos++;
+                        if (p1 && y1) tp++;
+                        else if (p1 && !y1) fp++;
+                        else if (!p1 && y1) fn++;
+                    }
+                    loss *= inv;
+
+                    ctx.currentModel->backwardPass(grad);
+                    poll_viz_live_params();
+                    ctx.currentModel->optimizerStep(opt, step_learning_rate(), nullptr);
+
+                    global_step += 1;
+
+                    if (validation_enabled && validate_every_steps > 0 && (global_step % validate_every_steps) == 0) {
+                        (void)run_validation(global_step, (epoch + 1));
+                    }
+
+                    if (viz_taps_every_steps > 0 && (global_step % viz_taps_every_steps) == 0) {
+                        push_viz_taps();
+                    }
+
+                    if ((global_step % log_every) == 0) {
+                        const double denom = (double)std::max(1, num_classes);
+                        const double pos_true_rate = denom > 0.0 ? (double)true_pos / denom : 0.0;
+                        const double pos_pred_rate = denom > 0.0 ? (double)pred_pos / denom : 0.0;
+                        const double avg_prob = denom > 0.0 ? prob_sum / denom : 0.0;
+                        const double f1_den = (2.0 * (double)tp + (double)fp + (double)fn);
+                        const double f1_micro = (f1_den > 0.0) ? (2.0 * (double)tp) / f1_den : 0.0;
+                        ctx.addLog(std::string("[") + model_type + "]" +
+                                   " step=" + std::to_string(global_step) +
+                                   " loss=" + std::to_string((float)loss) +
+                                   " lr=" + std::to_string(opt.getCurrentLR()) +
+                                   " pos_true=" + std::to_string((float)pos_true_rate) +
+                                   " pos_pred=" + std::to_string((float)pos_pred_rate) +
+                                   " f1_micro=" + std::to_string((float)f1_micro) +
+                                   " matched_tags=" + std::to_string(matched_tags) +
+                                   " parsed_tags=" + std::to_string((int)tags.size()));
+
+                        if (!warned_no_vocab_match && ((int)tags.size() > 0) && matched_tags == 0) {
+                            warned_no_vocab_match = true;
+                            ctx.addLog("⚠️  Aucun tag ne matche tags_vocab (matched_tags=0). "
+                                       "Parsing supporté: ., , ; | et nouvelles lignes + section '--- TAGS ---'.");
+                        }
+                    }
+                    if (ctx.asyncMonitor) {
+                        AsyncMonitor::Metrics m;
+                        m.epoch = epoch_offset + (epoch + 1);
+                        m.total_epochs = total_epochs_display;
+                        m.batch = k + 1;
+                        m.total_batches = use_n;
+                        m.loss = (float)loss;
+                        m.avg_loss = (float)loss;
+                        m.lr = opt.getCurrentLR();
+                        m.mse = (float)loss;
+                        m.grad_norm = 0.0f;
+                        m.grad_max = 0.0f;
+                        m.params = ctx.currentModel ? ctx.currentModel->totalParamCount() : 0;
+                        m.recon_loss_type = "bce_logits";
+                        m.opt_type = (int)opt.type;
+                        m.opt_step = (int)opt.step;
+                        m.opt_beta1 = opt.beta1;
+                        m.opt_beta2 = opt.beta2;
+                        m.opt_eps = opt.eps;
+                        m.opt_weight_decay = opt.weight_decay;
+
+                        apply_tags_perf_stats(m);
+                        ctx.asyncMonitor->updateMetrics(m);
+                    }
+
+                    if (ctx.asyncMonitor && ctx.asyncMonitor->consumeStopTrainingRequested()) {
+                        ctx.addLog("⛔ Stop demandé via Viz. Sauvegarde et arrêt...");
+                        stop_requested = true;
+                        stopped_by_ui = true;
+                        break;
+                    }
+                }
+
+                if (validation_enabled && validate_every_epochs > 0) {
+                    const int epoch_1based = epoch + 1;
+                    if ((epoch_1based % validate_every_epochs) == 0) {
+                        (void)run_validation(global_step, epoch_1based);
+                    }
+                }
+
+                // Autosave per epoch
+                if (!checkpoint_dir.empty() && autosave_every_epochs > 0) {
+                    const int epoch_1based = epoch + 1;
+                    if ((epoch_1based % autosave_every_epochs) == 0) {
+                        std::string save_err;
+                        if (!do_checkpoint_save(epoch_1based, std::string(), &save_err)) {
+                            ctx.addLog("⚠️ Autosave failed: " + save_err);
+                        }
+                    }
+                }
+
+                if (stop_requested) break;
+            }
+
+            if (ctx.currentModel) {
+                Optimizer opt_snapshot = opt;
+                ctx.currentModel->setSerializedOptimizer(std::move(opt_snapshot));
+            }
+
+            if (stopped_by_ui) {
+                lua_pushboolean(L, false);
+                lua_pushstring(L, "STOP_REQUESTED");
+                return 2;
+            }
+
+            lua_pushboolean(L, true);
+            return 1;
         }
 
         // -------------------------------
@@ -1493,20 +2853,51 @@ int LuaScripting::lua_trainModel(lua_State* L) {
             auto monitor_step_ddpm = [&](int epoch_1based, int batch_1based, int total_batches, const PonyXLDDPMModel::StepStats& st) {
                 if (!ctx.asyncMonitor) return;
 
+                static std::chrono::steady_clock::time_point last_ddpm_metrics_ts;
+                static bool has_last_ddpm_metrics_ts = false;
+
                 AsyncMonitor::Metrics m;
-                m.epoch = epoch_1based;
-                m.total_epochs = epochs;
+                m.epoch = epoch_offset + epoch_1based;
+                m.total_epochs = total_epochs_display;
                 m.batch = batch_1based;
                 m.total_batches = total_batches;
                 m.loss = st.loss;
                 m.avg_loss = st.loss;
                 m.lr = opt.getCurrentLR();
+                // Le training diffusion utilise une loss de type MSE sur eps (en pratique).
+                // On la mappe aussi dans la colonne générique "mse" du logger.
+                m.mse = st.loss;
                 m.kl = st.kl_divergence;
+                m.wass = st.wasserstein;
+                m.ent = st.entropy_diff;
+                m.mom = st.moment_mismatch;
+                m.spat = st.spatial_coherence;
+                m.temp = st.temporal_consistency;
                 m.timestep = st.timestep;
                 m.grad_norm = st.grad_norm;
                 m.grad_max = st.grad_max_abs;
+                m.kl_beta_effective = st.kl_beta_effective;
                 m.params = ctx.currentModel ? ctx.currentModel->totalParamCount() : 0;
                 m.recon_loss_type = recon_loss_type;
+
+                // Mémoire (best-effort): expose l'usage courant du MemoryGuard si actif.
+                {
+                    auto& guard = MemoryGuard::instance();
+                    m.memory_mb = guard.getCurrentBytes() / 1024 / 1024;
+                }
+
+                {
+                    const auto now = std::chrono::steady_clock::now();
+                    if (has_last_ddpm_metrics_ts) {
+                        const auto dt_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_ddpm_metrics_ts).count();
+                        if (dt_ms > 0 && dt_ms < 60LL * 60LL * 1000LL) {
+                            m.batch_time_ms = (int)dt_ms;
+                            m.bps = 1000.0f / (float)m.batch_time_ms;
+                        }
+                    }
+                    last_ddpm_metrics_ts = now;
+                    has_last_ddpm_metrics_ts = true;
+                }
 
                 m.opt_type = (int)opt.type;
                 m.opt_step = (int)opt.step;
@@ -1542,7 +2933,7 @@ int LuaScripting::lua_trainModel(lua_State* L) {
 
             for (int epoch = 0; epoch < epochs; ++epoch) {
                 std::shuffle(train_indices.begin(), train_indices.end(), rng);
-                ctx.addLog("Epoch " + std::to_string(epoch + 1) + "/" + std::to_string(epochs) +
+                ctx.addLog("Epoch " + std::to_string(epoch_offset + (epoch + 1)) + "/" + std::to_string(total_epochs_display) +
                            " (ponyxl_ddpm) items=" + std::to_string(use_n));
 
                 bool stop_requested = false;
@@ -1558,7 +2949,9 @@ int LuaScripting::lua_trainModel(lua_State* L) {
 
                     std::string prompt = get_prompt_for_item(item);
 
-                    const PonyXLDDPMModel::StepStats st = pony->trainStepSdxlLatentDiffusion(prompt, item.img, image_w, image_h, opt, (float)lr);
+                    poll_viz_live_params();
+                    const PonyXLDDPMModel::StepStats st = pony->trainStepSdxlLatentDiffusion(
+                        prompt, item.img, image_w, image_h, opt, step_learning_rate());
 
                     global_step += 1;
                     log_step_ddpm(global_step, st);
@@ -1788,7 +3181,7 @@ int LuaScripting::lua_trainModel(lua_State* L) {
             bool stopped_by_ui = false;
             for (int epoch = 0; epoch < epochs; ++epoch) {
                 std::shuffle(indices.begin(), indices.end(), rng);
-                ctx.addLog("Epoch " + std::to_string(epoch + 1) + "/" + std::to_string(epochs) +
+                ctx.addLog("Epoch " + std::to_string(epoch_offset + (epoch + 1)) + "/" + std::to_string(total_epochs_display) +
                            " (vae_text) items=" + std::to_string(use_n));
 
                 bool stop_requested = false;
@@ -1803,7 +3196,8 @@ int LuaScripting::lua_trainModel(lua_State* L) {
                     if ((int)ids.size() < seq_len) ids.resize((size_t)seq_len, pad_id);
                     else if ((int)ids.size() > seq_len) ids.resize((size_t)seq_len);
 
-                    const Model::VAEStepStats st = ctx.currentModel->trainStepVAEText(empty_x, ids, opt, (float)lr);
+                    poll_viz_live_params();
+                    const Model::VAEStepStats st = ctx.currentModel->trainStepVAEText(empty_x, ids, opt, step_learning_rate());
                     global_step += 1;
                     log_step(global_step, st, "[vae_text]");
                     monitor_step(epoch + 1, k + 1, use_n, st);
@@ -2805,6 +4199,71 @@ int LuaScripting::lua_getDataset(lua_State* L) {
     }
 }
 
+int LuaScripting::lua_readImageRGBU8(lua_State* L) {
+    // Args:
+    // 1 path (string)
+    // 2 target_w (int, optional, default 256)
+    // 3 target_h (int, optional, default 256)
+    const char* path = luaL_checkstring(L, 1);
+    const int top = lua_gettop(L);
+    const int target_w = (top >= 2 && lua_isinteger(L, 2)) ? (int)lua_tointeger(L, 2) : 256;
+    const int target_h = (top >= 3 && lua_isinteger(L, 3)) ? (int)lua_tointeger(L, 3) : 256;
+
+    if (!path || std::string(path).empty()) {
+        lua_pushnil(L);
+        lua_pushstring(L, "Chemin image vide");
+        return 2;
+    }
+    if (target_w <= 0 || target_h <= 0) {
+        lua_pushnil(L);
+        lua_pushstring(L, "Dimensions invalides");
+        return 2;
+    }
+
+    try {
+        int w_img = 0, h_img = 0, c = 0;
+        unsigned char* data = stbi_load(path, &w_img, &h_img, &c, 3);
+        if (!data) {
+            lua_pushnil(L);
+            lua_pushfstring(L, "Impossible de charger l'image: %s", path);
+            return 2;
+        }
+
+        std::vector<unsigned char> src((size_t)w_img * (size_t)h_img * 3);
+        std::memcpy(src.data(), data, src.size());
+        stbi_image_free(data);
+
+        std::vector<uint8_t> dst((size_t)target_w * (size_t)target_h * 3);
+        resizeBicubicRGB_SRGBLinear(src.data(), w_img, h_img, dst.data(), target_w, target_h);
+
+        lua_newtable(L);
+
+        lua_newtable(L);
+        for (size_t i = 0; i < dst.size(); ++i) {
+            lua_pushinteger(L, (lua_Integer)dst[i]);
+            lua_rawseti(L, -2, (int)i + 1);
+        }
+        lua_setfield(L, -2, "image");
+
+        lua_pushinteger(L, target_w);
+        lua_setfield(L, -2, "width");
+        lua_pushinteger(L, target_h);
+        lua_setfield(L, -2, "height");
+        lua_pushinteger(L, 3);
+        lua_setfield(L, -2, "channels");
+
+        return 1;
+    } catch (const std::exception& e) {
+        lua_pushnil(L);
+        lua_pushstring(L, e.what());
+        return 2;
+    } catch (...) {
+        lua_pushnil(L);
+        lua_pushstring(L, "unknown error");
+        return 2;
+    }
+}
+
 // ============================================================================
 // PonyXL helpers
 // ============================================================================
@@ -2968,6 +4427,9 @@ int LuaScripting::lua_ponyxlDdpmTrainStep(lua_State* L) {
         if (ctx.asyncMonitor) {
             s_ponyxl_global_step += 1;
 
+            static std::chrono::steady_clock::time_point s_last_pony_metrics_ts;
+            static bool s_has_last_pony_metrics_ts = false;
+
             AsyncMonitor::Metrics m;
             m.epoch = meta_epoch;
             m.total_epochs = meta_total_epochs;
@@ -2976,10 +4438,17 @@ int LuaScripting::lua_ponyxlDdpmTrainStep(lua_State* L) {
             m.loss = st.loss;
             m.avg_loss = (meta_avg_loss > 0.0f) ? meta_avg_loss : st.loss;
             m.lr = lr;
+            m.mse = st.loss;
             m.kl = st.kl_divergence;
+            m.wass = st.wasserstein;
+            m.ent = st.entropy_diff;
+            m.mom = st.moment_mismatch;
+            m.spat = st.spatial_coherence;
+            m.temp = st.temporal_consistency;
             m.timestep = st.timestep;
             m.grad_norm = st.grad_norm;
             m.grad_max = st.grad_max_abs;
+            m.kl_beta_effective = st.kl_beta_effective;
             m.params = ctx.currentModel ? ctx.currentModel->totalParamCount() : 0;
             m.opt_type = (int)opt->type;
             m.opt_step = opt->step;
@@ -2987,6 +4456,24 @@ int LuaScripting::lua_ponyxlDdpmTrainStep(lua_State* L) {
             m.opt_beta2 = opt->beta2;
             m.opt_eps = opt->eps;
             m.opt_weight_decay = opt->weight_decay;
+
+            {
+                auto& guard = MemoryGuard::instance();
+                m.memory_mb = guard.getCurrentBytes() / 1024 / 1024;
+            }
+
+            {
+                const auto now = std::chrono::steady_clock::now();
+                if (s_has_last_pony_metrics_ts) {
+                    const auto dt_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_last_pony_metrics_ts).count();
+                    if (dt_ms > 0 && dt_ms < 60LL * 60LL * 1000LL) {
+                        m.batch_time_ms = (int)dt_ms;
+                        m.bps = 1000.0f / (float)m.batch_time_ms;
+                    }
+                }
+                s_last_pony_metrics_ts = now;
+                s_has_last_pony_metrics_ts = true;
+            }
             ctx.asyncMonitor->updateMetrics(m);
 
             if (ctx.asyncMonitor->getViz() != nullptr) {
@@ -3737,7 +5224,9 @@ int LuaScripting::lua_forwardPass(lua_State* L) {
         return 2;
     }
     
-    // Argument 1: input (table de floats ou d'entiers)
+    // Argument 1: input
+    // - soit un tableau (array) de floats/ints
+    // - soit une table { __input__ = <array> }
     luaL_checktype(L, 1, LUA_TTABLE);
     
     // Argument 2 (optionnel): training (bool, défaut: true)
@@ -3772,26 +5261,52 @@ int LuaScripting::lua_forwardPass(lua_State* L) {
         ctx.asyncMonitor->setLayerBlockImages(frames);
     };
     
-    // Détecter si on a une table d'entiers (tokens) ou de floats
-    bool all_int = true;
-    lua_pushnil(L);
-    while (lua_next(L, 1) != 0) {
-        if (!lua_isinteger(L, -1)) {
-            all_int = false;
+    // Résoudre le tableau "array" à lire.
+    // Si arg1 est une map {__input__=...}, on lit arg1.__input__.
+    int input_index = 1;
+    bool pushed_subtable = false;
+    size_t n = lua_rawlen(L, input_index);
+    if (n == 0) {
+        lua_getfield(L, 1, "__input__");
+        if (lua_istable(L, -1)) {
+            input_index = lua_gettop(L);
+            pushed_subtable = true;
+            n = lua_rawlen(L, input_index);
+        } else {
             lua_pop(L, 1);
-            break;
         }
-        lua_pop(L, 1);
     }
 
-    // Re-parcourir pour construire le vecteur
+    if (n == 0) {
+        lua_pushnil(L);
+        lua_pushstring(L, "Model.forward: expected an array of numbers or a table {__input__=<array>}");
+        return 2;
+    }
+
+    // Détecter int vs float (et préserver l'ordre 1..n)
+    bool all_int = true;
+    for (size_t i = 1; i <= n; ++i) {
+        lua_rawgeti(L, input_index, static_cast<lua_Integer>(i));
+        const bool is_int = lua_isinteger(L, -1);
+        lua_pop(L, 1);
+        if (!is_int) {
+            all_int = false;
+            break;
+        }
+    }
+
     if (all_int) {
         std::vector<int> input_ids;
-        lua_pushnil(L);
-        while (lua_next(L, 1) != 0) {
+        input_ids.reserve(n);
+        for (size_t i = 1; i <= n; ++i) {
+            lua_rawgeti(L, input_index, static_cast<lua_Integer>(i));
             lua_Integer v = lua_tointeger(L, -1);
-            input_ids.push_back(static_cast<int>(v));
             lua_pop(L, 1);
+            input_ids.push_back(static_cast<int>(v));
+        }
+        if (pushed_subtable) {
+            lua_pop(L, 1);
+            pushed_subtable = false;
         }
         try {
             std::vector<float> output = ctx.currentModel->forwardPass(input_ids, training);
@@ -3812,10 +5327,15 @@ int LuaScripting::lua_forwardPass(lua_State* L) {
     }
 
     std::vector<float> input;
-    lua_pushnil(L);
-    while (lua_next(L, 1) != 0) {
-        input.push_back(lua_tonumber(L, -1));
+    input.reserve(n);
+    for (size_t i = 1; i <= n; ++i) {
+        lua_rawgeti(L, input_index, static_cast<lua_Integer>(i));
+        input.push_back(static_cast<float>(lua_tonumber(L, -1)));
         lua_pop(L, 1);
+    }
+    if (pushed_subtable) {
+        lua_pop(L, 1);
+        pushed_subtable = false;
     }
     
     try {
@@ -4809,6 +6329,9 @@ int LuaScripting::lua_htopCreate(lua_State* L) {
         bool enable_viz = false;
         bool enable_htop = true;
         json viz_config;
+        std::optional<bool> csv_flag;
+        std::optional<bool> csv_enabled;
+        std::optional<std::string> csv_path;
         if (lua_istable(L, 1)) {
             lua_getfield(L, 1, "enable_viz");
             if (lua_isboolean(L, -1)) enable_viz = lua_toboolean(L, -1);
@@ -4828,6 +6351,28 @@ int LuaScripting::lua_htopCreate(lua_State* L) {
                 viz_config = luaTableToJson(L, -1);
             }
             lua_pop(L, 1);
+
+            // Options CSV htop (compat Lua):
+            // - csv=true/false
+            // - csv_enabled=true/false
+            // - csv_path="..." (alias: csv_file)
+            lua_getfield(L, 1, "csv");
+            if (lua_isboolean(L, -1)) csv_flag = (bool)lua_toboolean(L, -1);
+            lua_pop(L, 1);
+
+            lua_getfield(L, 1, "csv_enabled");
+            if (lua_isboolean(L, -1)) csv_enabled = (bool)lua_toboolean(L, -1);
+            lua_pop(L, 1);
+
+            lua_getfield(L, 1, "csv_path");
+            if (lua_isstring(L, -1)) csv_path = std::string(lua_tostring(L, -1));
+            lua_pop(L, 1);
+
+            if (!csv_path.has_value()) {
+                lua_getfield(L, 1, "csv_file");
+                if (lua_isstring(L, -1)) csv_path = std::string(lua_tostring(L, -1));
+                lua_pop(L, 1);
+            }
         } else if (!lua_isnoneornil(L, 1)) {
             enable_viz = lua_toboolean(L, 1);
         }
@@ -4842,6 +6387,32 @@ int LuaScripting::lua_htopCreate(lua_State* L) {
         }
 
         ctx.asyncMonitor->start(enable_htop, enable_viz, viz_config);
+
+        // Appliquer les options CSV côté HtopDisplay si présent.
+        // Par défaut, AsyncMonitor désactive le CSV Htop si la Viz est active,
+        // pour éviter les écritures concurrentes.
+        if (enable_htop) {
+            auto h = ctx.asyncMonitor->getHtop();
+            if (h) {
+                if (csv_path.has_value() && !csv_path->empty()) {
+                    h->setCsvLogFile(*csv_path);
+                }
+
+                bool enable_csv = !enable_viz;
+                if (csv_path.has_value()) {
+                    // Si l'utilisateur fournit un chemin, activer par défaut.
+                    enable_csv = true;
+                }
+                if (csv_flag.has_value()) {
+                    enable_csv = *csv_flag;
+                }
+                if (csv_enabled.has_value()) {
+                    enable_csv = *csv_enabled;
+                }
+
+                h->setCsvEnabled(enable_csv);
+            }
+        }
 
         ctx.addLog(std::string("AsyncMonitor démarré (") + (enable_htop ? "htop enabled" : "htop disabled") + ")");
         lua_pushboolean(L, true);
@@ -5226,20 +6797,97 @@ int LuaScripting::lua_vizUpdateMetrics(lua_State* L) {
         return 2;
     }
     
-    // Arguments: epoch, batch, loss, lr, mse, kl, wass, ent, mom, spat, temp, kl_beta_effective (optionnel)
+    // Signature supportée:
+    //   - Viz.update_metrics(tbl)  (recommandé)
+    //   - Viz.update_metrics(epoch, batch, loss, lr, mse, kl, wass, ent, mom, spat, temp, kl_beta_effective[, time_ms, mem_mb, bps, params])
+    // Notes compat:
+    //   - tbl.time / tbl.time_ms -> batch_time_ms
+    //   - tbl.mem / tbl.mem_mb   -> memory_mb
     AsyncMonitor::Metrics metrics;
-    metrics.epoch = luaL_checkinteger(L, 1);
-    metrics.batch = luaL_checkinteger(L, 2);
-    metrics.loss = static_cast<float>(luaL_checknumber(L, 3));
-    metrics.lr = static_cast<float>(luaL_checknumber(L, 4));
-    metrics.mse = static_cast<float>(luaL_optnumber(L, 5, 0.0));
-    metrics.kl = static_cast<float>(luaL_optnumber(L, 6, 0.0));
-    metrics.wass = static_cast<float>(luaL_optnumber(L, 7, 0.0));
-    metrics.ent = static_cast<float>(luaL_optnumber(L, 8, 0.0));
-    metrics.mom = static_cast<float>(luaL_optnumber(L, 9, 0.0));
-    metrics.spat = static_cast<float>(luaL_optnumber(L, 10, 0.0));
-    metrics.temp = static_cast<float>(luaL_optnumber(L, 11, 0.0));
-    metrics.kl_beta_effective = static_cast<float>(luaL_optnumber(L, 12, 0.0));
+
+    if (lua_istable(L, 1)) {
+        auto get_int = [&](const char* key, int def) -> int {
+            lua_getfield(L, 1, key);
+            int v = lua_isnumber(L, -1) ? (int)lua_tointeger(L, -1) : def;
+            lua_pop(L, 1);
+            return v;
+        };
+        auto get_num = [&](const char* key, float def) -> float {
+            lua_getfield(L, 1, key);
+            float v = lua_isnumber(L, -1) ? (float)lua_tonumber(L, -1) : def;
+            lua_pop(L, 1);
+            return v;
+        };
+        auto get_str = [&](const char* key, const char* def) -> std::string {
+            lua_getfield(L, 1, key);
+            std::string v = lua_isstring(L, -1) ? std::string(lua_tostring(L, -1)) : std::string(def);
+            lua_pop(L, 1);
+            return v;
+        };
+
+        metrics.epoch = get_int("epoch", 0);
+        metrics.total_epochs = get_int("total_epochs", get_int("totalEpochs", 0));
+        metrics.batch = get_int("batch", 0);
+        metrics.total_batches = get_int("total_batches", get_int("totalBatches", 0));
+        const int step = get_int("step", 0);
+        if (metrics.batch == 0 && step > 0) metrics.batch = step;
+
+        metrics.loss = get_num("loss", 0.0f);
+        metrics.avg_loss = get_num("avg_loss", get_num("avgLoss", 0.0f));
+        metrics.lr = get_num("lr", 0.0f);
+
+        metrics.batch_time_ms = get_int(
+            "batch_time_ms",
+            get_int("batchTimeMs", get_int("time_ms", get_int("timeMs", get_int("time", 0))))
+        );
+        metrics.memory_mb = (size_t)std::max(
+            0,
+            get_int("memory_mb", get_int("memoryMb", get_int("mem_mb", get_int("memMb", get_int("mem", 0)))))
+        );
+        metrics.bps = get_num("bps", get_num("batches_per_sec", get_num("batchesPerSec", 0.0f)));
+        metrics.params = (size_t)std::max(0, get_int("params", 0));
+
+        metrics.mse = get_num("mse", 0.0f);
+        metrics.kl = get_num("kl", 0.0f);
+        metrics.wass = get_num("wass", 0.0f);
+        metrics.ent = get_num("ent", 0.0f);
+        metrics.mom = get_num("mom", 0.0f);
+        metrics.spat = get_num("spat", 0.0f);
+        metrics.temp = get_num("temp", 0.0f);
+        metrics.timestep = get_num("timestep", 0.0f);
+        metrics.grad_norm = get_num("grad_norm", get_num("gradNorm", 0.0f));
+        metrics.grad_max = get_num("grad_max", get_num("gradMax", 0.0f));
+        metrics.kl_beta_effective = get_num("kl_beta_effective", get_num("klBetaEffective", 0.0f));
+        metrics.recon_loss_type = get_str("recon_loss_type", "");
+        if (metrics.recon_loss_type.empty()) {
+            metrics.recon_loss_type = get_str("reconLoss", "");
+        }
+    } else {
+        metrics.epoch = luaL_checkinteger(L, 1);
+        metrics.batch = luaL_checkinteger(L, 2);
+        metrics.loss = static_cast<float>(luaL_checknumber(L, 3));
+        metrics.lr = static_cast<float>(luaL_checknumber(L, 4));
+        metrics.mse = static_cast<float>(luaL_optnumber(L, 5, 0.0));
+        metrics.kl = static_cast<float>(luaL_optnumber(L, 6, 0.0));
+        metrics.wass = static_cast<float>(luaL_optnumber(L, 7, 0.0));
+        metrics.ent = static_cast<float>(luaL_optnumber(L, 8, 0.0));
+        metrics.mom = static_cast<float>(luaL_optnumber(L, 9, 0.0));
+        metrics.spat = static_cast<float>(luaL_optnumber(L, 10, 0.0));
+        metrics.temp = static_cast<float>(luaL_optnumber(L, 11, 0.0));
+        metrics.kl_beta_effective = static_cast<float>(luaL_optnumber(L, 12, 0.0));
+        metrics.batch_time_ms = luaL_optinteger(L, 13, 0);
+        {
+            lua_Integer v = luaL_optinteger(L, 14, 0);
+            if (v < 0) v = 0;
+            metrics.memory_mb = (size_t)v;
+        }
+        metrics.bps = static_cast<float>(luaL_optnumber(L, 15, 0.0));
+        {
+            lua_Integer v = luaL_optinteger(L, 16, 0);
+            if (v < 0) v = 0;
+            metrics.params = (size_t)v;
+        }
+    }
     
     ctx.asyncMonitor->updateMetrics(metrics);
     

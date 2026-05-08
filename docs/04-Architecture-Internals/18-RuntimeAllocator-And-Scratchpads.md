@@ -45,7 +45,7 @@ Le cap local **ne modifie pas** la limite globale : il sert à garder une marge 
 
 - `return_scratchpad(BufferHandle&&)` : remet un buffer dans le pool.
 
-⚠️ Attention : le pool retient de la mémoire (comptabilisée) tant qu’il vit. Le caller doit décider quand nettoyer via `clear_scratchpad_pool()`.
+ATTENTION : le pool retient de la mémoire (comptabilisée) tant qu’il vit. Le caller doit décider quand nettoyer via `clear_scratchpad_pool()`.
 
 ## 5) `RUNTIME_CHECK` / mode strict
 

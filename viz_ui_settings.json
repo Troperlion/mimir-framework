@@ -3,21 +3,21 @@
     "panels": [
       {
         "allow_drag": true,
-        "h": 290.0,
+        "h": 291.0,
         "id": 0,
         "title": "Context",
         "visible": true,
-        "w": 401.0000305175781,
+        "w": 324.0000915527344,
         "x": 4.0,
         "y": 4.0
       },
       {
         "allow_drag": true,
-        "h": 356.9999084472656,
+        "h": 598.9998779296875,
         "id": 1,
         "title": "Blocks / Layers",
         "visible": true,
-        "w": 1251.0,
+        "w": 1252.0001220703125,
         "x": 6.99993896484375,
         "y": 303.0
       },
@@ -26,7 +26,7 @@
         "h": 291.00006103515625,
         "id": 2,
         "title": "Generated",
-        "visible": true,
+        "visible": false,
         "w": 844.0,
         "x": 415.0,
         "y": 4.000091552734375
@@ -43,26 +43,26 @@
       },
       {
         "allow_drag": true,
-        "h": 574.0,
+        "h": 817.9999389648438,
         "id": 4,
         "title": "Metrics",
         "visible": true,
-        "w": 517.0,
-        "x": 1268.0,
+        "w": 521.0,
+        "x": 1267.0,
         "y": 85.0
       },
       {
         "allow_drag": true,
-        "h": 238.0,
+        "h": 291.0,
         "id": 5,
         "title": "Loss",
         "visible": true,
-        "w": 1783.9998779296875,
-        "x": 4.0,
-        "y": 668.0
+        "w": 918.9999389648438,
+        "x": 337.00006103515625,
+        "y": 4.0
       }
     ],
-    "show_generated_images": true,
+    "show_generated_images": false,
     "show_loss_graph": true,
     "show_prompt_text": true,
     "show_training_progress": true,
@@ -156,17 +156,17 @@
         },
         {
           "allow_drag": true,
-          "h": 656.9999389648438,
+          "h": 900.9999389648438,
           "id": 1,
           "title": "Blocks / Layers",
           "visible": true,
-          "w": 849.0,
+          "w": 851.0001220703125,
           "x": 411.0,
           "y": 4.0
         },
         {
           "allow_drag": true,
-          "h": 359.00006103515625,
+          "h": 602.0,
           "id": 2,
           "title": "Generated",
           "visible": true,
@@ -196,13 +196,13 @@
         },
         {
           "allow_drag": true,
-          "h": 238.0,
+          "h": 236.0,
           "id": 5,
           "title": "Loss",
           "visible": true,
-          "w": 1783.9998779296875,
-          "x": 4.0,
-          "y": 668.0
+          "w": 517.0001220703125,
+          "x": 1268.9998779296875,
+          "y": 670.0
         }
       ],
       "show_generated_images": true,

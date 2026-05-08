@@ -254,6 +254,8 @@ static PonyXLDDPMModel::Config ponyxlDdpmCfgFromJson(const json& cfg) {
     out.d_model = jget<int>(cfg, "d_model", out.d_model);
     out.max_vocab = jget<int>(cfg, "max_vocab", out.max_vocab);
     out.text_ctx_len = jget<int>(cfg, "text_ctx_len", out.text_ctx_len);
+    out.text_clip_like = jget<bool>(cfg, "text_clip_like", out.text_clip_like);
+    out.global_ctx_tokens = jget<int>(cfg, "global_ctx_tokens", out.global_ctx_tokens);
     out.text_bottleneck_meanpool = jget<bool>(cfg, "text_bottleneck_meanpool", out.text_bottleneck_meanpool);
 
     out.latent_seq_len = jget<int>(cfg, "latent_seq_len", out.latent_seq_len);
@@ -261,6 +263,7 @@ static PonyXLDDPMModel::Config ponyxlDdpmCfgFromJson(const json& cfg) {
     out.num_heads = jget<int>(cfg, "num_heads", out.num_heads);
 
     out.sdxl_time_cond = jget<bool>(cfg, "sdxl_time_cond", out.sdxl_time_cond);
+    out.timestep_cond = jget<std::string>(cfg, "timestep_cond", out.timestep_cond);
     out.unet_layers = jget<int>(cfg, "unet_layers", out.unet_layers);
     out.text_layers = jget<int>(cfg, "text_layers", out.text_layers);
     out.mlp_hidden = jget<int>(cfg, "mlp_hidden", out.mlp_hidden);
@@ -268,6 +271,8 @@ static PonyXLDDPMModel::Config ponyxlDdpmCfgFromJson(const json& cfg) {
     out.latent_h = jget<int>(cfg, "latent_h", out.latent_h);
     out.latent_w = jget<int>(cfg, "latent_w", out.latent_w);
     out.unet_depth = jget<int>(cfg, "unet_depth", out.unet_depth);
+    out.unet_blocks_per_level = jget<int>(cfg, "unet_blocks_per_level", out.unet_blocks_per_level);
+    out.unet_bottleneck_blocks = jget<int>(cfg, "unet_bottleneck_blocks", out.unet_bottleneck_blocks);
 
     out.image_w = jget<int>(cfg, "image_w", out.image_w);
     out.image_h = jget<int>(cfg, "image_h", out.image_h);
@@ -279,6 +284,17 @@ static PonyXLDDPMModel::Config ponyxlDdpmCfgFromJson(const json& cfg) {
     out.ddpm_steps_per_image = jget<int>(cfg, "ddpm_steps_per_image", out.ddpm_steps_per_image);
 
     out.recon_loss = jget<std::string>(cfg, "recon_loss", out.recon_loss);
+
+    // KL regularization on eps_pred distribution (optional)
+    out.kl_beta = jget<float>(cfg, "kl_beta", out.kl_beta);
+    out.kl_warmup_steps = jget<int>(cfg, "kl_warmup_steps", out.kl_warmup_steps);
+    out.logvar_clip_min = jget<float>(cfg, "logvar_clip_min", out.logvar_clip_min);
+    out.logvar_clip_max = jget<float>(cfg, "logvar_clip_max", out.logvar_clip_max);
+
+    out.loss_weighting = jget<std::string>(cfg, "loss_weighting", out.loss_weighting);
+    out.min_snr_gamma = jget<float>(cfg, "min_snr_gamma", out.min_snr_gamma);
+
+    out.output_activation = jget<std::string>(cfg, "output_activation", out.output_activation);
 
     out.peltier_noise = jget<bool>(cfg, "peltier_noise", out.peltier_noise);
     out.peltier_mix = jget<float>(cfg, "peltier_mix", out.peltier_mix);
@@ -301,8 +317,24 @@ static PonyXLDDPMModel::Config ponyxlDdpmCfgFromJson(const json& cfg) {
     out.caption_mentalite_dropout_prob = jget<float>(cfg, "caption_mentalite_dropout_prob", out.caption_mentalite_dropout_prob);
     out.caption_texte_dropout_prob = jget<float>(cfg, "caption_texte_dropout_prob", out.caption_texte_dropout_prob);
 
+    // Captions key/value (caption/theme/keywords/tokens)
+    out.caption_kv_enable = jget<bool>(cfg, "caption_kv_enable", out.caption_kv_enable);
+
+    // Majoration des termes fréquents
+    out.term_freq_boost_enable = jget<bool>(cfg, "term_freq_boost_enable", out.term_freq_boost_enable);
+    out.term_freq_boost_use_tokens = jget<bool>(cfg, "term_freq_boost_use_tokens", out.term_freq_boost_use_tokens);
+    out.term_freq_boost_use_keywords = jget<bool>(cfg, "term_freq_boost_use_keywords", out.term_freq_boost_use_keywords);
+    out.term_freq_boost_top_k = jget<int>(cfg, "term_freq_boost_top_k", out.term_freq_boost_top_k);
+    out.term_freq_boost_repeat = jget<int>(cfg, "term_freq_boost_repeat", out.term_freq_boost_repeat);
+    out.term_freq_boost_start_step = jget<int>(cfg, "term_freq_boost_start_step", out.term_freq_boost_start_step);
+    out.term_freq_boost_update_every_steps = jget<int>(cfg, "term_freq_boost_update_every_steps", out.term_freq_boost_update_every_steps);
+
     out.viz_ddpm_every_steps = jget<int>(cfg, "viz_ddpm_every_steps", out.viz_ddpm_every_steps);
     out.viz_ddpm_num_steps = jget<int>(cfg, "viz_ddpm_num_steps", out.viz_ddpm_num_steps);
+
+    // Optional image-space auxiliary loss (via VAE decoder)
+    out.img_loss_weight = jget<float>(cfg, "img_loss_weight", out.img_loss_weight);
+    out.img_loss_every_steps = jget<int>(cfg, "img_loss_every_steps", out.img_loss_every_steps);
 
     return out;
 }
@@ -314,6 +346,8 @@ static json ponyxlDdpmDefaultConfigJson() {
         {"d_model", d.d_model},
         {"max_vocab", d.max_vocab},
         {"text_ctx_len", d.text_ctx_len},
+        {"text_clip_like", d.text_clip_like},
+        {"global_ctx_tokens", d.global_ctx_tokens},
         {"text_bottleneck_meanpool", d.text_bottleneck_meanpool},
 
         {"latent_seq_len", d.latent_seq_len},
@@ -321,6 +355,7 @@ static json ponyxlDdpmDefaultConfigJson() {
         {"num_heads", d.num_heads},
 
         {"sdxl_time_cond", d.sdxl_time_cond},
+        {"timestep_cond", d.timestep_cond},
         {"unet_layers", d.unet_layers},
         {"text_layers", d.text_layers},
         {"mlp_hidden", d.mlp_hidden},
@@ -328,6 +363,8 @@ static json ponyxlDdpmDefaultConfigJson() {
         {"latent_h", d.latent_h},
         {"latent_w", d.latent_w},
         {"unet_depth", d.unet_depth},
+        {"unet_blocks_per_level", d.unet_blocks_per_level},
+        {"unet_bottleneck_blocks", d.unet_bottleneck_blocks},
 
         {"image_w", d.image_w},
         {"image_h", d.image_h},
@@ -339,6 +376,17 @@ static json ponyxlDdpmDefaultConfigJson() {
         {"ddpm_steps_per_image", d.ddpm_steps_per_image},
 
         {"recon_loss", d.recon_loss},
+
+        // KL regularization on eps_pred distribution (optional)
+        {"kl_beta", d.kl_beta},
+        {"kl_warmup_steps", d.kl_warmup_steps},
+        {"logvar_clip_min", d.logvar_clip_min},
+        {"logvar_clip_max", d.logvar_clip_max},
+
+        {"loss_weighting", d.loss_weighting},
+        {"min_snr_gamma", d.min_snr_gamma},
+
+        {"output_activation", d.output_activation},
 
         {"peltier_noise", d.peltier_noise},
         {"peltier_mix", d.peltier_mix},
@@ -361,8 +409,24 @@ static json ponyxlDdpmDefaultConfigJson() {
         {"caption_mentalite_dropout_prob", d.caption_mentalite_dropout_prob},
         {"caption_texte_dropout_prob", d.caption_texte_dropout_prob},
 
+        // Captions key/value
+        {"caption_kv_enable", d.caption_kv_enable},
+
+        // Majoration des termes fréquents
+        {"term_freq_boost_enable", d.term_freq_boost_enable},
+        {"term_freq_boost_use_tokens", d.term_freq_boost_use_tokens},
+        {"term_freq_boost_use_keywords", d.term_freq_boost_use_keywords},
+        {"term_freq_boost_top_k", d.term_freq_boost_top_k},
+        {"term_freq_boost_repeat", d.term_freq_boost_repeat},
+        {"term_freq_boost_start_step", d.term_freq_boost_start_step},
+        {"term_freq_boost_update_every_steps", d.term_freq_boost_update_every_steps},
+
         {"viz_ddpm_every_steps", d.viz_ddpm_every_steps},
         {"viz_ddpm_num_steps", d.viz_ddpm_num_steps},
+
+        // Optional image-space auxiliary loss (via VAE decoder)
+        {"img_loss_weight", d.img_loss_weight},
+        {"img_loss_every_steps", d.img_loss_every_steps},
     };
 }
 
@@ -391,6 +455,26 @@ static VAEConvModel::Config vaeConvCfgFromJson(const json& cfg) {
     out.latent_c = jget<int>(cfg, "latent_c", out.latent_c);
     out.base_channels = jget<int>(cfg, "base_channels", out.base_channels);
 
+    // Encoder normalization (optional)
+    out.enc_norm = jget<std::string>(cfg, "enc_norm", out.enc_norm);
+    out.enc_gn_groups = jget<int>(cfg, "enc_gn_groups", out.enc_gn_groups);
+
+    // Compat: `use_attention` pilote désormais les blocs ResNet 2D injectés dans le décodeur.
+    out.use_attention = jget<bool>(cfg, "use_attention", out.use_attention);
+
+    // Nouvelle option: attention (SelfAttention) en plus des blocs ResNet.
+    out.use_attn = jget<bool>(cfg, "use_attn", out.use_attn);
+    out.attn_heads = jget<int>(cfg, "attn_heads", out.attn_heads);
+    out.attn_max_tokens = jget<int>(cfg, "attn_max_tokens", out.attn_max_tokens);
+
+    // Nouveau: gating séparé pour les blocs ResNet.
+    // Compat: si absent, on reprend l'ancien comportement (gating couplé à attn_max_tokens).
+    if (cfg.is_object() && cfg.contains("resnet_max_tokens")) {
+        out.resnet_max_tokens = jget<int>(cfg, "resnet_max_tokens", out.resnet_max_tokens);
+    } else {
+        out.resnet_max_tokens = out.attn_max_tokens;
+    }
+
     // Latent stochasticity (reparameterization noise)
     out.stochastic_latent = jget<bool>(cfg, "stochastic_latent", out.stochastic_latent);
 
@@ -400,6 +484,12 @@ static VAEConvModel::Config vaeConvCfgFromJson(const json& cfg) {
     out.seq_len = jget<int>(cfg, "seq_len", out.seq_len);
     out.text_d_model = jget<int>(cfg, "text_d_model", out.text_d_model);
     out.proj_dim = jget<int>(cfg, "proj_dim", out.proj_dim);
+
+    // Perceptual loss (optional, consumed by Model::trainStepVAE)
+    out.perceptual_weight = jget<float>(cfg, "perceptual_weight", out.perceptual_weight);
+    out.perceptual_arch = jget<std::string>(cfg, "perceptual_arch", out.perceptual_arch);
+    out.perceptual_checkpoint = jget<std::string>(cfg, "perceptual_checkpoint", out.perceptual_checkpoint);
+    out.perceptual_base_channels = jget<int>(cfg, "perceptual_base_channels", out.perceptual_base_channels);
     return out;
 }
 
@@ -412,12 +502,28 @@ static json vaeConvDefaultConfigJson() {
                 {"latent_w", d.latent_w},
                 {"latent_c", d.latent_c},
                 {"base_channels", d.base_channels},
+
+                // Encoder normalization (optional)
+                {"enc_norm", d.enc_norm},
+                {"enc_gn_groups", d.enc_gn_groups},
+
+                {"use_attention", d.use_attention},
+                {"resnet_max_tokens", d.resnet_max_tokens},
+                {"use_attn", d.use_attn},
+                {"attn_heads", d.attn_heads},
+                {"attn_max_tokens", d.attn_max_tokens},
                 {"stochastic_latent", d.stochastic_latent},
                 {"text_cond", d.text_cond},
                 {"vocab_size", d.vocab_size},
                 {"seq_len", d.seq_len},
                 {"text_d_model", d.text_d_model},
-                {"proj_dim", d.proj_dim}};
+                {"proj_dim", d.proj_dim},
+
+                // Perceptual loss (optional)
+                {"perceptual_weight", d.perceptual_weight},
+                {"perceptual_arch", d.perceptual_arch},
+                {"perceptual_checkpoint", d.perceptual_checkpoint},
+                {"perceptual_base_channels", d.perceptual_base_channels}};
 }
 
 static ResNetModel::Config resnetCfgFromJson(const json& cfg) {

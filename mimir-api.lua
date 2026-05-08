@@ -270,7 +270,46 @@ function write_file(path, content) end
 ---@field latent_h? int
 ---@field latent_w? int
 ---@field latent_c? int
+---@field latent_dim? int @latent_h*latent_w*latent_c (souvent rempli côté scripts)
 ---@field base_channels? int
+---@field use_attention? bool @Compat: pilote les blocs ResNet injectés dans le décodeur (anciennement des blocs d'attention)
+---@field resnet_max_tokens? int @Garde-fou perf ResNet: on n'insère des blocs que si H*W <= resnet_max_tokens
+---@field use_attn? bool @SelfAttention optionnelle (en plus des blocs ResNet)
+---@field attn_heads? int @Heads SelfAttention
+---@field attn_max_tokens? int @Garde-fou perf SelfAttention: H*W <= attn_max_tokens
+---@field stochastic_latent? bool
+---@field text_cond? bool
+---@field vocab_size? int
+---@field seq_len? int
+---@field text_d_model? int
+---@field proj_dim? int
+---@field align_weight? float
+---@field kl_beta? float
+---@field kl_warmup_steps? int
+---@field recon_loss? string @"l1"|"l2"|"mse"|"huber"|"charbonnier"|"nll" (selon impl.)
+---@field logvar_clip_min? float
+---@field logvar_clip_max? float
+---@field grad_clip_norm? float
+---@field grad_accum_steps? int
+---@field ssim_weight? float
+---@field ssim_mode? string
+---@field ssim_k1? float
+---@field ssim_k2? float
+---@field ssim_L? float
+---@field spectral_weight? float
+---@field spectral_scales? int
+---@field perceptual_weight? float
+---@field perceptual_arch? string
+---@field perceptual_checkpoint? string
+---@field perceptual_base_channels? int
+---@field huber_delta? float
+---@field charbonnier_eps? float
+---@field nll_sigma? float
+---@field marker_wass_scale? float
+---@field marker_temp_scale? float
+---@field marker_warmup_steps? int
+---@field marker_scale_max? float
+---@field tokenizer_frozen? bool
 
 ---@class ResNetConfig: ModelConfig
 ---@field image_w? int
@@ -367,6 +406,14 @@ function write_file(path, content) end
 ---@field ddpm_beta_start? float
 ---@field ddpm_beta_end? float
 ---@field ddpm_steps_per_image? int @Nb updates diffusion par image (1=standard)
+---@field recon_loss? string @Loss diffusion eps_pred vs eps (ex: "mse","mae","huber"/"smoothl1","charbonnier","gaussian_nll")
+---@field loss_weighting? string @Pondération par timestep ("none"|"min_snr")
+---@field min_snr_gamma? float @Gamma utilisé si loss_weighting="min_snr"
+---@field output_activation? string @Activation de sortie eps_pred ("linear"|"tanh")
+---@field kl_beta? float @Regularisation KL (eps_pred -> N(0,1))
+---@field kl_warmup_steps? int @Warmup linéaire de kl_beta (comme VAE_conv)
+---@field logvar_clip_min? float @Clip log(var) utilisé dans le KL (sécurité numérique)
+---@field logvar_clip_max? float @Clip log(var) utilisé dans le KL
 ---@field peltier_noise? bool @DÉPRÉCIÉ/IGNORÉ: ancien "bruit peltier" (corrélé). DDPM latent standard utilise eps~N(0,I).
 ---@field peltier_mix? float @DÉPRÉCIÉ/IGNORÉ
 ---@field peltier_blur_radius? int @DÉPRÉCIÉ/IGNORÉ

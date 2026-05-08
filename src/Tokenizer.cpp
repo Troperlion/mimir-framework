@@ -110,8 +110,8 @@ std::vector<std::string> Tokenizer::splitTokens(const std::string &text) const
                 cur.push_back(text[++i]);
             }
         }
-        // Alphanumeric
-        else if (std::isalnum(c)) {
+        // Alphanumeric (inclut '_' pour préserver des tags comme foo_bar)
+        else if (std::isalnum(c) || c == '_') {
             cur.push_back(text[i]);
         }
         // Apostrophe contextuelle (l', d', qu', c', j', m', t', s', n')
@@ -162,7 +162,7 @@ std::string Tokenizer::normalizeToken(std::string s) const
     // Détection de ponctuation pure (garder telle quelle)
     bool isPurePunct = true;
     for (unsigned char c : s) {
-        if (std::isalnum(c) || c >= 128) {  // alnum ou UTF-8
+        if (std::isalnum(c) || c == '_' || c >= 128) {  // alnum/'_' ou UTF-8
             isPurePunct = false;
             break;
         }
@@ -195,7 +195,7 @@ std::string Tokenizer::normalizeToken(std::string s) const
     
     // Trim ponctuation aux extrémités (mais garder apostrophes/traits d'union internes)
     auto isEdgePunct = [](unsigned char c) -> bool {
-        return !std::isalnum(c) && c < 128 && c != '\'' && c != '-';
+        return !(std::isalnum(c) || c == '_') && c < 128 && c != '\'' && c != '-';
     };
     
     while (!result.empty() && isEdgePunct(static_cast<unsigned char>(result.front()))) {

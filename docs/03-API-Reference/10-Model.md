@@ -24,6 +24,21 @@ Détails : `docs/02-User-Guide/02-Model-Lifecycle.md`.
 - Si `cfg` absent/vide : utilise la config par défaut du registre.
 - Crée le modèle via `ModelArchitectures::create`.
 
+### `Mimir.Model.create_from_config(full_cfg: table) -> (bool, arch|err)`
+
+Crée le modèle depuis une **config complète** (ex: `CONF` injecté par le mode CLI `--conf`).
+
+Comportement :
+
+- résout l’architecture depuis `full_cfg.architecture` (fallback `type`, puis `model.architecture|model.type`)
+- construit une config effective à partir de la config par défaut du registre + merges
+- crée le modèle via le registre
+
+Retour :
+
+- `true, <arch>` si OK
+- `false, <message>` sinon
+
 ### `Mimir.Model.build() -> (bool, params|err)`
 
 - Recrée le modèle via le registre à partir de `ctx.modelType` + `ctx.modelConfig`.

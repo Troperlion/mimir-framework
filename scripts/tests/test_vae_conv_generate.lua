@@ -353,6 +353,16 @@ local function infer_cfg_from_checkpoint(ckpt_dir)
   local latent_h = math.floor(image_h / div)
   local latent_w = math.floor(image_w / div)
 
+  -- Options d'architecture (si présentes dans arch.model_config)
+  local use_attention = false
+  local attn_heads = nil
+  local attn_max_tokens = nil
+  if type(arch.model_config) == "table" then
+    if arch.model_config.use_attention == true then use_attention = true end
+    attn_heads = tonumber(arch.model_config.attn_heads)
+    attn_max_tokens = tonumber(arch.model_config.attn_max_tokens)
+  end
+
   return {
     image_w = image_w,
     image_h = image_h,
@@ -362,6 +372,9 @@ local function infer_cfg_from_checkpoint(ckpt_dir)
     latent_c = math.floor(latent_c),
     base_channels = math.floor(base_channels),
     downsamples = downsamples,
+    use_attention = use_attention,
+    attn_heads = attn_heads,
+    attn_max_tokens = attn_max_tokens,
   }, nil
 end
 
@@ -448,6 +461,17 @@ cfg.latent_dim = cfg.latent_h * cfg.latent_w * cfg.latent_c
 cfg.text_cond = false
 cfg.stochastic_latent = false
 
+-- Attention (si présente dans le checkpoint)
+if inferred.use_attention ~= nil then
+  cfg.use_attention = inferred.use_attention
+end
+if inferred.attn_heads ~= nil then
+  cfg.attn_heads = inferred.attn_heads
+end
+if inferred.attn_max_tokens ~= nil then
+  cfg.attn_max_tokens = inferred.attn_max_tokens
+end
+
 -- Allow manual overrides (optionnels)
 if opts["image-w"] then cfg.image_w = opt_int("image-w", cfg.image_w) end
 if opts["image-h"] then cfg.image_h = opt_int("image-h", cfg.image_h) end
@@ -456,6 +480,21 @@ if opts["latent-h"] then cfg.latent_h = opt_int("latent-h", cfg.latent_h) end
 if opts["latent-w"] then cfg.latent_w = opt_int("latent-w", cfg.latent_w) end
 if opts["latent-c"] then cfg.latent_c = opt_int("latent-c", cfg.latent_c) end
 if opts["base-channels"] then cfg.base_channels = opt_int("base-channels", cfg.base_channels) end
+
+-- Optional manual overrides for attention
+if opts.attn ~= nil or opts["use-attn"] ~= nil then
+  local v = opts.attn
+  if v == nil then v = opts["use-attn"] end
+  if v == true or v == false then cfg.use_attention = v end
+  if type(v) == "string" then
+    local s = v:lower()
+    if s == "1" or s == "true" or s == "yes" or s == "on" then cfg.use_attention = true end
+    if s == "0" or s == "false" or s == "no" or s == "off" then cfg.use_attention = false end
+  end
+end
+if opts["attn-heads"] then cfg.attn_heads = opt_int("attn-heads", cfg.attn_heads) end
+if opts["attn-max-tokens"] then cfg.attn_max_tokens = opt_int("attn-max-tokens", cfg.attn_max_tokens) end
+
 cfg.latent_dim = cfg.latent_h * cfg.latent_w * cfg.latent_c
 
 logx(string.format("[test_vae_conv_generate] cfg image=%dx%dx%d latent=%dx%dx%d base=%d", cfg.image_w, cfg.image_h, cfg.image_c, cfg.latent_h, cfg.latent_w, cfg.latent_c, cfg.base_channels))

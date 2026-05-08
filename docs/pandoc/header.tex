@@ -1,0 +1,24 @@
+% Preamble injected by pandoc for PDF generation.
+% Goals:
+% - prevent overfull lines (URLs, long identifiers)
+% - enable line wrapping in code blocks (fenced code)
+
+% Better URL breaking
+\usepackage{xurl}
+\urlstyle{same}
+
+% Better justification / fewer overfull boxes
+\usepackage{microtype}
+
+% Allow verbatim/code blocks to break long lines
+% Pandoc uses a "Highlighting" environment for code blocks.
+\usepackage{fvextra}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\},breaklines,breakanywhere,fontsize=\small}
+\fvset{breaklines=true,breakanywhere=true}
+
+% Softer line-breaking to avoid overflow in normal text
+\setlength{\emergencystretch}{3em}
+\sloppy
+
+% Slightly smaller monospaced font to reduce overflow risk
+

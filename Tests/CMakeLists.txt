@@ -38,5 +38,7 @@ mimir_add_test(RuntimeTest.NamedRouting              test_layers_named_routing.c
 mimir_add_test(RuntimeTest.EmbeddingIntInputs         test_runtime_embedding_int_inputs.cpp)
 mimir_add_test(RuntimeTest.ResidualMerge              test_runtime_residual_merge.cpp)
 mimir_add_test(RuntimeTest.AllLayerTypes              test_layers_all_types.cpp)
+mimir_add_test(RuntimeTest.GlobalAvgPool2dBackwardNumeric test_global_avgpool2d_backward_numeric.cpp)
+mimir_add_test(RuntimeTest.NumericGradients           test_layers_numeric_gradients.cpp)
 mimir_add_test(ModelTest.WeightBlocks                test_model_weight_blocks.cpp)
 mimir_add_test(ModelTest.TrainStepFreeze             test_model_train_step_freeze.cpp)

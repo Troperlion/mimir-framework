@@ -11,11 +11,11 @@ Voir aussi:
 ## PonyXL (SDXL-like)
 
 - Architecture canonique : `ponyxl_sdxl` (anciens alias: `ponyxl_ddpm`, `t2i_autoencoder`, etc.)
-- Scripts : `scripts/examples/ponyxl_generate.lua`, `scripts/training/train_ponyxl_ddpm.lua`
+- Script training : `scripts/training/ponyxl_ddpm_train.lua`
 
 ### Entraîner (PonyXL DDPM)
 
-Script: `scripts/training/train_ponyxl_ddpm.lua`
+Script: `scripts/training/ponyxl_ddpm_train.lua`
 
 Pré-requis:
 
@@ -41,8 +41,14 @@ Lancement:
 
 ```bash
 export MIMIR_DATASET_ROOT="/chemin/vers/dataset"
-./bin/mimir --lua scripts/training/train_ponyxl_ddpm.lua
+./bin/mimir --lua scripts/training/ponyxl_ddpm_train.lua -- --help
+./bin/mimir --lua scripts/training/ponyxl_ddpm_train.lua
 ```
+
+Notes :
+
+- Les anciennes options `peltier-*` sont **dépréciées** et ignorées (DDPM latent standard : $\epsilon \sim \mathcal{N}(0,I)$).
+- Pour activer/désactiver certains chemins hardware, le script expose une option `--hw`.
 
 Resume:
 
@@ -54,12 +60,10 @@ Le script écrit généralement:
 - un checkpoint `raw_folder` dans `cfg.checkpoint_dir`
 - un `debug.json` (format debug, pour inspection humaine)
 
-## SD3.5 (skeleton / démos)
+## SD3.5 (statut)
 
 - Architecture : `sd3_5` (alias: `SD3.5`)
-- Démos : `scripts/examples/sd3_5_skeleton_demo.lua`, `sd3_5_subset_load_demo.lua`
-
-Ces scripts sont des démos/squelettes: ils servent surtout à valider les chemins de load/config.
+Cette partie est surtout un statut d’architecture côté registre : il n’y a pas forcément de “démos” prêtes à l’emploi dans `scripts/examples/`.
 
 ## Autoencoder image
 
@@ -67,25 +71,6 @@ Ces scripts sont des démos/squelettes: ils servent surtout à valider les chemi
 - Script training : `scripts/training/train_vae_conv.lua`
 
 Astuce: commence par un VAE conv petit et valide le save/load avant d’attaquer une pipeline diffusion complète.
-
-## Générer (PonyXL)
-
-Script: `scripts/examples/ponyxl_generate.lua`
-
-Ce script:
-
-- crée/build/alloue un modèle `ponyxl` avec une config qui doit matcher le checkpoint
-- charge un checkpoint (par défaut `checkpoint/PonyXL` en `raw_folder`)
-- charge un tokenizer (priorité au “base tokenizer”, sinon tokenizer du checkpoint)
-- calcule 2 forwards (cond/uncond) et applique une guidance simple
-- écrit une image PGM (grayscale) sur disque
-
-Lancement:
-
-```bash
-export MIMIR_BASE_TOKENIZER="checkpoint/PonyXL/tokenizer/tokenizer.json"
-./bin/mimir --lua scripts/examples/ponyxl_generate.lua
-```
 
 ## Statut
 

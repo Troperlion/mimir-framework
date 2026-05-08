@@ -91,3 +91,51 @@ Usage conseillé :
 - faire un dump juste avant le step qui casse
 - activer `include_gradients` uniquement si nécessaire (volume plus gros)
 - comparer deux dumps successifs (avant/après) sur min/max/mean
+
+## 7) Inspecter un artefact sur disque (analyze_model.lua)
+
+But : quand vous avez un fichier/dossier “checkpoint” mais que vous ne voulez pas (ou ne pouvez pas) relancer un pipeline, le script [scripts/tools/analyze_model.lua](../../scripts/tools/analyze_model.lua) permet de **trier rapidement** :
+
+- est-ce un SafeTensors, un RawFolder, ou un DebugJson ?
+- quelle architecture/couches sont déclarées ?
+- quels tenseurs dominent la taille disque ?
+- comment visualiser le flux (IO) sous forme de graphe ?
+
+### Fonctionnement (résumé)
+
+- **SafeTensors** : lit le header, liste les tensors (`dtype`, `shape`, offsets), et tente de décoder `model/architecture_json` si présent.
+- **RawFolder** : lit `manifest.json`, estime la taille des `.bin`, et peut enrichir les N plus gros via les sidecars JSON.
+- **DebugJson** : lit le dump (v1.0 “mimir_debug_dump” ou v1.1 enhanced) et reconstruit un résumé (couches + tensors si présents).
+
+### Exemples
+
+```bash
+# 1) SafeTensors
+./bin/mimir --lua scripts/tools/analyze_model.lua --in model.safetensors
+
+# 2) RawFolder
+./bin/mimir --lua scripts/tools/analyze_model.lua --in checkpoint/run1/
+
+# 3) DebugJson
+./bin/mimir --lua scripts/tools/analyze_model.lua --in debug.json
+```
+
+### Graphe Mermaid (Markdown)
+
+Pour coller un graphe directement dans un README/rapport, utilisez :
+
+```bash
+./bin/mimir --lua scripts/tools/analyze_model.lua --in model.safetensors --graph-format mermaid
+```
+
+Ça émet un bloc :
+
+- ` ```mermaid` + `flowchart LR` + noeuds/arêtes
+
+Note : les dumps DebugJson n’embarquent pas forcément `inputs`/`output` par couche ; dans ce cas le rendu Mermaid utilise un **fallback linéaire** (layer1 → layer2 → …) pour rester lisible.
+
+### Help du script
+
+```bash
+./bin/mimir --lua scripts/tools/analyze_model.lua --h
+```

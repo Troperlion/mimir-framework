@@ -1,5 +1,11 @@
 {
+  "architecture": "unet",
   "unet": {
+    "image_w": 64,
+    "image_h": 64,
+    "image_c": 1,
+    "base_channels": 16,
+    "depth": 4,
     "input_channels": 1,
     "output_channels": 10,
     "image_size": 64,
@@ -22,16 +28,7 @@
     "text_embed_dim": 512,
     "max_timesteps": 1000
   },
-  "model": {
-    "type": "UNet",
-    "architecture": "UNet",
-    "embed_dim": 720,
-    "num_layers": 16,
-    "num_heads": 16,
-    "latent_dim": 64,
-    "num_transformer_layers": 8,
-    "num_attention_heads": 4
-  },
+  "model": {},
   "tokenizer": {
     "type": "BPE",
     "max_vocab": 10000,
@@ -125,5 +122,13 @@
     "image_grid_cols": 3,
     "image_grid_rows": 1,
     "update_interval_ms": 100
+  },
+  "lua": {
+    "scripts": [
+      {
+        "script": "scripts/tests/test_list_archi_conf.lua",
+        "args": []
+      }
+    ]
   }
 }

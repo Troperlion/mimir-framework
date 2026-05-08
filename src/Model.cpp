@@ -1240,6 +1240,10 @@ const std::vector<float>& Model::forwardPassView(const std::vector<int> &input_i
                 // Réutiliser le switch-case existant en appelant une petite lambda locale
                 // en se basant sur le même dispatch que forwardPass(float).
                 switch (layer.type_enum) {
+                    case LayerType::Identity: {
+                        layer_output = x;
+                        break;
+                    }
                     case LayerType::Linear: {
                         layer_output = LayerOps::linear_forward(x, layer, training);
                         break;
@@ -1595,7 +1599,8 @@ Model::VAEStepStats Model::trainStepVAE(const std::vector<float>& x, Optimizer& 
     if (modelConfig.contains("ssim_weight")) ssim_weight = std::max(0.0f, modelConfig["ssim_weight"].get<float>());
     if (modelConfig.contains("spectral_weight")) spectral_weight = std::max(0.0f, modelConfig["spectral_weight"].get<float>());
     if (modelConfig.contains("perceptual_weight")) perceptual_weight = std::max(0.0f, modelConfig["perceptual_weight"].get<float>());
-    if (modelConfig.contains("adv_weight")) adv_weight = std::max(0.0f, modelConfig["adv_weight"].get<float>());
+    // Adversarial (discriminateur) retiré pour VAEConv. On ignore adv_weight si présent.
+    (void)adv_weight;
 
     // Image shape for image-specific losses
     int img_w = 0, img_h = 0, img_c = 0;
@@ -1843,10 +1848,24 @@ Model::VAEStepStats Model::trainStepVAE(const std::vector<float>& x, Optimizer& 
             pcfg["image_h"] = img_h;
             pcfg["image_c"] = img_c;
             if (modelConfig.contains("perceptual_base_channels")) {
-                pcfg["base_channels"] = std::max(1, modelConfig["perceptual_base_channels"].get<int>());
+                int bc = std::max(1, modelConfig["perceptual_base_channels"].get<int>());
+                // Compat: vgg16_feat force base_channels>=4.
+                if (p_arch == "vgg16_feat") bc = std::max(4, bc);
+                pcfg["base_channels"] = bc;
             }
             aux_perceptual_ = ModelArchitectures::create(p_arch, pcfg);
             aux_perceptual_->allocateParams();
+
+            // IMPORTANT: si aucun checkpoint n'est fourni, il faut au minimum
+            // initialiser les poids; sinon le réseau peut produire des features
+            // dégénérées (ex: zéros) et la loss perceptuelle n'apporte aucun
+            // signal => pas de "punition"/"récompense".
+            // On utilise un seed fixe pour garder un comportement déterministe.
+            try {
+                aux_perceptual_->initializeWeights("xavier", 1337u);
+            } catch (...) {
+                // Best-effort: si l'init échoue, on continue (checkpoint peut encore charger).
+            }
 
             std::string ckpt;
             if (modelConfig.contains("perceptual_checkpoint")) {
@@ -1862,11 +1881,63 @@ Model::VAEStepStats Model::trainStepVAE(const std::vector<float>& x, Optimizer& 
                 opts.validate_checksums = false;
                 std::string err;
                 if (!Mimir::Serialization::load_checkpoint(*aux_perceptual_, ckpt, opts, &err)) {
-                    std::cerr << "⚠️  Perceptual checkpoint load failed: " << ckpt << " | " << err << std::endl;
-                }
-            }
+                    // Helpful fallback: for raw_folder checkpoints, infer the base_channels from
+                    // the checkpoint architecture (e.g. base=4 vs base=8 mismatch) and retry.
+                    bool retried = false;
+                    if (opts.format == Mimir::Serialization::CheckpointFormat::RawFolder) {
+                        try {
+                            namespace fs = std::filesystem;
+                            const fs::path arch_path = fs::path(ckpt) / "model" / "architecture.json";
+                            if (fs::exists(arch_path)) {
+                                std::ifstream f(arch_path);
+                                json arch;
+                                f >> arch;
 
-            aux_perceptual_->freezeParameters(true);
+                                int inferred_base = 0;
+                                if (arch.is_object() && arch.contains("layers") && arch["layers"].is_array()) {
+                                    for (const auto& L : arch["layers"]) {
+                                        if (!L.is_object()) continue;
+                                        const std::string name = L.value("name", std::string());
+                                        if (name == "vgg16_feat/b1/c1") {
+                                            inferred_base = L.value("out_channels", 0);
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                const int cfg_base = pcfg.contains("base_channels") ? (int)pcfg["base_channels"].get<int>() : 0;
+                                if (inferred_base > 0 && inferred_base != cfg_base) {
+                                    std::cerr << "⚠️  Perceptual checkpoint base_channels mismatch (cfg=" << cfg_base
+                                              << ", ckpt=" << inferred_base << "). Rebuilding aux model and retrying load..." << std::endl;
+
+                                    json pcfg2 = pcfg;
+                                    pcfg2["base_channels"] = std::max(1, inferred_base);
+
+                                    aux_perceptual_.reset();
+                                    aux_perceptual_ = ModelArchitectures::create(p_arch, pcfg2);
+                                    aux_perceptual_->allocateParams();
+                                    try { aux_perceptual_->initializeWeights("xavier", 1337u); } catch (...) {}
+
+                                    std::string err2;
+                                    if (Mimir::Serialization::load_checkpoint(*aux_perceptual_, ckpt, opts, &err2)) {
+                                        retried = true;
+                                    } else {
+                                        err = err2;
+                                    }
+                                }
+                            }
+                        } catch (...) {
+                            // best-effort: keep original err
+                        }
+                    }
+
+                    if (!retried) {
+                        std::cerr << "⚠️  Perceptual checkpoint load failed: " << ckpt << " | " << err << std::endl;
+                    }
+                }
+            } else {
+                std::cerr << "⚠️  Perceptual loss active but perceptual_checkpoint is empty: using fixed random Xavier init (seed=1337)." << std::endl;
+            }
         }
 
         const std::vector<float> pred_recon(pred.begin(), pred.begin() + recon_n);
@@ -1904,102 +1975,7 @@ Model::VAEStepStats Model::trainStepVAE(const std::vector<float>& x, Optimizer& 
         }
     }
 
-    // Adversarial (PatchGAN-like). Updates discriminator internally and injects dL/dx into recon gradient.
-    if (adv_weight > 0.0f && recon_is_hwc) {
-        std::string d_arch = "patch_discriminator";
-        if (modelConfig.contains("adv_disc_arch")) {
-            try { d_arch = modelConfig["adv_disc_arch"].get<std::string>(); } catch (...) {}
-        }
-        float d_lr = learning_rate;
-        if (modelConfig.contains("adv_disc_lr")) d_lr = std::max(0.0f, modelConfig["adv_disc_lr"].get<float>());
-        if (d_lr <= 0.0f) d_lr = learning_rate;
-
-        if (!aux_discriminator_) {
-            json dcfg = ModelArchitectures::defaultConfig(d_arch);
-            dcfg["image_w"] = img_w;
-            dcfg["image_h"] = img_h;
-            dcfg["image_c"] = img_c;
-            if (modelConfig.contains("adv_disc_base_channels")) {
-                dcfg["base_channels"] = std::max(4, modelConfig["adv_disc_base_channels"].get<int>());
-            }
-            aux_discriminator_ = ModelArchitectures::create(d_arch, dcfg);
-            aux_discriminator_->allocateParams();
-            aux_discriminator_opt_inited_ = false;
-        }
-
-        // Init discriminator optimizer hyperparams from main config if provided
-        if (!aux_discriminator_opt_inited_) {
-            aux_discriminator_opt_.type = opt.type;
-            aux_discriminator_opt_.beta1 = opt.beta1;
-            aux_discriminator_opt_.beta2 = opt.beta2;
-            aux_discriminator_opt_.eps = opt.eps;
-            aux_discriminator_opt_.weight_decay = 0.0f;
-            aux_discriminator_opt_.decay_strategy = LRDecayStrategy::NONE;
-            aux_discriminator_opt_.initial_lr = d_lr;
-            aux_discriminator_opt_.min_lr = d_lr;
-            aux_discriminator_opt_.warmup_steps = 0;
-            aux_discriminator_opt_inited_ = true;
-        }
-
-        const std::vector<float> pred_recon(pred.begin(), pred.begin() + recon_n);
-        const std::vector<float> tgt_recon(x.begin(), x.begin() + recon_n);
-
-        // ---- Discriminator update ----
-        aux_discriminator_->zeroGradients();
-        const std::vector<float>& d_real_view = aux_discriminator_->forwardPassView(tgt_recon, true);
-        std::vector<float> d_real(d_real_view.begin(), d_real_view.end());
-        // Backward on real immediately to avoid clobbering activations
-
-        auto bce_logits_grad = [](const std::vector<float>& logits, float target, std::vector<float>& grad, double& loss_out) {
-            const size_t n = logits.size();
-            grad.assign(n, 0.0f);
-            if (n == 0) { loss_out = 0.0; return; }
-            const double inv_n = 1.0 / static_cast<double>(n);
-            double loss_sum = 0.0;
-            for (size_t i = 0; i < n; ++i) {
-                const float p = sigmoid_scalar_f(logits[i]);
-                const float t = target;
-                // BCE(p,t)
-                loss_sum += -(static_cast<double>(t) * std::log(std::max(1e-7f, p)) + static_cast<double>(1.0f - t) * std::log(std::max(1e-7f, 1.0f - p)));
-                grad[i] = (p - t) * static_cast<float>(inv_n);
-            }
-            loss_out = loss_sum * inv_n;
-        };
-
-        std::vector<float> g_real;
-        double l_real = 0.0;
-        bce_logits_grad(d_real, 1.0f, g_real, l_real);
-        aux_discriminator_->backwardPass(g_real);
-
-        // Forward fake (new activations) + backward
-        const std::vector<float>& d_fake_view = aux_discriminator_->forwardPassView(pred_recon, true);
-        std::vector<float> d_fake(d_fake_view.begin(), d_fake_view.end());
-        std::vector<float> g_fake;
-        double l_fake = 0.0;
-        bce_logits_grad(d_fake, 0.0f, g_fake, l_fake);
-        aux_discriminator_->backwardPass(g_fake);
-        aux_discriminator_opt_.step = opt.step; // keep roughly in sync
-        aux_discriminator_->optimizerStep(aux_discriminator_opt_, d_lr);
-
-        // ---- Generator adversarial gradient via D(input grad) ----
-        aux_discriminator_->zeroGradients();
-        const std::vector<float>& d_fake2_view = aux_discriminator_->forwardPassView(pred_recon, true);
-        std::vector<float> d_fake2(d_fake2_view.begin(), d_fake2_view.end());
-        std::vector<float> g_adv;
-        double l_adv = 0.0;
-        bce_logits_grad(d_fake2, 1.0f, g_adv, l_adv);
-        aux_discriminator_->backwardPass(g_adv);
-        if (aux_discriminator_->hasLastInputGradient()) {
-            const auto& gin = aux_discriminator_->getLastInputGradient();
-            if (gin.size() >= static_cast<size_t>(recon_n)) {
-                // Add scaled generator adv gradient
-                for (int i = 0; i < recon_n; ++i) {
-                    grad_recon[static_cast<size_t>(i)] += adv_weight * gin[static_cast<size_t>(i)];
-                }
-            }
-        }
-        recon += static_cast<double>(adv_weight) * l_adv;
-    }
+    // Adversarial (discriminateur) retiré.
     const int mu_off = image_dim;
     const int lv_off = image_dim + latent_dim;
     double kl = 0.0;
@@ -4896,6 +4872,7 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
     
     case LayerType::Conv2d:
     case LayerType::ConvTranspose2d: {
+        static bool accel_logged_conv2d = false;
         RUNTIME_CHECK(
             layer.in_channels > 0 && layer.out_channels > 0,
             "Conv2d: in_channels and out_channels must be set"
@@ -4967,6 +4944,27 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
         const bool can_fast = (layer.type_enum == LayerType::Conv2d) && global_use_hardware && hasAVX2() && hasFMA();
         const int out_spatial = out_height * out_width;
         const int K = in_channels * kernel_size * kernel_size;
+
+        if (!accel_logged_conv2d && env_flag_true("MIMIR_ACCEL_VERBOSE", false)) {
+            accel_logged_conv2d = true;
+            #if defined(__AVX2__)
+                std::cerr << "Conv2d: compiled_with_avx2=1";
+            #else
+                std::cerr << "Conv2d: compiled_with_avx2=0";
+            #endif
+
+            #if defined(__FMA__)
+                std::cerr << " compiled_with_fma=1";
+            #else
+                std::cerr << " compiled_with_fma=0";
+            #endif
+
+            std::cerr << " runtime_avx2=" << (hasAVX2() ? 1 : 0)
+                      << " runtime_fma=" << (hasFMA() ? 1 : 0)
+                      << " global_use_hardware=" << (global_use_hardware ? 1 : 0)
+                      << " will_use_fast_path=" << (can_fast ? 1 : 0)
+                      << std::endl;
+        }
 
         if (can_fast && out_spatial > 0 && K > 0 && out_channels > 0) {
             // Transpose des poids: [out_c x K] -> [K x out_c]
@@ -5195,6 +5193,28 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
         }
 #endif
         if (!did_vulkan && !did_opencl) {
+            static bool accel_logged_linear_cpu = false;
+            if (!accel_logged_linear_cpu && env_flag_true("MIMIR_ACCEL_VERBOSE", false)) {
+                accel_logged_linear_cpu = true;
+                #if defined(__AVX2__)
+                    std::cerr << "Linear(CPU): compiled_with_avx2=1";
+                #else
+                    std::cerr << "Linear(CPU): compiled_with_avx2=0";
+                #endif
+
+                #if defined(__FMA__)
+                    std::cerr << " compiled_with_fma=1";
+                #else
+                    std::cerr << " compiled_with_fma=0";
+                #endif
+
+                std::cerr << " runtime_avx2=" << (hasAVX2() ? 1 : 0)
+                          << " runtime_fma=" << (hasFMA() ? 1 : 0)
+                          << " global_use_hardware=" << (global_use_hardware ? 1 : 0)
+                          << " vulkan_linear=" << (env_flag_true("MIMIR_VULKAN_LINEAR", false) ? 1 : 0)
+                          << " opencl_linear=" << (env_flag_true("MIMIR_OPENCL_LINEAR", false) ? 1 : 0)
+                          << std::endl;
+            }
             layer_output = LayerOps::linear_forward(x, layer, training);
         }
         break;
@@ -5903,6 +5923,27 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
     
     case LayerType::SelfAttention:
     case LayerType::MultiHeadAttention: {
+        static bool accel_logged_attention = false;
+        if (!accel_logged_attention && env_flag_true("MIMIR_ACCEL_VERBOSE", false)) {
+            accel_logged_attention = true;
+            #if defined(__AVX2__)
+                std::cerr << "Attention: compiled_with_avx2=1";
+            #else
+                std::cerr << "Attention: compiled_with_avx2=0";
+            #endif
+
+            #if defined(__FMA__)
+                std::cerr << " compiled_with_fma=1";
+            #else
+                std::cerr << " compiled_with_fma=0";
+            #endif
+
+            std::cerr << " runtime_avx2=" << (hasAVX2() ? 1 : 0)
+                      << " runtime_fma=" << (hasFMA() ? 1 : 0)
+                      << " global_use_hardware=" << (global_use_hardware ? 1 : 0)
+                      << std::endl;
+        }
+
         RUNTIME_CHECK(
             layer.getWeights() != nullptr,
             "Attention: weights not initialized. Call allocateParams() first."
@@ -5933,6 +5974,27 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
     }
     
     case LayerType::CrossAttention: {
+        static bool accel_logged_cross_attention = false;
+        if (!accel_logged_cross_attention && env_flag_true("MIMIR_ACCEL_VERBOSE", false)) {
+            accel_logged_cross_attention = true;
+            #if defined(__AVX2__)
+                std::cerr << "CrossAttention: compiled_with_avx2=1";
+            #else
+                std::cerr << "CrossAttention: compiled_with_avx2=0";
+            #endif
+
+            #if defined(__FMA__)
+                std::cerr << " compiled_with_fma=1";
+            #else
+                std::cerr << " compiled_with_fma=0";
+            #endif
+
+            std::cerr << " runtime_avx2=" << (hasAVX2() ? 1 : 0)
+                      << " runtime_fma=" << (hasFMA() ? 1 : 0)
+                      << " global_use_hardware=" << (global_use_hardware ? 1 : 0)
+                      << std::endl;
+        }
+
         RUNTIME_CHECK(
             inputs.size() >= 2,
             "CrossAttention requires 2 inputs (query, key_value), got " +
@@ -6346,6 +6408,11 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
                     case LayerType::Multiply:
                     case LayerType::Divide:
 
+                    // Attention (affichage best-effort; utile pour diagnostiquer la mémoire K/V)
+                    case LayerType::SelfAttention:
+                    case LayerType::MultiHeadAttention:
+                    case LayerType::CrossAttention:
+
                     // Activations (souvent omettent output_w/output_h dans les builders)
                     case LayerType::ReLU:
                     case LayerType::LeakyReLU:
@@ -6754,11 +6821,13 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
             return vf;
         };
 
-        // MU: tensor spatial CHW (best-effort via layer config)
-        if (hasTensor("vae_conv/mu")) {
-            const auto& mu = getTensor("vae_conv/mu");
+        auto add_mu_frame = [&](const char* prefix) {
+            const std::string mu_name = std::string(prefix) + "/mu";
+            const std::string mu_layer = std::string(prefix) + "/enc/mu";
+            if (!hasTensor(mu_name)) return;
+            const auto& mu = getTensor(mu_name);
             int muW = 0, muH = 0, muC = 0;
-            if (Layer* L = getLayerByName("vae_conv/enc/mu")) {
+            if (Layer* L = getLayerByName(mu_layer)) {
                 muC = std::max(0, L->out_channels);
                 muH = std::max(0, L->input_height);
                 muW = std::max(0, L->input_width);
@@ -6774,50 +6843,59 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
             if (muW > 0 && muH > 0 && muC > 0 && mu.size() == static_cast<size_t>(muW) * static_cast<size_t>(muH) * static_cast<size_t>(muC)) {
                 VizFrame vf = downsample_mean_chw_to_gray(mu, muW, muH, muC, std::max(1, viz_taps_max_side_), /*take_abs*/false, /*symmetric*/true);
                 if (!vf.pixels.empty()) {
-                    vf.label = "vae_conv/latent/mu";
+                    vf.label = std::string(prefix) + "/latent/mu";
                     addVizTapFrame(std::move(vf));
                 }
             }
-        }
+        };
 
-        // resdiff: |recon - input| en image-space (HWC)
-        if (hasTensor("vae_conv/recon") && hasTensor("vae_conv/in_hwc")) {
-            const auto& recon = getTensor("vae_conv/recon");
-            const auto& in_hwc = getTensor("vae_conv/in_hwc");
-            if (recon.size() == in_hwc.size() && !recon.empty()) {
-                int W = 0, H = 0, C = 0;
-                if (Layer* P = getLayerByName("vae_conv/recon_to_hwc")) {
-                    if (P->shape.size() == 3) {
-                        C = std::max(0, P->shape[0]);
-                        H = std::max(0, P->shape[1]);
-                        W = std::max(0, P->shape[2]);
-                    }
-                }
-                if ((W <= 0 || H <= 0 || C <= 0) && recon.size() % 3 == 0) {
-                    // Fallback: supposer RGB carré
-                    C = 3;
-                    const size_t hw = recon.size() / 3ULL;
-                    const size_t s = static_cast<size_t>(std::llround(std::sqrt(static_cast<double>(hw))));
-                    if (s > 0 && s * s == hw) {
-                        H = static_cast<int>(s);
-                        W = static_cast<int>(s);
-                    }
-                }
-                if (W > 0 && H > 0 && C > 0 && recon.size() == static_cast<size_t>(W) * static_cast<size_t>(H) * static_cast<size_t>(C)) {
-                    std::vector<float> diff;
-                    diff.resize(recon.size());
-                    #pragma omp simd
-                    for (size_t i = 0; i < diff.size(); ++i) {
-                        diff[i] = std::fabs(recon[i] - in_hwc[i]);
-                    }
-                    VizFrame vf = downsample_mean_chw_to_gray(diff, W, H, C, std::max(1, viz_taps_max_side_), /*take_abs*/false, /*symmetric*/false);
-                    if (!vf.pixels.empty()) {
-                        vf.label = "vae_conv/err/resdiff_abs";
-                        addVizTapFrame(std::move(vf));
-                    }
+        // MU: tensor spatial CHW (best-effort via layer config)
+        add_mu_frame("vae_conv");
+
+        auto add_resdiff_frame = [&](const char* prefix) {
+            const std::string recon_name = std::string(prefix) + "/recon";
+            const std::string in_name = std::string(prefix) + "/in_hwc";
+            const std::string recon_to_hwc = std::string(prefix) + "/recon_to_hwc";
+            if (!hasTensor(recon_name) || !hasTensor(in_name)) return;
+            const auto& recon = getTensor(recon_name);
+            const auto& in_hwc = getTensor(in_name);
+            if (recon.size() != in_hwc.size() || recon.empty()) return;
+
+            int W = 0, H = 0, C = 0;
+            if (Layer* P = getLayerByName(recon_to_hwc)) {
+                if (P->shape.size() == 3) {
+                    C = std::max(0, P->shape[0]);
+                    H = std::max(0, P->shape[1]);
+                    W = std::max(0, P->shape[2]);
                 }
             }
-        }
+            if ((W <= 0 || H <= 0 || C <= 0) && recon.size() % 3 == 0) {
+                C = 3;
+                const size_t hw = recon.size() / 3ULL;
+                const size_t s = static_cast<size_t>(std::llround(std::sqrt(static_cast<double>(hw))));
+                if (s > 0 && s * s == hw) {
+                    H = static_cast<int>(s);
+                    W = static_cast<int>(s);
+                }
+            }
+            if (W <= 0 || H <= 0 || C <= 0) return;
+            if (recon.size() != static_cast<size_t>(W) * static_cast<size_t>(H) * static_cast<size_t>(C)) return;
+
+            std::vector<float> diff;
+            diff.resize(recon.size());
+            #pragma omp simd
+            for (size_t i = 0; i < diff.size(); ++i) {
+                diff[i] = std::fabs(recon[i] - in_hwc[i]);
+            }
+            VizFrame vf = downsample_mean_chw_to_gray(diff, W, H, C, std::max(1, viz_taps_max_side_), /*take_abs*/false, /*symmetric*/false);
+            if (!vf.pixels.empty()) {
+                vf.label = std::string(prefix) + "/err/resdiff_abs";
+                addVizTapFrame(std::move(vf));
+            }
+        };
+
+        // resdiff: |recon - input| en image-space (HWC)
+        add_resdiff_frame("vae_conv");
     }
 
     return getTensor("x");
@@ -9072,6 +9150,71 @@ Gradients Model::backwardPass(const std::vector<float> &loss_gradient) {
             }
 
             accumulate_grad(grad_store[input_names[0]], grad_input);
+        } else if (layer.type == "GlobalAvgPool2d" || layer.type == "AdaptiveAvgPool2d") {
+            if (inputs.empty()) {
+                continue;
+            }
+
+            const int in_channels = (layer.in_channels > 0) ? layer.in_channels : static_cast<int>(grad_out.size());
+            int height = (layer.input_height > 0) ? layer.input_height : 0;
+            int width = (layer.input_width > 0) ? layer.input_width : 0;
+
+            if (in_channels <= 0) {
+                std::cerr << "⚠️  GlobalAvgPool2d backward: missing channels (" << layer.name << ")" << std::endl;
+                continue;
+            }
+            if (grad_out.size() != static_cast<size_t>(in_channels)) {
+                std::cerr << "⚠️  GlobalAvgPool2d backward shape mismatch (" << layer.name << ")"
+                          << " grad=" << grad_out.size() << " expected=" << in_channels
+                          << std::endl;
+                continue;
+            }
+
+            // Use real input size as hint to infer H/W if needed.
+            size_t store_in_size = 0ULL;
+            bool have_store_in = false;
+            try {
+                store_in_size = getTensor(input_names[0]).size();
+                have_store_in = true;
+            } catch (...) {
+                have_store_in = false;
+            }
+            const size_t in_size_hint = have_store_in ? store_in_size : input0_size;
+
+            // Infer H/W if missing or inconsistent.
+            if (height <= 0 || width <= 0) {
+                const size_t c = static_cast<size_t>(in_channels);
+                if (c > 0 && in_size_hint > 0ULL && (in_size_hint % c) == 0ULL) {
+                    const size_t hw = in_size_hint / c;
+                    const size_t s = static_cast<size_t>(std::llround(std::sqrt(static_cast<double>(hw))));
+                    if (s > 0 && s * s == hw) {
+                        height = static_cast<int>(s);
+                        width = static_cast<int>(s);
+                    }
+                }
+            }
+
+            if (height <= 0 || width <= 0) {
+                std::cerr << "⚠️  GlobalAvgPool2d backward: missing H/W (" << layer.name << ")" << std::endl;
+                continue;
+            }
+
+            const size_t spatial = static_cast<size_t>(height) * static_cast<size_t>(width);
+            const size_t expected_in = static_cast<size_t>(in_channels) * spatial;
+            if (in_size_hint != 0ULL && in_size_hint != expected_in) {
+                std::cerr << "⚠️  GlobalAvgPool2d backward input mismatch (" << layer.name << ")"
+                          << " in=" << in_size_hint << " expected=" << expected_in
+                          << " (C=" << in_channels << " H=" << height << " W=" << width << ")"
+                          << std::endl;
+                continue;
+            }
+
+            std::vector<float> grad_in = LayerOps::global_avgpool2d_backward(grad_out, layer, expected_in);
+            if (grad_in.empty()) {
+                std::cerr << "⚠️  GlobalAvgPool2d backward failed (" << layer.name << ")" << std::endl;
+                continue;
+            }
+            accumulate_grad(grad_store[input_names[0]], grad_in);
         } else if (layer.type == "UpsampleNearest") {
             // Backward UpsampleNearest: accumulation vers le pixel source (nearest)
             if (layer.out_h <= 0 || layer.out_w <= 0 || layer.in_channels <= 0) {

@@ -12,7 +12,9 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <random>
 #include <unordered_map>
@@ -126,12 +128,13 @@ static inline std::string normalize_spaces(std::string s) {
 }
 
 static inline std::string normalize_tags_block(const std::string& s) {
-    // Split on commas/semicolons/newlines, trim, and join with ", ".
+    // Split on common separators (incl. '.' used by some captioners), trim, and join with ", ".
     std::string tmp;
     tmp.reserve(s.size());
     for (char ch : s) {
         if (ch == '\r') continue;
-        if (ch == '\n' || ch == ';') tmp.push_back(',');
+        const bool sep = (ch == '\n' || ch == ';' || ch == '.' || ch == '|' || ch == '\t');
+        if (sep) tmp.push_back(',');
         else tmp.push_back(ch);
     }
 
@@ -156,6 +159,123 @@ static inline std::string normalize_tags_block(const std::string& s) {
         if (i) out += ", ";
         out += parts[i];
     }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Captions key/value: caption/theme/keywords/tokens
+// ---------------------------------------------------------------------------
+
+struct KvCaption {
+    bool has_any = false;
+    std::string caption;
+    std::string theme;
+    std::string keywords;
+    std::string tokens;
+};
+
+static inline std::string to_lower_ascii(std::string s) {
+    for (char& ch : s) {
+        const unsigned char c = static_cast<unsigned char>(ch);
+        if (c >= 'A' && c <= 'Z') ch = static_cast<char>(c + ('a' - 'A'));
+    }
+    return s;
+}
+
+static inline bool parse_kv_line(const std::string& line_in, std::string& out_key_lc, std::string& out_value) {
+    // Format: key: value
+    const std::string line = trim_ws(line_in);
+    if (line.empty()) return false;
+    const size_t colon = line.find(':');
+    if (colon == std::string::npos) return false;
+    if (colon == 0) return false;
+
+    std::string key = trim_ws(line.substr(0, colon));
+    std::string val = trim_ws(line.substr(colon + 1));
+    if (key.empty()) return false;
+    out_key_lc = to_lower_ascii(key);
+    out_value = val;
+    return true;
+}
+
+static inline std::string normalize_kv_list_as_spaces(const std::string& s) {
+    // Convert separators (comma/semicolon/newlines/tabs) to spaces and normalize.
+    std::string tmp;
+    tmp.reserve(s.size());
+    for (char ch : s) {
+        if (ch == '\r') continue;
+        if (ch == ',' || ch == ';' || ch == '\n' || ch == '\t') tmp.push_back(' ');
+        else tmp.push_back(ch);
+    }
+    return normalize_spaces(tmp);
+}
+
+static inline KvCaption parse_kv_caption(const std::string& caption) {
+    KvCaption out;
+    std::vector<std::string> lines;
+    split_lines(caption, lines);
+    for (const std::string& raw : lines) {
+        std::string k, v;
+        if (!parse_kv_line(raw, k, v)) continue;
+        if (k == "caption") {
+            out.caption = v;
+            out.has_any = true;
+        } else if (k == "theme") {
+            out.theme = v;
+            out.has_any = true;
+        } else if (k == "keywords") {
+            out.keywords = v;
+            out.has_any = true;
+        } else if (k == "tokens") {
+            out.tokens = v;
+            out.has_any = true;
+        }
+    }
+
+    // Normalize lists.
+    out.keywords = normalize_kv_list_as_spaces(out.keywords);
+    out.tokens = normalize_kv_list_as_spaces(out.tokens);
+    out.caption = normalize_spaces(out.caption);
+    out.theme = normalize_spaces(out.theme);
+    return out;
+}
+
+static inline std::string compose_kv_caption_prompt(const KvCaption& kv) {
+    // Compact form aimed at conditioning (no explicit "caption:" labels).
+    std::string out;
+    auto add_part = [&](const std::string& p) {
+        if (p.empty()) return;
+        if (!out.empty()) out += " | ";
+        out += p;
+    };
+    add_part(kv.caption);
+    add_part(kv.theme);
+    add_part(kv.keywords);
+    add_part(kv.tokens);
+    return normalize_spaces(out);
+}
+
+static inline std::vector<std::string> split_terms_simple(const std::string& s) {
+    // Split on common separators + whitespace. Intended for `tokens:`/`keywords:`.
+    std::vector<std::string> out;
+    std::string cur;
+    cur.reserve(32);
+    auto flush = [&]() {
+        std::string t = trim_ws(cur);
+        if (!t.empty()) out.push_back(t);
+        cur.clear();
+    };
+    for (char ch : s) {
+        if (ch == '\r') continue;
+        const unsigned char c = static_cast<unsigned char>(ch);
+        const bool sep = (ch == ',' || ch == ';' || ch == '\n' || ch == '\t' || std::isspace(c));
+        if (sep) {
+            flush();
+        } else {
+            cur.push_back(ch);
+        }
+    }
+    flush();
     return out;
 }
 
@@ -215,7 +335,7 @@ static inline StructuredCaption parse_structured_caption(const std::string& capt
             } else if (starts_with(name, "MENTALIT")) {
                 cur = Sec::Mentalite;
                 extra_idx = -1;
-            } else if (starts_with(name, "TEXTE") || starts_with(name, "TEXT")) {
+            } else if (starts_with(name, "TEXTE") || starts_with(name, "TEXT") || starts_with(name, "DESCRIPTION") || starts_with(name, "DESC")) {
                 cur = Sec::Texte;
                 extra_idx = -1;
             } else {
@@ -349,71 +469,8 @@ static std::string resolve_checkpoint_dir_for_loading(const std::string& ckpt_pa
     return p.string();
 }
 
-static void box_blur_latent_inplace(std::vector<float>& v, int h, int w, int c, int radius) {
-    if (radius <= 0) return;
-    if (h <= 0 || w <= 0 || c <= 0) return;
-    const size_t n = static_cast<size_t>(h) * static_cast<size_t>(w) * static_cast<size_t>(c);
-    if (v.size() < n) return;
-
-    std::vector<float> tmp(n, 0.0f);
-    std::vector<double> prefix;
-    prefix.resize(static_cast<size_t>(std::max(h, w)) + 1u);
-
-    // Horizontal pass
-    for (int y = 0; y < h; ++y) {
-        for (int ch = 0; ch < c; ++ch) {
-            prefix[0] = 0.0;
-            for (int x = 0; x < w; ++x) {
-                const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * static_cast<size_t>(c) + static_cast<size_t>(ch);
-                prefix[static_cast<size_t>(x) + 1u] = prefix[static_cast<size_t>(x)] + static_cast<double>(v[idx]);
-            }
-            for (int x = 0; x < w; ++x) {
-                const int lo = std::max(0, x - radius);
-                const int hi = std::min(w - 1, x + radius);
-                const double sum = prefix[static_cast<size_t>(hi) + 1u] - prefix[static_cast<size_t>(lo)];
-                const double den = static_cast<double>(hi - lo + 1);
-                const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * static_cast<size_t>(c) + static_cast<size_t>(ch);
-                tmp[idx] = static_cast<float>(sum / std::max(1.0, den));
-            }
-        }
-    }
-
-    // Vertical pass
-    for (int x = 0; x < w; ++x) {
-        for (int ch = 0; ch < c; ++ch) {
-            prefix[0] = 0.0;
-            for (int y = 0; y < h; ++y) {
-                const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * static_cast<size_t>(c) + static_cast<size_t>(ch);
-                prefix[static_cast<size_t>(y) + 1u] = prefix[static_cast<size_t>(y)] + static_cast<double>(tmp[idx]);
-            }
-            for (int y = 0; y < h; ++y) {
-                const int lo = std::max(0, y - radius);
-                const int hi = std::min(h - 1, y + radius);
-                const double sum = prefix[static_cast<size_t>(hi) + 1u] - prefix[static_cast<size_t>(lo)];
-                const double den = static_cast<double>(hi - lo + 1);
-                const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * static_cast<size_t>(c) + static_cast<size_t>(ch);
-                v[idx] = static_cast<float>(sum / std::max(1.0, den));
-            }
-        }
-    }
-}
-
-static void normalize_to_unit_gaussian(std::vector<float>& v) {
-    if (v.empty()) return;
-    double sum = 0.0;
-    double sumsq = 0.0;
-    for (float x : v) {
-        sum += static_cast<double>(x);
-        sumsq += static_cast<double>(x) * static_cast<double>(x);
-    }
-    const double n = static_cast<double>(v.size());
-    const double mean = sum / std::max(1.0, n);
-    const double var = std::max(0.0, (sumsq / std::max(1.0, n)) - mean * mean);
-    const double stdv = std::sqrt(std::max(1e-12, var));
-    for (float& x : v) {
-        x = static_cast<float>((static_cast<double>(x) - mean) / stdv);
-    }
-}
+// NOTE: l'ancien chemin "peltier noise" (bruit corrélé/blur) a été retiré.
+// PonyXLDDPMModel utilise désormais uniquement eps ~ N(0, I) (DDPM latent standard).
 
 struct DistMoments {
     double mean = 0.0;
@@ -424,26 +481,87 @@ struct DistMoments {
 static inline DistMoments compute_moments_local(const std::vector<float>& v) {
     DistMoments m;
     if (v.empty()) return m;
-    const double n = static_cast<double>(v.size());
     double sum = 0.0;
     double sumsq = 0.0;
+    double n = 0.0;
     for (float x : v) {
+        if (!std::isfinite(x)) continue;
         const double xd = static_cast<double>(x);
         sum += xd;
         sumsq += xd * xd;
+        n += 1.0;
     }
-    m.mean = sum / std::max(1.0, n);
-    m.var = std::max(0.0, (sumsq / std::max(1.0, n)) - m.mean * m.mean);
+    if (n <= 0.0) return m;
+    m.mean = sum / n;
+    m.var = std::max(0.0, (sumsq / n) - m.mean * m.mean);
 
     // Skewness (best-effort)
     const double stdv = std::sqrt(std::max(1e-12, m.var));
     double acc3 = 0.0;
     for (float x : v) {
+        if (!std::isfinite(x)) continue;
         const double z = (static_cast<double>(x) - m.mean) / std::max(1e-12, stdv);
         acc3 += z * z * z;
     }
     m.skew = acc3 / std::max(1.0, n);
     return m;
+}
+
+static inline std::string normalize_timestep_cond(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (s.empty()) return "log_snr";
+    if (s == "logsnr" || s == "log_snr_tanh" || s == "logsnr_tanh") return "log_snr";
+    if (s == "tnorm" || s == "t" || s == "linear") return "t_norm";
+    if (s == "tnorm_center" || s == "t_norm_center" || s == "centered" || s == "t_centered") return "t_norm_centered";
+    return s;
+}
+
+static inline float compute_time_cond_value(const PonyXLDDPMModel::Config& cfg, float t_norm, float alpha_bar) {
+    const std::string mode = normalize_timestep_cond(cfg.timestep_cond);
+    if (mode == "t_norm") {
+        return std::clamp(t_norm, 0.0f, 1.0f);
+    }
+    if (mode == "t_norm_centered") {
+        const float tn = std::clamp(t_norm, 0.0f, 1.0f);
+        return 2.0f * tn - 1.0f;
+    }
+
+    // Default: logSNR, compressed to roughly [-1,1].
+    const float ab = std::clamp(alpha_bar, 1e-6f, 1.0f - 1e-6f);
+    const float one_m = std::max(1e-6f, 1.0f - ab);
+    const float logsnr = std::log(ab) - std::log(one_m);
+    // Scale factor tuned so values stay in a sensible range across typical DDPM schedules.
+    const float scaled = logsnr / 8.0f;
+    return std::tanh(scaled);
+}
+
+static inline std::string normalize_loss_weighting(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (s.empty()) return "none";
+    if (s == "off" || s == "disabled") return "none";
+    if (s == "minsnr" || s == "min_snr" || s == "min-snr") return "min_snr";
+    return s;
+}
+
+static inline float compute_snr_from_alpha_bar(float alpha_bar) {
+    const float ab = std::clamp(alpha_bar, 1e-6f, 1.0f - 1e-6f);
+    const float one_m = std::max(1e-6f, 1.0f - ab);
+    return ab / one_m;
+}
+
+static inline float compute_loss_weight(const PonyXLDDPMModel::Config& cfg, float alpha_bar) {
+    const std::string mode = normalize_loss_weighting(cfg.loss_weighting);
+    if (mode == "none") return 1.0f;
+
+    const float snr = std::max(1e-6f, compute_snr_from_alpha_bar(alpha_bar));
+    if (mode == "min_snr") {
+        const float gamma = std::max(1e-6f, cfg.min_snr_gamma);
+        const float w = std::min(snr, gamma) / snr;
+        return std::isfinite(w) ? std::clamp(w, 0.0f, 1.0f) : 1.0f;
+    }
+
+    // Fallback: unknown mode => no weighting.
+    return 1.0f;
 }
 
 static inline double mean_abs_adjacent_diff_local(const std::vector<float>& v) {
@@ -500,11 +618,6 @@ static std::vector<uint8_t> to_rgb_preview_latent(const std::vector<float>& v,
     const int pw = std::max(1, w / sx);
     const int ph = std::max(1, h / sy);
 
-    const bool rgb = (c >= 3);
-    const int out_c = rgb ? 3 : 1;
-    std::vector<float> map;
-    map.assign(static_cast<size_t>(pw) * static_cast<size_t>(ph) * static_cast<size_t>(out_c), 0.0f);
-
     auto at = [&](int yy, int xx, int cc) -> float {
         // HWC
         const size_t idx = (static_cast<size_t>(yy) * static_cast<size_t>(w) + static_cast<size_t>(xx)) * static_cast<size_t>(c) + static_cast<size_t>(cc);
@@ -514,13 +627,65 @@ static std::vector<uint8_t> to_rgb_preview_latent(const std::vector<float>& v,
         return std::isfinite(val) ? val : 0.0f;
     };
 
+    const bool rgb = (c >= 3);
+    const int out_c = rgb ? 3 : 1;
+
+    // Heuristic for better previews:
+    // - Many latent channels are not equally informative. Showing channels (0,1,2)
+    //   can look uniform even when other channels carry structure.
+    // - We pick up to 3 channels with the highest variance (among a small prefix)
+    //   on the sampled grid used for preview.
+    std::array<int, 3> chan = {0, 1, 2};
+    if (rgb && c > 3) {
+        const int cand = std::max(3, std::min(c, 16));
+        std::vector<double> sum(static_cast<size_t>(cand), 0.0);
+        std::vector<double> sumsq(static_cast<size_t>(cand), 0.0);
+        size_t nstat = 0;
+        for (int y = 0; y < ph; ++y) {
+            const int yy = y * sy;
+            for (int x = 0; x < pw; ++x) {
+                const int xx = x * sx;
+                for (int cc = 0; cc < cand; ++cc) {
+                    const float val = at(yy, xx, cc);
+                    const double dv = static_cast<double>(val);
+                    sum[static_cast<size_t>(cc)] += dv;
+                    sumsq[static_cast<size_t>(cc)] += dv * dv;
+                }
+                nstat += 1;
+            }
+        }
+
+        struct CVar { int ch; double var; };
+        std::vector<CVar> vars;
+        vars.reserve(static_cast<size_t>(cand));
+        const double dn = std::max<size_t>(1, nstat);
+        for (int cc = 0; cc < cand; ++cc) {
+            const double m = sum[static_cast<size_t>(cc)] / dn;
+            const double v2 = std::max(0.0, sumsq[static_cast<size_t>(cc)] / dn - m * m);
+            vars.push_back({cc, v2});
+        }
+        std::sort(vars.begin(), vars.end(), [](const CVar& a, const CVar& b) {
+            if (a.var != b.var) return a.var > b.var;
+            return a.ch < b.ch;
+        });
+        // Keep unique channels; fall back to (0,1,2) if something goes wrong.
+        if (vars.size() >= 3) {
+            chan[0] = vars[0].ch;
+            chan[1] = (vars[1].ch != chan[0]) ? vars[1].ch : 1;
+            chan[2] = (vars[2].ch != chan[0] && vars[2].ch != chan[1]) ? vars[2].ch : 2;
+        }
+    }
+    std::vector<float> map;
+    map.assign(static_cast<size_t>(pw) * static_cast<size_t>(ph) * static_cast<size_t>(out_c), 0.0f);
+
     for (int y = 0; y < ph; ++y) {
         const int yy = y * sy;
         for (int x = 0; x < pw; ++x) {
             const int xx = x * sx;
             if (rgb) {
                 for (int cc = 0; cc < 3; ++cc) {
-                    map[(static_cast<size_t>(y) * static_cast<size_t>(pw) + static_cast<size_t>(x)) * 3ULL + static_cast<size_t>(cc)] = at(yy, xx, cc);
+                    const int src_ch = std::clamp(chan[static_cast<size_t>(cc)], 0, std::max(0, c - 1));
+                    map[(static_cast<size_t>(y) * static_cast<size_t>(pw) + static_cast<size_t>(x)) * 3ULL + static_cast<size_t>(cc)] = at(yy, xx, src_ch);
                 }
             } else {
                 // Mean over a few channels.
@@ -532,21 +697,72 @@ static std::vector<uint8_t> to_rgb_preview_latent(const std::vector<float>& v,
         }
     }
 
-    float max_abs = 0.0f;
-    for (float x : map) {
-        if (!std::isfinite(x)) continue;
-        max_abs = std::max(max_abs, std::fabs(x));
+    // Robust normalization: per-channel z-score on the sampled preview grid,
+    // then compress with tanh. This avoids “flat” previews when one outlier
+    // dominates max_abs.
+    std::array<double, 3> mean = {0.0, 0.0, 0.0};
+    std::array<double, 3> var = {0.0, 0.0, 0.0};
+    {
+        std::array<double, 3> sum = {0.0, 0.0, 0.0};
+        std::array<double, 3> sumsq = {0.0, 0.0, 0.0};
+        size_t nstat = 0;
+        if (out_c == 1) {
+            for (float x : map) {
+                const double v0 = std::isfinite(x) ? static_cast<double>(x) : 0.0;
+                sum[0] += v0;
+                sumsq[0] += v0 * v0;
+                nstat += 1;
+            }
+        } else {
+            for (size_t i = 0; i + 2 < map.size(); i += 3) {
+                for (int cc = 0; cc < 3; ++cc) {
+                    const float x = map[i + static_cast<size_t>(cc)];
+                    const double v0 = std::isfinite(x) ? static_cast<double>(x) : 0.0;
+                    sum[static_cast<size_t>(cc)] += v0;
+                    sumsq[static_cast<size_t>(cc)] += v0 * v0;
+                }
+                nstat += 1;
+            }
+        }
+        const double dn = static_cast<double>(std::max<size_t>(1, nstat));
+        for (int cc = 0; cc < out_c; ++cc) {
+            mean[static_cast<size_t>(cc)] = sum[static_cast<size_t>(cc)] / dn;
+            var[static_cast<size_t>(cc)] = std::max(0.0, sumsq[static_cast<size_t>(cc)] / dn - mean[static_cast<size_t>(cc)] * mean[static_cast<size_t>(cc)]);
+        }
     }
-    const float inv = 1.0f / (max_abs + 1e-6f);
 
     std::vector<uint8_t> px;
     px.resize(map.size());
-    for (size_t i = 0; i < map.size(); ++i) {
-        const float x = std::isfinite(map[i]) ? map[i] : 0.0f;
-        const float s = x * inv;
-        const float t = 0.5f + 0.5f * std::tanh(s);
-        const int p = static_cast<int>(std::lround(std::clamp(t, 0.0f, 1.0f) * 255.0f));
-        px[i] = static_cast<uint8_t>(std::clamp(p, 0, 255));
+    if (out_c == 1) {
+        const double std0 = std::sqrt(std::max(1e-12, var[0]));
+        for (size_t i = 0; i < map.size(); ++i) {
+            const double x = std::isfinite(map[i]) ? static_cast<double>(map[i]) : 0.0;
+            const double s = (x - mean[0]) / (3.0 * std0 + 1e-6);
+            const double t = 0.5 + 0.5 * std::tanh(s);
+            const int p = static_cast<int>(std::lround(std::clamp(t, 0.0, 1.0) * 255.0));
+            px[i] = static_cast<uint8_t>(std::clamp(p, 0, 255));
+        }
+    } else {
+        const double std0 = std::sqrt(std::max(1e-12, var[0]));
+        const double std1 = std::sqrt(std::max(1e-12, var[1]));
+        const double std2 = std::sqrt(std::max(1e-12, var[2]));
+        for (size_t i = 0; i + 2 < map.size(); i += 3) {
+            const double x0 = std::isfinite(map[i + 0]) ? static_cast<double>(map[i + 0]) : 0.0;
+            const double x1 = std::isfinite(map[i + 1]) ? static_cast<double>(map[i + 1]) : 0.0;
+            const double x2 = std::isfinite(map[i + 2]) ? static_cast<double>(map[i + 2]) : 0.0;
+
+            const double s0 = (x0 - mean[0]) / (3.0 * std0 + 1e-6);
+            const double s1 = (x1 - mean[1]) / (3.0 * std1 + 1e-6);
+            const double s2 = (x2 - mean[2]) / (3.0 * std2 + 1e-6);
+
+            const double t0 = 0.5 + 0.5 * std::tanh(s0);
+            const double t1 = 0.5 + 0.5 * std::tanh(s1);
+            const double t2 = 0.5 + 0.5 * std::tanh(s2);
+
+            px[i + 0] = static_cast<uint8_t>(std::clamp(static_cast<int>(std::lround(std::clamp(t0, 0.0, 1.0) * 255.0)), 0, 255));
+            px[i + 1] = static_cast<uint8_t>(std::clamp(static_cast<int>(std::lround(std::clamp(t1, 0.0, 1.0) * 255.0)), 0, 255));
+            px[i + 2] = static_cast<uint8_t>(std::clamp(static_cast<int>(std::lround(std::clamp(t2, 0.0, 1.0) * 255.0)), 0, 255));
+        }
     }
     return px;
 }
@@ -845,6 +1061,15 @@ PonyXLDDPMModel::PonyXLDDPMModel() {
     setHasEncoder(true);
 }
 
+void PonyXLDDPMModel::setLiveKL(float kl_beta, int kl_warmup_steps) {
+    cfg_.kl_beta = std::max(0.0f, kl_beta);
+    cfg_.kl_warmup_steps = std::max(0, kl_warmup_steps);
+
+    // Garder modelConfig aligné (utile pour debug/viz/serialization).
+    modelConfig["kl_beta"] = cfg_.kl_beta;
+    modelConfig["kl_warmup_steps"] = cfg_.kl_warmup_steps;
+}
+
 namespace {
 static std::string normalize_loss_name(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -853,6 +1078,15 @@ static std::string normalize_loss_name(std::string s) {
     if (s == "l1") return "mae";
     if (s == "smooth_l1") return "smoothl1";
     if (s == "gaussian-nll") return "gaussian_nll";
+    return s;
+}
+
+static std::string normalize_output_activation(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (s.empty()) return "linear";
+    if (s == "identity" || s == "none") return "linear";
+    if (s == "tanh") return "tanh";
+    if (s == "linear") return "linear";
     return s;
 }
 } // namespace
@@ -871,6 +1105,22 @@ void PonyXLDDPMModel::buildFromConfig(const Config& cfg) {
         cfg_.recon_loss != "gaussian_nll" && cfg_.recon_loss != "nll_gaussian") {
         std::cout << "⚠️  PonyXLDDPM: recon_loss='" << cfg_.recon_loss << "' unsupported; falling back to mse" << std::endl;
         cfg_.recon_loss = "mse";
+    }
+
+    // Normaliser la pondération de loss en fonction du timestep.
+    cfg_.loss_weighting = normalize_loss_weighting(cfg_.loss_weighting);
+    if (cfg_.loss_weighting != "none" && cfg_.loss_weighting != "min_snr") {
+        std::cout << "⚠️  PonyXLDDPM: loss_weighting='" << cfg_.loss_weighting << "' unsupported; falling back to none" << std::endl;
+        cfg_.loss_weighting = "none";
+    }
+    if (!(cfg_.min_snr_gamma > 0.0f) || !std::isfinite(cfg_.min_snr_gamma)) {
+        cfg_.min_snr_gamma = 5.0f;
+    }
+
+    cfg_.output_activation = normalize_output_activation(cfg_.output_activation);
+    if (cfg_.output_activation != "linear" && cfg_.output_activation != "tanh") {
+        std::cout << "⚠️  PonyXLDDPM: output_activation='" << cfg_.output_activation << "' unsupported; falling back to linear" << std::endl;
+        cfg_.output_activation = "linear";
     }
 
     // Auto-align dims from VAE checkpoint when available (RawFolder architecture.json).
@@ -893,6 +1143,16 @@ void PonyXLDDPMModel::buildFromConfig(const Config& cfg) {
     setTokenizer(Tokenizer(static_cast<size_t>(mv)));
     // Pour permettre des prompts longs (ex: 512 tokens), garder un max sequence length cohérent.
     getMutableTokenizer().setMaxSequenceLength(std::max(1, cfg_.text_ctx_len));
+
+    // IMPORTANT: aligner la capacité du tokenizer sur la taille de l'embedding texte.
+    // Sinon, tokenizeEnsure() peut produire des IDs >= max_vocab, et on perd la correspondance.
+    getMutableTokenizer().setMaxVocab(static_cast<size_t>(std::max(1, cfg_.max_vocab)));
+
+    // Réserver les tokens de contexte global (appris) tôt, pour stabiliser leurs IDs.
+    const int gct = std::max(0, cfg_.global_ctx_tokens);
+    for (int i = 0; i < gct; ++i) {
+        (void)getMutableTokenizer().addToken("<GCTX" + std::to_string(i) + ">");
+    }
 
     buildInto(*this, cfg_);
 }
@@ -922,6 +1182,13 @@ void PonyXLDDPMModel::accumulateVaeMuMoments(
         vae_cfg["image_w"] = W;
         vae_cfg["image_h"] = H;
         vae_cfg["image_c"] = 3;
+
+        // Pour les pipelines type SD/SDXL, on veut un encodeur déterministe.
+        // NOTE: même si on extrait mu pour x0, garder le VAE en mode déterministe évite
+        // des reconstructions/viz bruitées et rend le comportement plus stable.
+        if (cfg_.vae_arch == "vae_conv") {
+            vae_cfg["stochastic_latent"] = false;
+        }
 
         int lh = cfg_.latent_h;
         int lw = cfg_.latent_w;
@@ -961,6 +1228,12 @@ void PonyXLDDPMModel::accumulateVaeMuMoments(
         std::string err;
         if (!Mimir::Serialization::load_checkpoint(*m, vae_ckpt, opts, &err)) {
             throw std::runtime_error("Failed to load VAE checkpoint: " + cfg_.vae_checkpoint + " (resolved=" + vae_ckpt + ") | " + err);
+        }
+
+        // Assure déterminisme même si le checkpoint embarque un flag différent.
+        // Le layer Reparameterize lit modelConfig["stochastic_latent"] à l'exécution.
+        if (cfg_.vae_arch == "vae_conv") {
+            m->modelConfig["stochastic_latent"] = false;
         }
 
         // IMPORTANT: le VAE est un composant pré-entraîné utilisé uniquement pour encoder/décoder.
@@ -1033,6 +1306,20 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
     const int latent_raw_dim = latent_len * latent_in_dim;
     const int max_vocab = std::max(1, cfg_.max_vocab);
 
+    // KL warmup (same shape as VAEConv): beta ramps linearly over kl_warmup_steps.
+    const float kl_beta = std::max(0.0f, cfg_.kl_beta);
+    const int kl_warmup_steps = std::max(0, cfg_.kl_warmup_steps);
+    const float kl_progress = (kl_warmup_steps > 0)
+        ? std::min(1.0f, static_cast<float>(static_cast<int>(opt.step) + 1) / static_cast<float>(kl_warmup_steps))
+        : 1.0f;
+    const float kl_beta_eff = kl_beta * kl_progress;
+
+    float logvar_min = cfg_.logvar_clip_min;
+    float logvar_max = cfg_.logvar_clip_max;
+    if (!std::isfinite(logvar_min)) logvar_min = -10.0f;
+    if (!std::isfinite(logvar_max)) logvar_max = 10.0f;
+    if (logvar_min > logvar_max) std::swap(logvar_min, logvar_max);
+
     std::uniform_real_distribution<float> u01(0.0f, 1.0f);
     std::normal_distribution<float> n01(0.0f, 1.0f);
 
@@ -1040,6 +1327,19 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
     std::string used_prompt = sanitize_utf8(prompt);
     if (cfg_.max_text_chars > 0 && used_prompt.size() > static_cast<size_t>(cfg_.max_text_chars)) {
         used_prompt = truncate_utf8_safe(used_prompt, static_cast<size_t>(cfg_.max_text_chars));
+    }
+
+    // Support format key/value (caption/theme/keywords/tokens) si activé.
+    // On l'applique tôt pour pouvoir compter les termes fréquents sans pré-charger le dataset.
+    KvCaption kv;
+    if (cfg_.caption_kv_enable) {
+        kv = parse_kv_caption(used_prompt);
+        if (kv.has_any) {
+            used_prompt = compose_kv_caption_prompt(kv);
+            if (cfg_.max_text_chars > 0 && used_prompt.size() > static_cast<size_t>(cfg_.max_text_chars)) {
+                used_prompt = truncate_utf8_safe(used_prompt, static_cast<size_t>(cfg_.max_text_chars));
+            }
+        }
     }
 
     if (cfg_.caption_structured_enable) {
@@ -1064,6 +1364,39 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
         }
     }
 
+    // Mettre à jour les fréquences (incrémentales) à partir de tokens/keywords si disponibles,
+    // sinon fallback sur les IDs tokenisés du prompt.
+    bool term_freq_updated_from_explicit = false;
+    if (cfg_.term_freq_boost_enable) {
+        std::vector<std::string> terms;
+        if (kv.has_any) {
+            if (cfg_.term_freq_boost_use_tokens && !kv.tokens.empty()) {
+                const auto t = split_terms_simple(kv.tokens);
+                terms.insert(terms.end(), t.begin(), t.end());
+            }
+            if (cfg_.term_freq_boost_use_keywords && !kv.keywords.empty()) {
+                const auto t = split_terms_simple(kv.keywords);
+                terms.insert(terms.end(), t.begin(), t.end());
+            }
+        }
+
+        if (!terms.empty()) {
+            term_freq_updated_from_explicit = true;
+            const int pad_id0 = getMutableTokenizer().getPadId();
+            const int unk_id0 = getMutableTokenizer().getUnkId();
+            const int bos0 = getMutableTokenizer().getBosId();
+            const int eos0 = getMutableTokenizer().getEosId();
+            for (const std::string& raw_term : terms) {
+                std::string norm = getMutableTokenizer().normalizeToken(raw_term);
+                if (norm.empty()) continue;
+                const int id = getMutableTokenizer().addToken(norm);
+                if (id < 0) continue;
+                if (id == pad_id0 || id == unk_id0 || id == bos0 || id == eos0) continue;
+                term_freq_counts_[id] += 1;
+            }
+        }
+    }
+
     if (cfg_.cfg_dropout_prob > 0.0f && u01(rng_) < cfg_.cfg_dropout_prob) {
         used_prompt.clear();
     }
@@ -1074,7 +1407,72 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
         text_ids = getMutableTokenizer().tokenizeEnsure(used_prompt);
     }
 
+    // Fallback: si aucune liste explicite tokens/keywords n'est présente, compter les IDs du prompt.
+    if (cfg_.term_freq_boost_enable && !term_freq_updated_from_explicit && !text_ids.empty()) {
+        const int pad_id0 = getMutableTokenizer().getPadId();
+        const int unk_id0 = getMutableTokenizer().getUnkId();
+        const int bos0 = getMutableTokenizer().getBosId();
+        const int eos0 = getMutableTokenizer().getEosId();
+
+        size_t start = 0;
+        size_t end = text_ids.size();
+        if (start < end && text_ids[start] == bos0) ++start;
+        if (end > start && text_ids[end - 1] == eos0) --end;
+        for (size_t i = start; i < end; ++i) {
+            const int id = text_ids[i];
+            if (id < 0) continue;
+            if (id == pad_id0 || id == unk_id0 || id == bos0 || id == eos0) continue;
+            term_freq_counts_[id] += 1;
+        }
+    }
+
+    // Rebuild top-K cache periodically (based on optimizer steps).
+    if (cfg_.term_freq_boost_enable) {
+        const int64_t step = static_cast<int64_t>(opt.step);
+        const int start_step = std::max(0, cfg_.term_freq_boost_start_step);
+        const int every = std::max(1, cfg_.term_freq_boost_update_every_steps);
+        if (step >= start_step && (term_freq_last_rebuild_step_ < 0 || (step - term_freq_last_rebuild_step_) >= every)) {
+            const int pad_id0 = getMutableTokenizer().getPadId();
+            const int unk_id0 = getMutableTokenizer().getUnkId();
+            const int bos0 = getMutableTokenizer().getBosId();
+            const int eos0 = getMutableTokenizer().getEosId();
+            const int topk = std::max(0, cfg_.term_freq_boost_top_k);
+
+            std::vector<std::pair<int, uint64_t>> pairs;
+            pairs.reserve(term_freq_counts_.size());
+            for (const auto& kvp : term_freq_counts_) {
+                const int id = kvp.first;
+                if (id == pad_id0 || id == unk_id0 || id == bos0 || id == eos0) continue;
+                if (kvp.second == 0) continue;
+                pairs.emplace_back(id, kvp.second);
+            }
+            std::sort(pairs.begin(), pairs.end(), [](const auto& a, const auto& b) {
+                if (a.second != b.second) return a.second > b.second;
+                return a.first < b.first;
+            });
+
+            term_freq_top_ids_.clear();
+            term_freq_top_set_.clear();
+            for (int i = 0; i < topk && i < static_cast<int>(pairs.size()); ++i) {
+                term_freq_top_ids_.push_back(pairs[static_cast<size_t>(i)].first);
+                term_freq_top_set_.insert(pairs[static_cast<size_t>(i)].first);
+            }
+            term_freq_last_rebuild_step_ = step;
+        }
+    }
+
+    // Tokens de contexte global (appris), injectés après BOS.
+    std::vector<int> gctx_ids;
+    {
+        const int want = std::max(0, cfg_.global_ctx_tokens);
+        gctx_ids.reserve(static_cast<size_t>(want));
+        for (int i = 0; i < want; ++i) {
+            gctx_ids.push_back(getMutableTokenizer().addToken("<GCTX" + std::to_string(i) + ">"));
+        }
+    }
+
     const int pad_id = getMutableTokenizer().getPadId();
+    const int unk_id = getMutableTokenizer().getUnkId();
     const int bos = getMutableTokenizer().getBosId();
     const int eos = getMutableTokenizer().getEosId();
 
@@ -1091,7 +1489,32 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
                            text_ids.begin() + static_cast<std::ptrdiff_t>(end));
         }
 
-        const int cap = std::max(0, text_len - 2);
+        const int cap = std::max(0, text_len - 2 - static_cast<int>(gctx_ids.size()));
+
+        // Majoration: répéter certains tokens fréquents (top-K) pendant l'entraînement.
+        if (cfg_.term_freq_boost_enable) {
+            const int64_t step = static_cast<int64_t>(opt.step);
+            const int start_step = std::max(0, cfg_.term_freq_boost_start_step);
+            const int rep = std::max(0, cfg_.term_freq_boost_repeat);
+            if (rep > 0 && step >= start_step && !term_freq_top_set_.empty() && cap > 0 && !content.empty()) {
+                std::vector<int> boosted;
+                boosted.reserve(content.size());
+                for (size_t i = 0; i < content.size(); ++i) {
+                    const int id = content[i];
+                    if (static_cast<int>(boosted.size()) >= cap) break;
+                    boosted.push_back(id);
+                    if (static_cast<int>(boosted.size()) >= cap) break;
+                    if (term_freq_top_set_.find(id) != term_freq_top_set_.end()) {
+                        for (int r = 0; r < rep; ++r) {
+                            if (static_cast<int>(boosted.size()) >= cap) break;
+                            boosted.push_back(id);
+                        }
+                    }
+                }
+                content.swap(boosted);
+            }
+        }
+
         if (static_cast<int>(content.size()) > cap) {
             content.resize(static_cast<size_t>(cap));
         }
@@ -1099,6 +1522,7 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
         text_ids.clear();
         text_ids.reserve(static_cast<size_t>(text_len));
         text_ids.push_back(bos);
+        text_ids.insert(text_ids.end(), gctx_ids.begin(), gctx_ids.end());
         text_ids.insert(text_ids.end(), content.begin(), content.end());
         while (static_cast<int>(text_ids.size()) < (text_len - 1)) {
             text_ids.push_back(pad_id);
@@ -1116,7 +1540,7 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
     for (auto& id : text_ids) {
         if (id == pad_id) continue;
         if (id < 0) id = pad_id;
-        if (id >= max_vocab) id = id % max_vocab;
+        if (id >= max_vocab) id = (unk_id >= 0) ? unk_id : pad_id;
     }
 
     // VAE (pré-entraîné) requis
@@ -1296,12 +1720,18 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
     std::uniform_int_distribution<int> ut(0, T - 1);
 
     double loss_sum = 0.0;
+    double kl_sum = 0.0;
     double grad_sum = 0.0;
     float grad_max = 0.0f;
     float last_t_norm = 0.0f;
     std::vector<float> last_pred;
     std::vector<float> last_eps;
     float last_loss = 0.0f;
+    float last_kl = 0.0f;
+
+    // Optional: image-space auxiliary loss (throttled)
+    const float img_loss_w = std::max(0.0f, cfg_.img_loss_weight);
+    const int img_loss_every = std::max(0, cfg_.img_loss_every_steps);
 
     // For visualizer (only last step): keep a copy of the signals we want to show.
     std::vector<float> viz_x0;
@@ -1320,23 +1750,10 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
         const float sqrt_ab = std::sqrt(alpha_bar);
         const float sqrt_1mab = std::sqrt(std::max(0.0f, 1.0f - alpha_bar));
 
-        // eps ~ N(0,I) or "Peltier" correlated noise.
+        // eps ~ N(0, I) (DDPM standard)
         std::vector<float> eps(static_cast<size_t>(latent_raw_dim), 0.0f);
         for (int i = 0; i < latent_raw_dim; ++i) {
             eps[static_cast<size_t>(i)] = n01(rng_);
-        }
-        if (cfg_.peltier_noise) {
-            const int radius = std::clamp(cfg_.peltier_blur_radius, 0, 16);
-            const float mix = std::clamp(cfg_.peltier_mix, 0.0f, 1.0f);
-            if (radius > 0 && mix > 0.0f && (lat_h * lat_w) == latent_len) {
-                std::vector<float> corr = eps;
-                box_blur_latent_inplace(corr, lat_h, lat_w, latent_in_dim, radius);
-                normalize_to_unit_gaussian(corr);
-                for (size_t i = 0; i < eps.size(); ++i) {
-                    eps[i] = (1.0f - mix) * eps[i] + mix * corr[i];
-                }
-                normalize_to_unit_gaussian(eps);
-            }
         }
 
         // Keep the last target noise for metrics.
@@ -1346,6 +1763,13 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
         for (int i = 0; i < latent_raw_dim; ++i) {
             const float e = eps[static_cast<size_t>(i)];
             x_t[static_cast<size_t>(i)] = sqrt_ab * x0[static_cast<size_t>(i)] + sqrt_1mab * e;
+        }
+
+        // Keep a copy of x_t for optional image loss (only when needed).
+        std::vector<float> x_t_keep;
+        const bool want_img_loss = (img_loss_w > 0.0f && img_loss_every > 0 && (static_cast<int>(opt.step) % img_loss_every) == 0 && (s == steps_per_image - 1));
+        if (want_img_loss) {
+            x_t_keep = x_t;
         }
 
         if (prev_viz_taps_enabled && (s == steps_per_image - 1)) {
@@ -1362,18 +1786,198 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
         fin.emplace("latent", std::move(x_t));
         iin.emplace("text_ids", text_ids);
         if (cfg_.sdxl_time_cond) {
-            fin.emplace("timestep", std::vector<float>{t_norm});
+            fin.emplace("timestep", std::vector<float>{compute_time_cond_value(cfg_, t_norm, alpha_bar)});
         }
 
         const std::vector<float>& pred_view = forwardPassNamedView(fin, iin, true);
-        last_loss = computeLoss(pred_view, eps, cfg_.recon_loss);
-        loss_sum += static_cast<double>(last_loss);
-        last_pred.assign(pred_view.begin(), pred_view.end());
 
-        // Backward: dLoss/dPred scaled by 1/steps_per_image to match the previous behavior
-        // (lr/steps_per_image applied per inner-step).
-        std::vector<float> loss_grad;
-        computeLossGradientInto(pred_view, eps, loss_grad, cfg_.recon_loss);
+        // IMPORTANT:
+        // Model::computeLoss requires prediction.size() == target.size().
+        // PonyXL's head may output extra channels (e.g. auxiliary outputs), so we compute the
+        // diffusion loss only on the first latent_raw_dim values (or fewer if the model outputs less).
+        const int pred_dim = static_cast<int>(pred_view.size());
+        const int nloss = std::max(0, std::min(latent_raw_dim, pred_dim));
+
+        // Keep the diffusion-relevant prediction slice for visualization/metrics (eps-part).
+        // (This also ensures KL/corr are computed on the same signal as the loss.)
+
+        // Slice prediction/target to match sizes for loss.
+        std::vector<float> pred_slice;
+        std::vector<float> tgt_slice;
+        pred_slice.reserve(static_cast<size_t>(nloss));
+        tgt_slice.reserve(static_cast<size_t>(nloss));
+
+        // Track moments for KL prior regularization without an extra pass.
+        double psum = 0.0;
+        double psumsq = 0.0;
+        int pcount = 0;
+        for (int i = 0; i < nloss; ++i) {
+            float pv = pred_view[static_cast<size_t>(i)];
+            if (!std::isfinite(pv)) pv = 0.0f;
+            pred_slice.push_back(pv);
+            tgt_slice.push_back(eps[static_cast<size_t>(i)]);
+
+            psum += static_cast<double>(pv);
+            psumsq += static_cast<double>(pv) * static_cast<double>(pv);
+            pcount += 1;
+        }
+
+        last_pred = pred_slice;
+
+        const float wt = compute_loss_weight(cfg_, alpha_bar);
+        const float base_loss = computeLoss(pred_slice, tgt_slice, cfg_.recon_loss);
+        const float diff_loss = base_loss * wt;
+
+        // Optional: KL prior regularization on eps_pred distribution (to N(0,1)).
+        // KL(N(m, v) || N(0,1)) = 0.5 * (m^2 + v - 1 - log v)
+        float kl_prior = 0.0f;
+        if (kl_beta_eff > 0.0f && pcount > 0) {
+            const double mean = psum / static_cast<double>(pcount);
+            double var = (psumsq / static_cast<double>(pcount)) - mean * mean;
+            if (!std::isfinite(var) || var < 1e-12) var = 1e-12;
+            double lv = std::log(var);
+            lv = std::clamp(lv, static_cast<double>(logvar_min), static_cast<double>(logvar_max));
+            const double v_use = std::exp(lv);
+            kl_prior = static_cast<float>(0.5 * (mean * mean + v_use - 1.0 - lv));
+        }
+
+        const float kl_loss = kl_beta_eff * wt * kl_prior;
+        last_loss = diff_loss + kl_loss;
+        last_kl = kl_prior;
+
+        loss_sum += static_cast<double>(last_loss);
+        kl_sum += static_cast<double>(kl_prior);
+
+        // Backward: gradient only on the diffusion portion, zeros elsewhere.
+        std::vector<float> grad_slice;
+        computeLossGradientInto(pred_slice, tgt_slice, grad_slice, cfg_.recon_loss);
+        std::vector<float> loss_grad(static_cast<size_t>(pred_dim), 0.0f);
+        for (int i = 0; i < nloss; ++i) {
+            loss_grad[static_cast<size_t>(i)] = grad_slice[static_cast<size_t>(i)] * wt;
+        }
+
+        // Optional: image-space auxiliary loss (decode x0_hat and backprop through VAE decoder)
+        if (want_img_loss && !x_t_keep.empty()) {
+            try {
+                if (!vae_decode_) {
+                    using json = nlohmann::json;
+                    json dec_cfg = ModelArchitectures::defaultConfig("vae_conv_decode");
+                    dec_cfg["image_w"] = W;
+                    dec_cfg["image_h"] = H;
+                    dec_cfg["image_c"] = 3;
+                    dec_cfg["latent_h"] = lat_h;
+                    dec_cfg["latent_w"] = lat_w;
+                    dec_cfg["latent_c"] = latent_in_dim;
+                    if (cfg_.vae_base_channels > 0) {
+                        dec_cfg["base_channels"] = cfg_.vae_base_channels;
+                    }
+
+                    auto mdec = ModelArchitectures::create("vae_conv_decode", dec_cfg);
+                    if (mdec) {
+                        mdec->allocateParams();
+                        Mimir::Serialization::LoadOptions lopts;
+                        const std::string vae_ckpt = resolve_checkpoint_dir_for_loading(cfg_.vae_checkpoint);
+                        lopts.format = Mimir::Serialization::detect_format(vae_ckpt);
+                        lopts.load_tokenizer = false;
+                        lopts.load_encoder = false;
+                        lopts.load_optimizer = false;
+                        lopts.strict_mode = false;
+                        lopts.validate_checksums = false;
+                        std::string err;
+                        if (Mimir::Serialization::load_checkpoint(*mdec, vae_ckpt, lopts, &err)) {
+                            vae_decode_ = std::move(mdec);
+                        }
+                    }
+                }
+
+                if (vae_decode_) {
+                    // x0_hat in latent space
+                    std::vector<float> x0_hat(static_cast<size_t>(nloss), 0.0f);
+                    for (int i = 0; i < nloss; ++i) {
+                        x0_hat[static_cast<size_t>(i)] = (x_t_keep[static_cast<size_t>(i)] - sqrt_1mab * pred_slice[static_cast<size_t>(i)]) / std::max(1e-6f, sqrt_ab);
+                    }
+
+                    // Decode requires CHW latents (unscale)
+                    const float scale0 = std::max(0.0f, cfg_.vae_scale);
+                    const float inv_scale = (scale0 > 0.0f) ? (1.0f / scale0) : 1.0f;
+                    std::vector<float> hat_chw;
+                    if (!latent_tokens_hwc_to_chw_scaled(hat_chw, x0_hat.data(), lat_h, lat_w, latent_in_dim, inv_scale)) {
+                        throw std::runtime_error("img_loss: latent_tokens_hwc_to_chw_scaled failed");
+                    }
+
+                    // Forward decoder in training mode so backward is available.
+                    const std::vector<float>& img_hat = vae_decode_->forwardPassView(hat_chw, true);
+                    const int im_n = std::min<int>((int)img_hat.size(), (int)img_f.size());
+                    if (im_n > 0) {
+                        double acc = 0.0;
+                        for (int i = 0; i < im_n; ++i) {
+                            const double d = static_cast<double>(img_hat[static_cast<size_t>(i)]) - static_cast<double>(img_f[static_cast<size_t>(i)]);
+                            acc += d * d;
+                        }
+                        const float img_mse = static_cast<float>(acc / static_cast<double>(im_n));
+                        const float img_loss = img_loss_w * wt * img_mse;
+                        last_loss += img_loss;
+                        loss_sum += static_cast<double>(img_loss);
+
+                        // d/dimg_hat MSE
+                        std::vector<float> g_img(static_cast<size_t>(img_hat.size()), 0.0f);
+                        const float invN = 1.0f / static_cast<float>(im_n);
+                        for (int i = 0; i < im_n; ++i) {
+                            g_img[static_cast<size_t>(i)] = (2.0f * invN) * (img_hat[static_cast<size_t>(i)] - img_f[static_cast<size_t>(i)]);
+                        }
+
+                        // Scale gradients by weight and timestep weighting.
+                        // The global grad_scale (1/steps_per_image) will be applied later to the whole loss_grad.
+                        const float gscale = img_loss_w * wt;
+                        if (gscale != 1.0f) {
+                            for (float& g : g_img) g *= gscale;
+                        }
+
+                        const bool was_frozen = vae_decode_->parametersFrozen();
+                        if (was_frozen) vae_decode_->freezeParameters(false);
+                        vae_decode_->zeroGradients();
+                        vae_decode_->backwardPass(g_img);
+                        if (was_frozen) vae_decode_->freezeParameters(true);
+
+                        if (vae_decode_->hasLastInputGradient()) {
+                            const std::vector<float>& g_hat_chw = vae_decode_->getLastInputGradient();
+                            // Convert CHW grad back to tokens and unscale accordingly.
+                            std::vector<float> g_x0_tokens;
+                            if (latent_chw_to_tokens_hwc_scaled(g_x0_tokens, g_hat_chw.data(), lat_h, lat_w, latent_in_dim, inv_scale)) {
+                                const float k = -sqrt_1mab / std::max(1e-6f, sqrt_ab);
+                                const int gn = std::min<int>(nloss, (int)g_x0_tokens.size());
+                                for (int i = 0; i < gn; ++i) {
+                                    loss_grad[static_cast<size_t>(i)] += g_x0_tokens[static_cast<size_t>(i)] * k;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (...) {
+                // Best-effort: image loss is optional; ignore failures.
+            }
+        }
+
+        // Add KL prior gradient on the diffusion portion only.
+        if (kl_beta_eff > 0.0f && kl_prior > 0.0f && pcount > 0) {
+            const float invN = 1.0f / static_cast<float>(pcount);
+            const float mean_f = static_cast<float>(psum / static_cast<double>(pcount));
+            float var = static_cast<float>((psumsq / static_cast<double>(pcount)) - (psum / static_cast<double>(pcount)) * (psum / static_cast<double>(pcount)));
+            if (!std::isfinite(var) || var < 1e-12f) var = 1e-12f;
+            float lv = std::log(var);
+            lv = std::clamp(lv, logvar_min, logvar_max);
+            const float v_use = std::exp(lv);
+
+            const float scale_kl = kl_beta_eff * wt;
+            for (int i = 0; i < pcount; ++i) {
+                const float x = pred_slice[static_cast<size_t>(i)];
+                // d/dx_i KL(N(m,v)||N(0,1)) with m/var estimated over the vector.
+                const float g = invN * (x - (x - mean_f) / std::max(1e-12f, v_use));
+                loss_grad[static_cast<size_t>(i)] += scale_kl * g;
+            }
+        }
+
+        // Scale by 1/steps_per_image to match the previous behavior (lr/steps_per_image per inner-step).
         if (grad_scale != 1.0f) {
             for (float& g : loss_grad) g *= grad_scale;
         }
@@ -1403,6 +2007,73 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
         setVizTapsEnabled(true);
         const int max_side = getVizTapsMaxSide();
 
+        auto add_stats_frame = [&](const std::string& short_name, const std::vector<float>& v) {
+            // Encode stats into the label (visible in focus/zoom overlay).
+            // The thumbnail is a tiny 1x1 grayscale pixel (so it shows up in Blocks/Layers).
+            size_t n_total = v.size();
+            size_t n_finite = 0;
+            size_t n_nonfinite = 0;
+
+            // Welford
+            double mean = 0.0;
+            double m2 = 0.0;
+            double sum_sq = 0.0;
+            float vmin = 0.0f;
+            float vmax = 0.0f;
+            bool has_any = false;
+
+            for (float x : v) {
+                if (!std::isfinite(x)) {
+                    n_nonfinite++;
+                    continue;
+                }
+                n_finite++;
+                sum_sq += static_cast<double>(x) * static_cast<double>(x);
+
+                if (!has_any) {
+                    vmin = x;
+                    vmax = x;
+                    has_any = true;
+                } else {
+                    vmin = std::min(vmin, x);
+                    vmax = std::max(vmax, x);
+                }
+
+                const double dx = static_cast<double>(x) - mean;
+                mean += dx / static_cast<double>(n_finite);
+                const double dx2 = static_cast<double>(x) - mean;
+                m2 += dx * dx2;
+            }
+
+            const double var = (n_finite > 1) ? (m2 / static_cast<double>(n_finite - 1)) : 0.0;
+            const double stdv = std::sqrt(std::max(0.0, var));
+            const double rms = (n_finite > 0) ? std::sqrt(sum_sq / static_cast<double>(n_finite)) : 0.0;
+
+            std::ostringstream ss;
+            ss.setf(std::ios::scientific);
+            ss << std::setprecision(4);
+            ss << "n=" << n_finite;
+            if (n_total > 0) ss << "/" << n_total;
+            if (n_nonfinite > 0) ss << " nonfinite=" << n_nonfinite;
+            ss << " mean=" << mean;
+            ss << " std=" << stdv;
+            ss << " min=" << (has_any ? static_cast<double>(vmin) : 0.0);
+            ss << " max=" << (has_any ? static_cast<double>(vmax) : 0.0);
+            ss << " rms=" << rms;
+
+            // Visual cue: brightness ~ rms (tanh-compressed), so you can at least see if it is ~0.
+            const double t = std::tanh(rms / 3.0);
+            const uint8_t p = static_cast<uint8_t>(std::clamp(static_cast<int>(std::lround(t * 255.0)), 0, 255));
+
+            Model::VizFrame vf;
+            vf.w = 1;
+            vf.h = 1;
+            vf.channels = 1;
+            vf.pixels = { p };
+            vf.label = "ponyxl_sdxl/viz/stats/" + short_name + " | " + ss.str();
+            addVizTapFrame(std::move(vf));
+        };
+
         auto add_latent_frame = [&](const std::string& label, const std::vector<float>& v) {
             Model::VizFrame vf;
             vf.pixels = to_rgb_preview_latent(v, lat_h, lat_w, latent_in_dim, max_side);
@@ -1428,6 +2099,9 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
         add_latent_frame("ponyxl_sdxl/viz/latent/x_t_noised", viz_x_t);
         add_latent_frame("ponyxl_sdxl/viz/latent/eps_true", viz_eps);
 
+        // Stats taps (useful when the preview looks uniform)
+        add_stats_frame("eps_true_stats", viz_eps);
+
         // eps_pred is the last model output for the last inner-step.
         std::vector<float> eps_pred = last_pred;
         if (static_cast<int>(eps_pred.size()) >= latent_raw_dim) {
@@ -1436,6 +2110,8 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
             {
                 add_latent_frame("ponyxl_sdxl/viz/latent/eps_pred", eps_pred);
             }
+
+            add_stats_frame("eps_pred_stats", eps_pred);
 
             // x0_hat (denoised reconstruction in latent space)
             std::vector<float> x0_hat(static_cast<size_t>(latent_raw_dim), 0.0f);
@@ -1514,19 +2190,7 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
                         for (int i = 0; i < latent_raw_dim; ++i) {
                             eps0[static_cast<size_t>(i)] = n01(rng_);
                         }
-                        if (cfg_.peltier_noise) {
-                            const int radius = std::clamp(cfg_.peltier_blur_radius, 0, 16);
-                            const float mix = std::clamp(cfg_.peltier_mix, 0.0f, 1.0f);
-                            if (radius > 0 && mix > 0.0f && (lat_h * lat_w) == latent_len) {
-                                std::vector<float> corr = eps0;
-                                box_blur_latent_inplace(corr, lat_h, lat_w, latent_in_dim, radius);
-                                normalize_to_unit_gaussian(corr);
-                                for (size_t i = 0; i < eps0.size(); ++i) {
-                                    eps0[i] = (1.0f - mix) * eps0[i] + mix * corr[i];
-                                }
-                                normalize_to_unit_gaussian(eps0);
-                            }
-                        }
+
 
                         // Emit a compact per-timestep sequence: x_t (decoded) + x0_hat (decoded).
                         for (int si = 0; si < nsteps; ++si) {
@@ -1547,7 +2211,7 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
                             fin_seq.emplace("latent", x_t_seq);
                             iin_seq.emplace("text_ids", text_ids);
                             if (cfg_.sdxl_time_cond) {
-                                fin_seq.emplace("timestep", std::vector<float>{t_norm});
+                                fin_seq.emplace("timestep", std::vector<float>{compute_time_cond_value(cfg_, t_norm, alpha_bar)});
                             }
 
                             // We don't want extra activation/block tap spam for these preview-only forwards.
@@ -1601,6 +2265,90 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
                 addVizTapFrame(std::move(vf));
             }
 
+            // Scalar training metrics (loss/lr/grad + distribution/coherence) as tiny 1x1 frames.
+            {
+                auto add_scalar = [&](const std::string& label, double value, double scale, bool signed_mode, bool log_compress) {
+                    std::ostringstream ss;
+                    ss.setf(std::ios::scientific);
+                    ss << std::setprecision(6);
+                    if (!std::isfinite(value)) {
+                        ss << "value=nan";
+                        Model::VizFrame vf;
+                        vf.w = 1;
+                        vf.h = 1;
+                        vf.channels = 1;
+                        vf.pixels = {0};
+                        vf.label = label + " | " + ss.str();
+                        addVizTapFrame(std::move(vf));
+                        return;
+                    }
+                    ss << "value=" << value;
+
+                    const double s = (scale > 0.0) ? scale : 1.0;
+                    double v = value;
+                    if (!signed_mode) v = std::max(0.0, v);
+                    if (log_compress) v = std::log1p(std::max(0.0, std::abs(v)));
+
+                    double t01 = 0.0;
+                    if (signed_mode) {
+                        t01 = 0.5 + 0.5 * std::tanh(v / s);
+                    } else {
+                        t01 = std::tanh(v / s);
+                    }
+                    const int p = static_cast<int>(std::lround(std::clamp(t01, 0.0, 1.0) * 255.0));
+
+                    Model::VizFrame vf;
+                    vf.w = 1;
+                    vf.h = 1;
+                    vf.channels = 1;
+                    vf.pixels = {static_cast<uint8_t>(std::clamp(p, 0, 255))};
+                    vf.label = label + " | " + ss.str();
+                    addVizTapFrame(std::move(vf));
+                };
+
+                // Losses + optimizer
+                add_scalar("ponyxl_sdxl/viz/train/metrics/loss_last", static_cast<double>(last_loss), 1.0, /*signed*/false, /*log*/false);
+                add_scalar("ponyxl_sdxl/viz/train/metrics/loss_avg", static_cast<double>(loss_sum / static_cast<double>(std::max(1, steps_per_image))), 1.0, /*signed*/false, /*log*/false);
+                add_scalar("ponyxl_sdxl/viz/train/metrics/lr", static_cast<double>(learning_rate), 1.0, /*signed*/false, /*log*/true);
+
+                // Grad stats (log-compressed because magnitudes vary a lot)
+                add_scalar("ponyxl_sdxl/viz/train/metrics/grad_norm", static_cast<double>(grad_sum), 1.0, /*signed*/false, /*log*/true);
+                add_scalar("ponyxl_sdxl/viz/train/metrics/grad_max_abs", static_cast<double>(grad_max), 1.0, /*signed*/false, /*log*/true);
+
+                // DDPM timestep (duplicate of meta/t_norm but placed under metrics)
+                add_scalar("ponyxl_sdxl/viz/train/metrics/t_norm", static_cast<double>(viz_tnorm), 1.0, /*signed*/false, /*log*/false);
+
+                // Distribution/coherence diagnostics on last_pred vs last_eps (best-effort)
+                const auto mp = compute_moments_local(last_pred);
+                const auto mt = compute_moments_local(last_eps);
+                const double vp_raw = std::max(mp.var, 1e-12);
+                const double vt = std::max(mt.var, 1e-12);
+
+                // KL prior (eps_pred -> N(0,1)), same term as training regularizer.
+                double lv = std::log(vp_raw);
+                lv = std::clamp(lv, static_cast<double>(logvar_min), static_cast<double>(logvar_max));
+                const double vp = std::exp(lv);
+                const double kl_prior = 0.5 * (mp.mean * mp.mean + vp - 1.0 - lv);
+
+                // Other diagnostics remain pred vs target (eps).
+                const double w2 = (mt.mean - mp.mean) * (mt.mean - mp.mean) +
+                                  (std::sqrt(vt) - std::sqrt(vp_raw)) * (std::sqrt(vt) - std::sqrt(vp_raw));
+                constexpr double kPi = 3.14159265358979323846;
+                constexpr double kE = 2.71828182845904523536;
+                const double Hp = 0.5 * std::log(2.0 * kPi * kE * vp_raw);
+                const double Ht = 0.5 * std::log(2.0 * kPi * kE * vt);
+                const double tvp = mean_abs_adjacent_diff_local(last_pred);
+                const double tvt = mean_abs_adjacent_diff_local(last_eps);
+                const double corr = pearson_corr_local(last_pred, last_eps);
+
+                add_scalar("ponyxl_sdxl/viz/train/metrics/kl_divergence", std::max(0.0, kl_prior), 1.0, /*signed*/false, /*log*/true);
+                add_scalar("ponyxl_sdxl/viz/train/metrics/wasserstein", std::sqrt(std::max(0.0, w2)), 1.0, /*signed*/false, /*log*/true);
+                add_scalar("ponyxl_sdxl/viz/train/metrics/entropy_diff", (Hp - Ht), 1.0, /*signed*/true, /*log*/false);
+                add_scalar("ponyxl_sdxl/viz/train/metrics/moment_mismatch", std::abs(mp.skew - mt.skew), 1.0, /*signed*/false, /*log*/true);
+                add_scalar("ponyxl_sdxl/viz/train/metrics/spatial_coherence", std::abs(tvp - tvt), 1.0, /*signed*/false, /*log*/true);
+                add_scalar("ponyxl_sdxl/viz/train/metrics/temporal_consistency", corr, 1.0, /*signed*/true, /*log*/false);
+            }
+
         // Restore the previous taps state so the next step can still emit custom frames.
         // (We still disable taps during the heavy forward/backward at the start of the step.)
         setVizTapsEnabled(prev_viz_taps_enabled);
@@ -1612,6 +2360,7 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
     out.grad_norm = static_cast<float>(grad_sum);
     out.grad_max_abs = grad_max;
     out.timestep = cfg_.sdxl_time_cond ? last_t_norm : 0.0f;
+    out.kl_beta_effective = kl_beta_eff;
 
     // Divergence/coherence metrics (best-effort) on last prediction vs target.
     {
@@ -1620,9 +2369,10 @@ PonyXLDDPMModel::StepStats PonyXLDDPMModel::trainStepSdxlLatentDiffusion(
         const double vp = std::max(mp.var, 1e-12);
         const double vt = std::max(mt.var, 1e-12);
 
-        // KL(Nt || Np)
-        const double kl = 0.5 * (std::log(vp / vt) + (vt + (mt.mean - mp.mean) * (mt.mean - mp.mean)) / vp - 1.0);
-        out.kl_divergence = static_cast<float>(std::max(0.0, kl));
+        // Metric: report the KL prior term actually used for regularization (eps_pred -> N(0,1)).
+        // Use the last computed value to make it step-aligned with other diagnostics.
+        // (If kl_beta==0, this stays at 0.)
+        out.kl_divergence = last_kl;
 
         // Wasserstein-2 (1D gaussians)
         const double w2 = (mt.mean - mp.mean) * (mt.mean - mp.mean) +
@@ -1677,6 +2427,26 @@ PonyXLDDPMModel::ValStats PonyXLDDPMModel::validateStepSdxlLatentDiffusion(
             used = truncate_utf8_safe(used, static_cast<size_t>(cfg_.max_text_chars));
         }
 
+        if (cfg_.caption_kv_enable) {
+            KvCaption kv = parse_kv_caption(used);
+            if (kv.has_any) {
+                used = compose_kv_caption_prompt(kv);
+                if (cfg_.max_text_chars > 0 && used.size() > static_cast<size_t>(cfg_.max_text_chars)) {
+                    used = truncate_utf8_safe(used, static_cast<size_t>(cfg_.max_text_chars));
+                }
+            }
+        }
+
+        if (cfg_.caption_kv_enable) {
+            KvCaption kv = parse_kv_caption(used);
+            if (kv.has_any) {
+                used = compose_kv_caption_prompt(kv);
+                if (cfg_.max_text_chars > 0 && used.size() > static_cast<size_t>(cfg_.max_text_chars)) {
+                    used = truncate_utf8_safe(used, static_cast<size_t>(cfg_.max_text_chars));
+                }
+            }
+        }
+
         if (cfg_.caption_structured_enable) {
             StructuredCaption cap = parse_structured_caption(used);
             if (cap.has_any_header) {
@@ -1693,7 +2463,18 @@ PonyXLDDPMModel::ValStats PonyXLDDPMModel::validateStepSdxlLatentDiffusion(
         std::vector<int> ids;
         if (!used.empty()) ids = getMutableTokenizer().tokenizeEnsure(used);
 
+        // Tokens de contexte global (appris), injectés après BOS.
+        std::vector<int> gctx_ids;
+        {
+            const int want = std::max(0, cfg_.global_ctx_tokens);
+            gctx_ids.reserve(static_cast<size_t>(want));
+            for (int i = 0; i < want; ++i) {
+                gctx_ids.push_back(getMutableTokenizer().addToken("<GCTX" + std::to_string(i) + ">"));
+            }
+        }
+
         const int pad_id = getMutableTokenizer().getPadId();
+        const int unk_id = getMutableTokenizer().getUnkId();
         const int bos = getMutableTokenizer().getBosId();
         const int eos = getMutableTokenizer().getEosId();
 
@@ -1709,7 +2490,7 @@ PonyXLDDPMModel::ValStats PonyXLDDPMModel::validateStepSdxlLatentDiffusion(
                                ids.begin() + static_cast<std::ptrdiff_t>(end));
             }
 
-            const int cap = std::max(0, text_len - 2);
+            const int cap = std::max(0, text_len - 2 - static_cast<int>(gctx_ids.size()));
             if (static_cast<int>(content.size()) > cap) {
                 content.resize(static_cast<size_t>(cap));
             }
@@ -1717,6 +2498,7 @@ PonyXLDDPMModel::ValStats PonyXLDDPMModel::validateStepSdxlLatentDiffusion(
             ids.clear();
             ids.reserve(static_cast<size_t>(text_len));
             ids.push_back(bos);
+            ids.insert(ids.end(), gctx_ids.begin(), gctx_ids.end());
             ids.insert(ids.end(), content.begin(), content.end());
             while (static_cast<int>(ids.size()) < (text_len - 1)) {
                 ids.push_back(pad_id);
@@ -1733,7 +2515,7 @@ PonyXLDDPMModel::ValStats PonyXLDDPMModel::validateStepSdxlLatentDiffusion(
         for (auto& id : ids) {
             if (id == pad_id) continue;
             if (id < 0) id = pad_id;
-            if (id >= max_vocab) id = id % max_vocab;
+            if (id >= max_vocab) id = (unk_id >= 0) ? unk_id : pad_id;
         }
         return ids;
     };
@@ -1843,7 +2625,7 @@ PonyXLDDPMModel::ValStats PonyXLDDPMModel::validateStepSdxlLatentDiffusion(
         throw std::runtime_error("Failed to convert VAE mu (CHW) to PonyXL latent (tokens HWC) during validation");
     }
 
-    // Latent H/W for Peltier blur
+    // Latent H/W (pour previews/viz)
     int lat_h = vae_lh;
     int lat_w = vae_lw;
     if (lat_h <= 0 && lat_w <= 0) {
@@ -1899,19 +2681,6 @@ PonyXLDDPMModel::ValStats PonyXLDDPMModel::validateStepSdxlLatentDiffusion(
     for (int i = 0; i < latent_raw_dim; ++i) {
         eps[static_cast<size_t>(i)] = n01(rng);
     }
-    if (cfg_.peltier_noise) {
-        const int radius = std::clamp(cfg_.peltier_blur_radius, 0, 16);
-        const float mix = std::clamp(cfg_.peltier_mix, 0.0f, 1.0f);
-        if (radius > 0 && mix > 0.0f && (lat_h * lat_w) == latent_len) {
-            std::vector<float> corr = eps;
-            box_blur_latent_inplace(corr, lat_h, lat_w, latent_in_dim, radius);
-            normalize_to_unit_gaussian(corr);
-            for (size_t i = 0; i < eps.size(); ++i) {
-                eps[i] = (1.0f - mix) * eps[i] + mix * corr[i];
-            }
-            normalize_to_unit_gaussian(eps);
-        }
-    }
 
     std::vector<float> x_t(static_cast<size_t>(latent_raw_dim), 0.0f);
     for (int i = 0; i < latent_raw_dim; ++i) {
@@ -1931,7 +2700,7 @@ PonyXLDDPMModel::ValStats PonyXLDDPMModel::validateStepSdxlLatentDiffusion(
         fin["latent"] = x_t;
         iin["text_ids"] = ids;
         if (cfg_.sdxl_time_cond) {
-            fin["timestep"] = std::vector<float>{t_norm};
+            fin["timestep"] = std::vector<float>{compute_time_cond_value(cfg_, t_norm, alpha_bar)};
         }
         return forwardPassNamed(fin, iin, false);
     };
@@ -2046,15 +2815,81 @@ PonyXLDDPMModel::ValStats PonyXLDDPMModel::validateStepSdxlLatentDiffusion(
                 if (!vf.pixels.empty()) addVizTapFrame(std::move(vf));
             };
 
+            auto add_stats = [&](const std::string& short_name, const float* ptr, size_t len) {
+                size_t n_total = len;
+                size_t n_finite = 0;
+                size_t n_nonfinite = 0;
+
+                // Welford
+                double mean = 0.0;
+                double m2 = 0.0;
+                double sum_sq = 0.0;
+                float vmin = 0.0f;
+                float vmax = 0.0f;
+                bool has_any = false;
+
+                for (size_t i = 0; i < len; ++i) {
+                    const float x = ptr ? ptr[i] : 0.0f;
+                    if (!std::isfinite(x)) {
+                        n_nonfinite++;
+                        continue;
+                    }
+                    n_finite++;
+                    sum_sq += static_cast<double>(x) * static_cast<double>(x);
+                    if (!has_any) {
+                        vmin = x;
+                        vmax = x;
+                        has_any = true;
+                    } else {
+                        vmin = std::min(vmin, x);
+                        vmax = std::max(vmax, x);
+                    }
+                    const double dx = static_cast<double>(x) - mean;
+                    mean += dx / static_cast<double>(n_finite);
+                    const double dx2 = static_cast<double>(x) - mean;
+                    m2 += dx * dx2;
+                }
+
+                const double var = (n_finite > 1) ? (m2 / static_cast<double>(n_finite - 1)) : 0.0;
+                const double stdv = std::sqrt(std::max(0.0, var));
+                const double rms = (n_finite > 0) ? std::sqrt(sum_sq / static_cast<double>(n_finite)) : 0.0;
+
+                std::ostringstream ss;
+                ss.setf(std::ios::scientific);
+                ss << std::setprecision(4);
+                ss << "n=" << n_finite;
+                if (n_total > 0) ss << "/" << n_total;
+                if (n_nonfinite > 0) ss << " nonfinite=" << n_nonfinite;
+                ss << " mean=" << mean;
+                ss << " std=" << stdv;
+                ss << " min=" << (has_any ? static_cast<double>(vmin) : 0.0);
+                ss << " max=" << (has_any ? static_cast<double>(vmax) : 0.0);
+                ss << " rms=" << rms;
+
+                const double t = std::tanh(rms / 3.0);
+                const uint8_t p = static_cast<uint8_t>(std::clamp(static_cast<int>(std::lround(t * 255.0)), 0, 255));
+
+                Model::VizFrame vf;
+                vf.w = 1;
+                vf.h = 1;
+                vf.channels = 1;
+                vf.pixels = { p };
+                vf.label = "ponyxl_sdxl/viz/val/stats/" + short_name + " | " + ss.str();
+                addVizTapFrame(std::move(vf));
+            };
+
             // Denoise signals at timestep t
             add_lat("ponyxl_sdxl/viz/val/latent/x_t_noised", x_t, lat_h, lat_w, latent_in_dim);
             add_lat("ponyxl_sdxl/viz/val/latent/eps_true", eps, lat_h, lat_w, latent_in_dim);
+            add_stats("eps_true_stats", eps.data(), eps.size());
             if (n > 0) {
                 // pred/pred_wrong are flat, but we know they contain at least latent_raw_dim.
                 add_lat("ponyxl_sdxl/viz/val/latent/eps_pred", pred, lat_h, lat_w, latent_in_dim);
+                add_stats("eps_pred_stats", pred.data(), static_cast<size_t>(std::max(0, n)));
             }
             if (nw > 0) {
                 add_lat("ponyxl_sdxl/viz/val/latent/eps_pred_wrong", pred_wrong, lat_h, lat_w, latent_in_dim);
+                add_stats("eps_pred_wrong_stats", pred_wrong.data(), static_cast<size_t>(std::max(0, nw)));
             }
 
             // Text influence map: per-token norm(|eps_pred - eps_pred_wrong|)
@@ -2078,11 +2913,62 @@ PonyXLDDPMModel::ValStats PonyXLDDPMModel::validateStepSdxlLatentDiffusion(
 
             // Scalar marker: assoc_margin encoded as a tiny 1x1 grayscale frame.
             {
+                auto add_scalar = [&](const std::string& label, double value, double scale, bool signed_mode, bool log_compress) {
+                    std::ostringstream ss;
+                    ss.setf(std::ios::scientific);
+                    ss << std::setprecision(6);
+                    if (!std::isfinite(value)) {
+                        ss << "value=nan";
+                        Model::VizFrame vf;
+                        vf.w = 1;
+                        vf.h = 1;
+                        vf.channels = 1;
+                        vf.pixels = {0};
+                        vf.label = label + " | " + ss.str();
+                        addVizTapFrame(std::move(vf));
+                        return;
+                    }
+                    ss << "value=" << value;
+
+                    const double s = (scale > 0.0) ? scale : 1.0;
+                    double v = value;
+                    if (!signed_mode) v = std::max(0.0, v);
+                    if (log_compress) v = std::log1p(std::max(0.0, std::abs(v)));
+
+                    double t01 = 0.0;
+                    if (signed_mode) {
+                        t01 = 0.5 + 0.5 * std::tanh(v / s);
+                    } else {
+                        t01 = std::tanh(v / s);
+                    }
+                    const int p = static_cast<int>(std::lround(std::clamp(t01, 0.0, 1.0) * 255.0));
+
+                    Model::VizFrame vf;
+                    vf.w = 1;
+                    vf.h = 1;
+                    vf.channels = 1;
+                    vf.pixels = {static_cast<uint8_t>(std::clamp(p, 0, 255))};
+                    vf.label = label + " | " + ss.str();
+                    addVizTapFrame(std::move(vf));
+                };
+
+                // Core validation metrics
+                add_scalar("ponyxl_sdxl/viz/val/metrics/eps_mse", static_cast<double>(out.eps_mse), 1.0, /*signed*/false, /*log*/true);
+                add_scalar("ponyxl_sdxl/viz/val/metrics/x0_mse", static_cast<double>(out.x0_mse), 1.0, /*signed*/false, /*log*/true);
+                add_scalar("ponyxl_sdxl/viz/val/metrics/img_mse", static_cast<double>(out.img_mse), 1.0, /*signed*/false, /*log*/true);
+                add_scalar("ponyxl_sdxl/viz/val/metrics/eps_mse_wrong", static_cast<double>(out.eps_mse_wrong), 1.0, /*signed*/false, /*log*/true);
+
                 Model::VizFrame vf;
                 vf.w = 1;
                 vf.h = 1;
                 vf.channels = 1;
-                vf.label = "ponyxl_sdxl/viz/val/text_image/assoc_margin";
+                {
+                    std::ostringstream ss;
+                    ss.setf(std::ios::scientific);
+                    ss << std::setprecision(6);
+                    ss << "value=" << static_cast<double>(out.assoc_margin);
+                    vf.label = "ponyxl_sdxl/viz/val/text_image/assoc_margin" + std::string(" | ") + ss.str();
+                }
                 const float s = static_cast<float>(out.assoc_margin);
                 const float t01 = 0.5f + 0.5f * std::tanh(s);
                 const int p = static_cast<int>(std::lround(std::clamp(t01, 0.0f, 1.0f) * 255.0f));
@@ -2155,7 +3041,18 @@ PonyXLDDPMModel::ReconPreview PonyXLDDPMModel::reconstructPreviewSdxlLatentDiffu
         std::vector<int> ids;
         if (!used.empty()) ids = getMutableTokenizer().tokenizeEnsure(used);
 
+        // Tokens de contexte global (appris), injectés après BOS.
+        std::vector<int> gctx_ids;
+        {
+            const int want = std::max(0, cfg_.global_ctx_tokens);
+            gctx_ids.reserve(static_cast<size_t>(want));
+            for (int i = 0; i < want; ++i) {
+                gctx_ids.push_back(getMutableTokenizer().addToken("<GCTX" + std::to_string(i) + ">"));
+            }
+        }
+
         const int pad_id = getMutableTokenizer().getPadId();
+        const int unk_id = getMutableTokenizer().getUnkId();
         const int bos = getMutableTokenizer().getBosId();
         const int eos = getMutableTokenizer().getEosId();
 
@@ -2171,7 +3068,7 @@ PonyXLDDPMModel::ReconPreview PonyXLDDPMModel::reconstructPreviewSdxlLatentDiffu
                                ids.begin() + static_cast<std::ptrdiff_t>(end));
             }
 
-            const int cap = std::max(0, text_len - 2);
+            const int cap = std::max(0, text_len - 2 - static_cast<int>(gctx_ids.size()));
             if (static_cast<int>(content.size()) > cap) {
                 content.resize(static_cast<size_t>(cap));
             }
@@ -2179,6 +3076,7 @@ PonyXLDDPMModel::ReconPreview PonyXLDDPMModel::reconstructPreviewSdxlLatentDiffu
             ids.clear();
             ids.reserve(static_cast<size_t>(text_len));
             ids.push_back(bos);
+            ids.insert(ids.end(), gctx_ids.begin(), gctx_ids.end());
             ids.insert(ids.end(), content.begin(), content.end());
             while (static_cast<int>(ids.size()) < (text_len - 1)) {
                 ids.push_back(pad_id);
@@ -2195,7 +3093,7 @@ PonyXLDDPMModel::ReconPreview PonyXLDDPMModel::reconstructPreviewSdxlLatentDiffu
         for (auto& id : ids) {
             if (id == pad_id) continue;
             if (id < 0) id = pad_id;
-            if (id >= max_vocab) id = id % max_vocab;
+            if (id >= max_vocab) id = (unk_id >= 0) ? unk_id : pad_id;
         }
         return ids;
     };
@@ -2399,20 +3297,6 @@ PonyXLDDPMModel::ReconPreview PonyXLDDPMModel::reconstructPreviewSdxlLatentDiffu
     for (int i = 0; i < latent_raw_dim; ++i) {
         eps[static_cast<size_t>(i)] = n01(rng);
     }
-    if (cfg_.peltier_noise) {
-        const int radius = std::clamp(cfg_.peltier_blur_radius, 0, 16);
-        const float mix = std::clamp(cfg_.peltier_mix, 0.0f, 1.0f);
-        if (radius > 0 && mix > 0.0f && (lat_h * lat_w) == latent_len) {
-            std::vector<float> corr = eps;
-            box_blur_latent_inplace(corr, lat_h, lat_w, latent_in_dim, radius);
-            normalize_to_unit_gaussian(corr);
-            for (size_t i = 0; i < eps.size(); ++i) {
-                eps[i] = (1.0f - mix) * eps[i] + mix * corr[i];
-            }
-            normalize_to_unit_gaussian(eps);
-        }
-    }
-
     std::vector<float> x_t(static_cast<size_t>(latent_raw_dim), 0.0f);
     for (int i = 0; i < latent_raw_dim; ++i) {
         const float e = eps[static_cast<size_t>(i)];
@@ -2424,7 +3308,7 @@ PonyXLDDPMModel::ReconPreview PonyXLDDPMModel::reconstructPreviewSdxlLatentDiffu
     fin["latent"] = x_t;
     iin["text_ids"] = text_ids;
     if (cfg_.sdxl_time_cond) {
-        fin["timestep"] = std::vector<float>{t_norm};
+        fin["timestep"] = std::vector<float>{compute_time_cond_value(cfg_, t_norm, alpha_bar)};
     }
     const std::vector<float> pred = forwardPassNamed(fin, iin, false);
     if (static_cast<int>(pred.size()) < latent_raw_dim) {
@@ -2484,6 +3368,8 @@ void PonyXLDDPMModel::buildInto(Model& model, const Config& cfg) {
         const int mlp_hidden = std::max(4, cfg.mlp_hidden);
 
         const int unet_depth = std::max(1, cfg.unet_depth);
+        const int unet_blocks = std::max(1, cfg.unet_blocks_per_level);
+        const int unet_bottleneck_blocks = std::max(1, cfg.unet_bottleneck_blocks);
 
         const int latent_raw_dim = latent_len * latent_in_dim;
         const int output_dim = latent_raw_dim;
@@ -2500,7 +3386,18 @@ void PonyXLDDPMModel::buildInto(Model& model, const Config& cfg) {
         m.modelConfig["mlp_hidden"] = mlp_hidden;
         m.modelConfig["sdxl_time_cond"] = cfg.sdxl_time_cond;
         m.modelConfig["unet_depth"] = unet_depth;
+        m.modelConfig["unet_blocks_per_level"] = unet_blocks;
+        m.modelConfig["unet_bottleneck_blocks"] = unet_bottleneck_blocks;
         m.modelConfig["output_dim"] = output_dim;
+
+        // Training helpers / stabilization knobs
+        m.modelConfig["recon_loss"] = cfg.recon_loss;
+        m.modelConfig["loss_weighting"] = cfg.loss_weighting;
+        m.modelConfig["min_snr_gamma"] = cfg.min_snr_gamma;
+        m.modelConfig["kl_beta"] = cfg.kl_beta;
+        m.modelConfig["kl_warmup_steps"] = cfg.kl_warmup_steps;
+        m.modelConfig["logvar_clip_min"] = cfg.logvar_clip_min;
+        m.modelConfig["logvar_clip_max"] = cfg.logvar_clip_max;
 
         // Input routing (latents = float)
         m.push("ponyxl_sdxl/latent_in", "Identity", 0);
@@ -2578,7 +3475,7 @@ void PonyXLDDPMModel::buildInto(Model& model, const Config& cfg) {
                 L->seq_len = text_len;
                 L->embed_dim = d_model;
                 L->num_heads = heads;
-                L->causal = false;
+                L->causal = cfg.text_clip_like;
             }
 
             m.push(p + "/add1", "Add", 0);
@@ -2632,6 +3529,20 @@ void PonyXLDDPMModel::buildInto(Model& model, const Config& cfg) {
             }
 
             text = p + "/out";
+        }
+
+        if (cfg.text_clip_like) {
+            // LN final (CLIP-like)
+            m.push("ponyxl_sdxl/text_encoder/final_ln", "LayerNorm", static_cast<size_t>(2) * static_cast<size_t>(d_model));
+            if (auto* L = m.getLayerByName("ponyxl_sdxl/text_encoder/final_ln")) {
+                L->inputs = {text};
+                L->output = "ponyxl_sdxl/text_encoder/final_ln_out";
+                L->affine = true;
+                L->use_bias = true;
+                L->eps = 1e-5f;
+                L->in_features = d_model;
+            }
+            text = "ponyxl_sdxl/text_encoder/final_ln_out";
         }
 
         if (cfg.text_bottleneck_meanpool) {
@@ -2876,10 +3787,13 @@ void PonyXLDDPMModel::buildInto(Model& model, const Config& cfg) {
 
             for (int d = 0; d < depth; ++d) {
                 const std::string b = "ponyxl_sdxl/unet2d/down" + std::to_string(d + 1);
-                x = conv2d(b + "/conv1", x, b + "/c1", C, C, cur_h, cur_w, 3, 1, 1);
-                x = conv2d(b + "/conv2", x, b + "/c2", C, C, cur_h, cur_w, 3, 1, 1);
-                cross_attend_chw(b + "/xattn", x, b + "/xattn_out", C, cur_h, cur_w);
-                x = b + "/xattn_out";
+                for (int bi = 0; bi < unet_blocks; ++bi) {
+                    const std::string bb = b + "/b" + std::to_string(bi + 1);
+                    x = conv2d(bb + "/conv1", x, bb + "/c1", C, C, cur_h, cur_w, 3, 1, 1);
+                    x = conv2d(bb + "/conv2", x, bb + "/c2", C, C, cur_h, cur_w, 3, 1, 1);
+                    cross_attend_chw(bb + "/xattn", x, bb + "/xattn_out", C, cur_h, cur_w);
+                    x = bb + "/xattn_out";
+                }
 
                 skips.push_back(x);
                 skip_h.push_back(cur_h);
@@ -2895,10 +3809,13 @@ void PonyXLDDPMModel::buildInto(Model& model, const Config& cfg) {
             // Bottleneck
             {
                 const std::string b = "ponyxl_sdxl/unet2d/bottleneck";
-                x = conv2d(b + "/conv1", x, b + "/c1", C, C, cur_h, cur_w, 3, 1, 1);
-                cross_attend_chw(b + "/xattn", x, b + "/xattn_out", C, cur_h, cur_w);
-                x = b + "/xattn_out";
-                x = conv2d(b + "/conv2", x, b + "/c2", C, C, cur_h, cur_w, 3, 1, 1);
+                for (int bi = 0; bi < unet_bottleneck_blocks; ++bi) {
+                    const std::string bb = b + "/b" + std::to_string(bi + 1);
+                    x = conv2d(bb + "/conv1", x, bb + "/c1", C, C, cur_h, cur_w, 3, 1, 1);
+                    cross_attend_chw(bb + "/xattn", x, bb + "/xattn_out", C, cur_h, cur_w);
+                    x = bb + "/xattn_out";
+                    x = conv2d(bb + "/conv2", x, bb + "/c2", C, C, cur_h, cur_w, 3, 1, 1);
+                }
             }
 
             // Up path
@@ -2921,9 +3838,12 @@ void PonyXLDDPMModel::buildInto(Model& model, const Config& cfg) {
 
                 // Reduce back to C
                 x = conv2d(b + "/reduce", b + "/cat", b + "/r", C * 2, C, cur_h, cur_w, 3, 1, 1);
-                x = conv2d(b + "/conv", x, b + "/c", C, C, cur_h, cur_w, 3, 1, 1);
-                cross_attend_chw(b + "/xattn", x, b + "/xattn_out", C, cur_h, cur_w);
-                x = b + "/xattn_out";
+                for (int bi = 0; bi < unet_blocks; ++bi) {
+                    const std::string bb = b + "/b" + std::to_string(bi + 1);
+                    x = conv2d(bb + "/conv", x, bb + "/c", C, C, cur_h, cur_w, 3, 1, 1);
+                    cross_attend_chw(bb + "/xattn", x, bb + "/xattn_out", C, cur_h, cur_w);
+                    x = bb + "/xattn_out";
+                }
             }
 
             // CHW -> HWC -> (seq-major) -> out_proj
@@ -2945,7 +3865,9 @@ void PonyXLDDPMModel::buildInto(Model& model, const Config& cfg) {
                 L->out_features = latent_in_dim;
                 L->use_bias = true;
             }
-            m.push("ponyxl_sdxl/out", "Identity", 0);
+            const std::string out_act = normalize_output_activation(cfg.output_activation);
+            const std::string out_type = (out_act == "tanh") ? "Tanh" : "Identity";
+            m.push("ponyxl_sdxl/out", out_type, 0);
             if (auto* L = m.getLayerByName("ponyxl_sdxl/out")) {
                 L->inputs = {"ponyxl_sdxl/unet/eps"};
                 L->output = "x";

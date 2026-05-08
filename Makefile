@@ -63,11 +63,17 @@ build-docs:
 	if pandoc $(DOCS_SOURCES) \
 		-o $(DOCS_PDF) \
 		--pdf-engine=xelatex \
+		--include-in-header docs/pandoc/header.tex \
 		--toc \
 		--toc-depth=3 \
 		--number-sections \
+		-V geometry:a4paper \
 		-V geometry:margin=2.5cm \
 		-V fontsize=11pt \
+		-V mainfont="DejaVu Serif" \
+		-V sansfont="DejaVu Sans" \
+		-V monofont="DejaVu Sans Mono" \
+		-V monofontoptions=Scale=0.92 \
 		-V documentclass=report \
 		--highlight-style=tango \
 		--title-prefix "Mimir Framework"; then \

@@ -73,6 +73,28 @@ assert(cfg, err)
 
 Conseil : garde une `config.json` “humaine” et génère des configs plus détaillées via `Mimir.Architectures.default_config(...)` + overrides.
 
+### Mode `--conf` : conf injectée + scripts pilotés par JSON
+
+Le binaire supporte un mode `--conf <config.json>` qui exécute une liste de scripts définie dans `lua.scripts` (ou `run.lua.scripts`).
+
+Dans ce mode, le runtime injecte :
+
+- `CONF` : table Lua correspondant au JSON complet (la conf “full”)
+- `CONF_PATH` : chemin absolu du JSON chargé
+- `CONF_DIR` : dossier parent de la conf
+
+Cas d’usage typique : un script peut créer un modèle directement depuis `CONF` :
+
+```lua
+if CONF then
+  local ok, arch_or_err = Mimir.Model.create_from_config(CONF)
+  assert(ok, arch_or_err)
+  log("arch=" .. tostring(arch_or_err))
+end
+```
+
+Note : en mode `--conf`, les arguments `arg` du script sont ceux définis par la conf (champ `args`).
+
 ### Modules `scripts/modules/*`
 
 Ces modules ne sont pas “magiques” : ils sont juste là pour uniformiser les scripts.

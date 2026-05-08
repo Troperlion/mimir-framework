@@ -1,0 +1,25 @@
+# Build artifacts
+build/
+bin/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+
+# Large assets / datasets / runs
+checkpoints/
+checkpoint/
+dataset_2/
+logs/
+logs-ctest/
+.mimir_spill/
+
+# Bundles / archives
+*.zip
+
+# Model weights
+model.safetensors
+
+# Git
+.git/
+.github/

@@ -16,7 +16,23 @@ cmake --build build -j
 
 ## Exécuter les tests
 
-Si le projet a été configuré avec CTest :
+Le build expose des tests via CTest si activés à la configuration.
+
+Activation (par défaut `MIMIR_ENABLE_TESTS=ON`) :
+
+```bash
+cmake -S . -B build -DMIMIR_ENABLE_TESTS=ON
+cmake --build build -j
+```
+
+Désactivation (build plus léger) :
+
+```bash
+cmake -S . -B build -DMIMIR_ENABLE_TESTS=OFF
+cmake --build build -j
+```
+
+Exécution :
 
 ```bash
 ctest --test-dir build

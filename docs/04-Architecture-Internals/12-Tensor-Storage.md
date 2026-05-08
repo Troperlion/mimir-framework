@@ -45,7 +45,7 @@ Règles de construction :
 - `tensor(size_t size)` : alloue `data` en dur (non contrôlé par `MemoryGuard`).
 - `tensor(size_t size, bool dynamic)` : si `dynamic==true`, crée un handle **sans allouer immédiatement** la RAM (lazy). L’allocation réelle arrive au premier `getData()`.
 
-⚠️ Invariant important : **copie interdite**.
+ATTENTION : invariant important : **copie interdite**.
 
 - Copy constructor et copy assignment sont `delete` pour éviter double-free/double-handle.
 - Move constructor/assignment déplacent le handle ou le `data`.

@@ -1,0 +1,34 @@
+version: "3.8"
+
+services:
+  mimir-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    ports:
+      - "8088:8088"
+    environment:
+      # OpenMP tuning (same spirit as run_mimir.sh)
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-}
+      OMP_PROC_BIND: "false"
+      OMP_PLACES: "cores"
+      OMP_SCHEDULE: "static"
+      OMP_NESTED: "false"
+      OMP_MAX_ACTIVE_LEVELS: "1"
+      OMP_WAIT_POLICY: "active"
+      OMP_DYNAMIC: "false"
+      # Optional pinning (set it yourself if desired)
+      # GOMP_CPU_AFFINITY: "0-7"
+    command:
+      - /opt/mimir/bin/mimir
+      - --lua
+      - scripts/modules/api_ws_server.lua
+      - --
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8088"
+    restart: unless-stopped

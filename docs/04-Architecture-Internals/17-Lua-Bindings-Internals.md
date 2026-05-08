@@ -40,7 +40,7 @@ Rôle :
 - stocker des objets C++ partagés (modèle courant, tokenizer, encoder, visualizer, dataset, logs…),
 - éviter de repasser des pointeurs via la stack Lua pour tout.
 
-⚠️ Implication : l’API Lua est **stateful**. Beaucoup de fonctions opèrent sur “le modèle courant”.
+ATTENTION : l’API Lua est **stateful**. Beaucoup de fonctions opèrent sur “le modèle courant”.
 
 ## 4) Conventions d’IO
 

@@ -108,7 +108,7 @@ Pour `SelfAttention` / `MultiHeadAttention` :
 
 Dans certains chemins (forward int), le runtime reconstruit des `std::vector` temporaires `qkv_weight/out_weight` à partir du bloc.
 
-⚠️ Implication : `params_count` doit être configuré correctement, sinon lecture hors limites.
+ATTENTION : implication : `params_count` doit être configuré correctement, sinon lecture hors limites.
 
 ## 6) `LayerOpsExt` : extensions et statut
 

@@ -16,6 +16,14 @@ cmake --build build -j
 ./bin/mimir --help
 ```
 
+## 2bis) Tester le mode `--conf` (JSON -> scripts)
+
+Si `config.json` contient une section `lua.scripts`, tu peux valider l’injection de conf + exécution :
+
+```bash
+./bin/mimir --conf config.json
+```
+
 ## 3) Exécuter un exemple minimal (Lua)
 
 ```bash

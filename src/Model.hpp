@@ -466,12 +466,9 @@ public:
     std::vector<float> last_input_gradient_;
     bool has_last_input_gradient_ = false;
 
-    // Aux models used by some training steps (perceptual/adversarial).
+    // Aux models used by some training steps (perceptual).
     // Stored here to avoid rebuild/alloc each step.
     std::shared_ptr<Model> aux_perceptual_;
-    std::shared_ptr<Model> aux_discriminator_;
-    Optimizer aux_discriminator_opt_{};
-    bool aux_discriminator_opt_inited_ = false;
 
     static void conv2d_same(const std::vector<float> &in, std::vector<float> &out, int W, int H, const std::vector<float> &kernel, int ksize);
 

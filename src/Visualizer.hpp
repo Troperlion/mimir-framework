@@ -46,6 +46,24 @@ public:
     void requestStopTraining();
     bool consumeStopTrainingRequested();
 
+    // ---------------------------------------------------------------------
+    // Live training params (UI -> training thread)
+    // ---------------------------------------------------------------------
+    struct LiveTrainParams {
+        // Quand false, le training doit ignorer ces valeurs et revenir au comportement natif.
+        // (lr/warmup/kl restent exposés pour debug UI, mais ne doivent pas être appliqués.)
+        bool overrides_enabled = false;
+        float lr = 0.0f;            // base LR (opt.initial_lr)
+        int lr_warmup_steps = 0;    // opt.warmup_steps
+        float kl_beta = 0.0f;       // modelConfig["kl_beta"]
+        int kl_warmup_steps = 0;    // modelConfig["kl_warmup_steps"]
+        bool kl_enabled = true;     // if false => kl_beta forced to 0
+        uint64_t version = 0;       // monotonically increases on UI edits
+    };
+
+    uint64_t liveTrainParamsVersion() const;
+    LiveTrainParams liveTrainParamsSnapshot() const;
+
     // Mettre à jour l'affichage
     void update();
 
@@ -127,6 +145,15 @@ private:
 
     // Flag thread-safe: mis à true quand l'utilisateur demande d'arrêter l'entraînement.
     std::atomic<bool> stop_training_requested_{false};
+
+    // Live params (thread-safe). Version=0 => jamais modifié par l'UI.
+    std::atomic<uint64_t> live_params_version_{0};
+        std::atomic<bool> live_overrides_enabled_{false};
+    std::atomic<float> live_lr_{0.0f};
+    std::atomic<int> live_lr_warmup_steps_{0};
+    std::atomic<float> live_kl_beta_{0.0f};
+    std::atomic<int> live_kl_warmup_steps_{0};
+    std::atomic<bool> live_kl_enabled_{true};
 
     // Label parsing / architecture hints
     bool hide_activation_blocks = false;
@@ -376,6 +403,29 @@ private:
     // Stop button (Metrics panel)
     std::optional<sf::FloatRect> last_stop_button_rect_;
 
+    // Live tuning controls (Metrics panel)
+    bool live_ui_inited_ = false;
+    float live_ui_lr_ = 0.0f;
+    int live_ui_lr_warmup_steps_ = 0;
+    float live_ui_kl_beta_ = 0.0f;
+    int live_ui_kl_warmup_steps_ = 0;
+    bool live_ui_kl_enabled_ = true;
+
+    // Hitboxes from last render (for interaction)
+    std::optional<sf::FloatRect> last_live_lr_track_;
+    std::optional<sf::FloatRect> last_live_lr_thumb_;
+    std::optional<sf::FloatRect> last_live_lrwu_track_;
+    std::optional<sf::FloatRect> last_live_lrwu_thumb_;
+    std::optional<sf::FloatRect> last_live_klb_track_;
+    std::optional<sf::FloatRect> last_live_klb_thumb_;
+    std::optional<sf::FloatRect> last_live_klwu_track_;
+    std::optional<sf::FloatRect> last_live_klwu_thumb_;
+    std::optional<sf::FloatRect> last_live_kl_enable_box_;
+    std::optional<sf::FloatRect> last_live_overrides_box_;
+
+    enum class LiveDragTarget { None, LR, LRWarmup, KLBeta, KLWarmup };
+    LiveDragTarget live_dragging_ = LiveDragTarget::None;
+
     // Scroll (Blocks/Layers panel)
     float blocks_scroll_y_ = 0.0f;
     float blocks_scroll_max_ = 0.0f;
@@ -430,6 +480,18 @@ public:
 
     void requestStopTraining() {}
     bool consumeStopTrainingRequested() { return false; }
+
+    struct LiveTrainParams {
+        float lr = 0.0f;
+        int lr_warmup_steps = 0;
+        float kl_beta = 0.0f;
+        int kl_warmup_steps = 0;
+        bool kl_enabled = true;
+        uint64_t version = 0;
+    };
+
+    uint64_t liveTrainParamsVersion() const { return 0; }
+    LiveTrainParams liveTrainParamsSnapshot() const { return LiveTrainParams{}; }
 
     void addGeneratedImage(const std::vector<uint8_t>&, int, int, int, const std::string&) {}
 

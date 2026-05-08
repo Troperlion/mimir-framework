@@ -534,9 +534,14 @@ json DebugJsonDump::build_json_enhanced(const Model& model, const DebugJsonOptio
     json root;
     
     // Version and format
+    root["format"] = "mimir_debug_dump";
     root["format_version"] = "1.1.0";
     root["timestamp"] = std::time(nullptr);
+    root["mimir_version"] = get_mimir_version();
     root["model_name"] = model.getModelName();
+    root["model_type"] = model.getModelName();
+    root["debug_only"] = true;
+    root["warning"] = "This serialization is DEBUG-ONLY (debug_json). It is write-only, not intended for production checkpoints or large models.";
     
     // Features supported in this version
     json features = json::array();
@@ -780,16 +785,19 @@ json DebugJsonDump::build_json_enhanced(const Model& model, const DebugJsonOptio
         const Encoder& enc = model.getEncoder();
         json encoder_obj;
         encoder_obj["has_encoder"] = true;
-        encoder_obj["architecture"] = "ViT";  // Or get from encoder
+        // The current Encoder is a learned token-embedding table (not a ViT).
+        encoder_obj["type"] = "token_embedding_table";
+        encoder_obj["dim"] = enc.dim;
+        encoder_obj["vocab_size"] = enc.vocab_size;
         root["encoder"] = encoder_obj;
     }
     
     // Git info (if requested)
     if (options.include_git_info) {
-        json git;
-        git["commit"] = "unknown";  // Would parse from .git if available
-        git["branch"] = "unknown";
-        root["git"] = git;
+        std::string git_commit = get_git_commit();
+        if (!git_commit.empty()) {
+            root["git_commit"] = git_commit;
+        }
     }
     
     return root;
@@ -815,6 +823,7 @@ bool DebugJsonDump::save_enhanced(
         file.close();
         
         std::cout << "[DebugJsonDump] Saved enhanced debug JSON to: " << path << std::endl;
+        std::cout << "[DebugJsonDump] NOTE: debug_json is DEBUG-ONLY (write-only) and not meant for production checkpoints." << std::endl;
         return true;
         
     } catch (const std::exception& e) {

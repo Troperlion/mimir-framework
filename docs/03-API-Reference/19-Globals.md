@@ -10,6 +10,18 @@ Objectif :
 
 Source de vérité : `src/LuaScripting.cpp`.
 
+## 1bis) Globals supplémentaires en mode `--conf`
+
+Quand un script est exécuté via `./bin/mimir --conf <config.json>`, le binaire injecte en plus :
+
+| Nom | Type | Sens |
+| --- | --- | --- |
+| `CONF` | table | config JSON complète (convertie en table Lua) |
+| `CONF_PATH` | string | chemin absolu du JSON |
+| `CONF_DIR` | string | dossier parent du JSON |
+
+But : permettre à un script de lire la conf complète et/ou d’instancier un modèle via `Mimir.Model.create_from_config(CONF)`.
+
 ## 1) Globals injectés
 
 ### Table `arg`

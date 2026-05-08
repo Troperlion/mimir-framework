@@ -74,3 +74,25 @@ Canonicalisation observée dans le registre C++ :
 - variantes conviviales `SD3.5` / `sd3.5` / `SD3_5` -> `sd3_5`
 
 Recommandation : utilisez les noms canoniques pour les configs et la sérialisation (ils sont stables), et ne comptez sur les alias que pour charger des anciens scripts.
+
+## Config complète (JSON) : résolution + merge
+
+Le runtime (CLI `--config`) et certaines APIs utilisent une **config complète** qui contient plusieurs sections (tokenizer, viz, lua, etc.).
+
+### Choix de l’architecture
+
+Ordre de recherche :
+
+1) `architecture` (top-level)
+2) `type` (top-level)
+3) `model.architecture`
+4) `model.type`
+
+### Où mettre les overrides modèle
+
+Deux emplacements sont fusionnés dans la config effective du modèle :
+
+- `model` (overrides génériques)
+- la section nommée comme l’architecture (ex: `unet`, `vae_conv`, `transformer`)
+
+Le runtime préserve aussi les clés parentes (ex: `tokenizer`, `lua`, `viz`) dans `model->modelConfig` afin que les scripts puissent les relire.

@@ -13,13 +13,45 @@ Si tu as l’impression que “la doc n’explique rien”, commence par les 3 p
 
 ## Index par tâche (guide rapide)
 
-| Je veux… | Lis… | Lance… |
-| --- | --- | --- |
-| vérifier que l’environnement marche | [docs/01-Getting-Started/01-Quick-Start.md](01-Getting-Started/01-Quick-Start.md) | `./bin/mimir --lua scripts/templates/template_new_model.lua` |
-| comprendre create/build/alloc/init | [docs/02-User-Guide/02-Model-Lifecycle.md](02-User-Guide/02-Model-Lifecycle.md) | `./bin/mimir --lua scripts/templates/template_new_model.lua` |
-| apprendre à passer des arguments | [docs/02-User-Guide/06-Lua-Scripting.md](02-User-Guide/06-Lua-Scripting.md) | `./bin/mimir --lua scripts/training/ponyxl_ddpm_train.lua -- --help` |
-| éviter les OOM et stabiliser les runs | [docs/02-User-Guide/09-Memory.md](02-User-Guide/09-Memory.md) | `./bin/mimir --lua scripts/benchmarks/benchmark_official.lua -- --safe --iters 1` |
-| sauver/charger proprement | [docs/03-API-Reference/02-Serialization.md](03-API-Reference/02-Serialization.md) | `./bin/mimir --lua scripts/tests/test_serialization_smoke.lua` |
+- Vérifier que l’environnement marche
+	- Lis : [docs/01-Getting-Started/01-Quick-Start.md](01-Getting-Started/01-Quick-Start.md)
+	- Lance :
+
+```bash
+./bin/mimir --lua scripts/templates/template_new_model.lua
+```
+
+- Comprendre create/build/alloc/init
+	- Lis : [docs/02-User-Guide/02-Model-Lifecycle.md](02-User-Guide/02-Model-Lifecycle.md)
+	- Lance :
+
+```bash
+./bin/mimir --lua scripts/templates/template_new_model.lua
+```
+
+- Apprendre à passer des arguments
+	- Lis : [docs/02-User-Guide/06-Lua-Scripting.md](02-User-Guide/06-Lua-Scripting.md)
+	- Lance :
+
+```bash
+./bin/mimir --lua scripts/training/ponyxl_ddpm_train.lua -- --help
+```
+
+- Éviter les OOM et stabiliser les runs
+	- Lis : [docs/02-User-Guide/09-Memory.md](02-User-Guide/09-Memory.md)
+	- Lance :
+
+```bash
+./bin/mimir --lua scripts/benchmarks/benchmark_official.lua -- --safe --iters 1
+```
+
+- Sauver/charger proprement
+	- Lis : [docs/03-API-Reference/02-Serialization.md](03-API-Reference/02-Serialization.md)
+	- Lance :
+
+```bash
+./bin/mimir --lua scripts/tests/test_serialization_smoke.lua
+```
 
 ## Cheat sheet (conventions + champs importants)
 
@@ -68,6 +100,7 @@ Si tu as l’impression que “la doc n’explique rien”, commence par les 3 p
 - Scripting Lua (args, globals) : [docs/02-User-Guide/06-Lua-Scripting.md](02-User-Guide/06-Lua-Scripting.md)
 - Tokenizer & Encoder : [docs/02-User-Guide/07-Tokenizer-Encoder.md](02-User-Guide/07-Tokenizer-Encoder.md)
 - Checkpoints / reprise : [docs/02-User-Guide/08-Checkpoints.md](02-User-Guide/08-Checkpoints.md)
+- Analyse d’un artefact modèle sur disque (SafeTensors / RawFolder / DebugJson) : [docs/02-User-Guide/08-Checkpoints.md](02-User-Guide/08-Checkpoints.md)
 - Mémoire (Allocator, MemoryGuard) : [docs/02-User-Guide/09-Memory.md](02-User-Guide/09-Memory.md)
 - Scripts d’exemples : [docs/02-User-Guide/10-Examples.md](02-User-Guide/10-Examples.md)
 - Tutoriel VAEText : [docs/02-User-Guide/11-VAEText.md](02-User-Guide/11-VAEText.md)
@@ -115,6 +148,7 @@ Si tu as l’impression que “la doc n’explique rien”, commence par les 3 p
 
 - Performance & tuning CPU : [docs/05-Advanced/01-Performance.md](05-Advanced/01-Performance.md)
 - Debug & stabilité numérique : [docs/05-Advanced/02-Debugging.md](05-Advanced/02-Debugging.md)
+- Analyse modèle (outil `analyze_model.lua`, graphe Mermaid Markdown) : [docs/05-Advanced/02-Debugging.md](05-Advanced/02-Debugging.md)
 - LLM (état / manque / roadmap) : [docs/05-Advanced/03-LLM-Readiness.md](05-Advanced/03-LLM-Readiness.md)
 - Carte du code source (C/C++, fichier par fichier) : [docs/05-Advanced/04-Source-Code-Map.md](05-Advanced/04-Source-Code-Map.md)
 

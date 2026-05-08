@@ -217,6 +217,7 @@ set(MIMIR_SOURCES
     src/Model.cpp
     src/Encoder.cpp
     src/Tokenizer.cpp
+    src/ConfigOverrides.cpp
     src/Visualizer.cpp
     src/tensors.cpp
     src/Sha256.cpp
@@ -255,6 +256,7 @@ set(MIMIR_HEADERS
     src/Model.hpp
     src/Encoder.hpp
     src/Tokenizer.hpp
+    src/ConfigOverrides.hpp
     src/Visualizer.hpp
     src/tensors.hpp
     src/Sha256.hpp
@@ -453,20 +455,6 @@ if(BUILD_MIMIR_STATIC)
     endif()
 endif()
 
-message(STATUS "Tests/exemples désactivés (obsolètes)")
-
-# ============================================================================
-# Tests unitaires (CTest)
-# ============================================================================
-
-option(MIMIR_ENABLE_TESTS "Build unit tests (CTest)" OFF)
-if(MIMIR_ENABLE_TESTS)
-    include(CTest)
-    if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Tests/CMakeLists.txt")
-        add_subdirectory(Tests)
-    endif()
-endif()
-
 # ============================================================================
 # Scripts Lua
 # ============================================================================
@@ -537,3 +525,12 @@ message(STATUS "  Examples:          ${BUILD_EXAMPLES}")
 message(STATUS "")
 message(STATUS "Install prefix:      ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "")
+option(MIMIR_ENABLE_TESTS "Build unit tests (CTest)" ON)
+if(MIMIR_ENABLE_TESTS)
+    include(CTest)
+    if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Tests/CMakeLists.txt")
+        # Use a unique binary dir to avoid collisions when multiple subprojects
+        # (or previous configurations) also add a 'Tests' directory.
+        add_subdirectory(Tests "${CMAKE_CURRENT_BINARY_DIR}/_mimir_tests")
+    endif()
+endif()
