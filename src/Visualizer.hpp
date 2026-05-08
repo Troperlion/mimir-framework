@@ -482,6 +482,7 @@ public:
     bool consumeStopTrainingRequested() { return false; }
 
     struct LiveTrainParams {
+        bool overrides_enabled = false;
         float lr = 0.0f;
         int lr_warmup_steps = 0;
         float kl_beta = 0.0f;

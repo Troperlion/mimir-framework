@@ -18,6 +18,28 @@
 #include <filesystem>
 #include <iomanip>
 #include <unordered_set>
+#include <type_traits>
+#include <utility>
+
+namespace {
+
+template <typename T, typename = void>
+struct _mimir_has_overrides_enabled : std::false_type {};
+
+template <typename T>
+struct _mimir_has_overrides_enabled<T, std::void_t<decltype(std::declval<T>().overrides_enabled)>>
+    : std::true_type {};
+
+template <typename T>
+bool _mimir_live_params_overrides_enabled(const T& p) {
+    if constexpr (_mimir_has_overrides_enabled<T>::value) {
+        return static_cast<bool>(p.overrides_enabled);
+    }
+    // Compat: anciennes versions n'avaient pas de toggle => considérer "ON".
+    return true;
+}
+
+}  // namespace
 
 // ============================================================================
 // Constructeur / Destructeur
@@ -1117,7 +1139,7 @@ int LuaScripting::lua_trainModel(lua_State* L) {
             if (p.version == 0) return;
 
             // Si on repasse en mode natif, restaurer la baseline une fois.
-            if (!p.overrides_enabled) {
+            if (!_mimir_live_params_overrides_enabled(p)) {
                 if (live_override_active) {
                     live_override_active = false;
                     opt.initial_lr = std::max(1e-12f, baseline_lr);
