@@ -393,8 +393,8 @@ pas d'un toolkit CUDA.
 
 ### Validation
 
-Recette CMake/CTest pour un build avec tests (elle n'a pas été exécutée dans
-le build local, où `MIMIR_ENABLE_TESTS=OFF`) :
+Recette CMake/CTest pour un build avec tests (adapter le dossier de build ;
+les validations matérielles locales sont précisées ci-dessous) :
 
 ```bash
 cmake -S . -B build-gpu-tests -DENABLE_OPENCL=ON -DENABLE_VULKAN=ON -DMIMIR_ENABLE_TESTS=ON -DBUILD_TESTING=ON
@@ -417,3 +417,18 @@ Ces résultats prouvent la conformité et le routage, sans mesure de performance
 
 Voir aussi [le contrat NMS](../03-API-Reference/01-Layers.md#contrat-de-nms)
 et [les sources portables](../../src/runtimes/portable/README.md).
+
+
+### Benchmarks Colab et validation du 18 octobre 2026
+
+Les 165 cas de parité native par backend ont été revérifiés sur AMD Radeon
+Graphics avec Vulkan/RADV et OpenCL/Rusticl. Le contrôle des budgets portables
+passe aussi. Le profil Colab `portable` valide sept cas par runtime, avec
+sélection explicite de `VULKAN` ou `OPENCL`, sans repli CPU attribué au GPU.
+Cette validation locale ne prouve pas la disponibilité du pilote NVIDIA dans Colab.
+
+Le microbenchmark peut mesurer plusieurs runtimes Mímir dans le même run, chacun
+dans son processus et sous son identité. Le profil portable partage les mêmes
+formes entre tous les concurrents ; les budgets de sécurité restent actifs.
+Voir [Benchmarks Colab](../05-Advanced/07-Colab-Benchmarks.md) pour les profils,
+la provenance, le RSS et le dépannage des anciennes cellules.

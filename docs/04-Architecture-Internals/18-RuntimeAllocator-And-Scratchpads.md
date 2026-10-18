@@ -19,7 +19,7 @@ Source de vérité :
 
 ## 1) Objectif
 
-- Toute allocation d’activations/buffers temporaires doit être **comptabilisée**.
+- Les allocations effectuées via cet allocator sont **comptabilisées** ; des vecteurs de kernels et des bibliothèques externes peuvent allouer en dehors de ces compteurs.
 - Réduire la fragmentation et les `new/delete` répétés via des scratchpads réutilisables.
 
 ## 2) Deux types de handles RAII
@@ -52,6 +52,19 @@ Le cap local **ne modifie pas** la limite globale : il sert à garder une marge 
   - sinon alloue un nouveau buffer.
 
 - `return_scratchpad(BufferHandle&&)` : remet un buffer dans le pool.
+
+`allocate_buffer(bytes, tag)` initialise les octets demandés à zéro lors d’une
+nouvelle allocation. `allocate_buffer_uninitialized(bytes, tag)` réserve sans
+initialiser : le kernel doit écrire chaque élément avant toute lecture.
+`get_scratchpad_uninitialized(min_bytes, tag)` applique le même contrat à une
+réservation ou à un buffer réutilisé. Un scratchpad déjà présent dans le pool
+n’est pas remis à zéro automatiquement, y compris avec `get_scratchpad`.
+
+Les demandes d’octets non multiples de `sizeof(float)` disposent d’un stockage
+physique arrondi à l’élément supérieur. Le handle et MemoryGuard comptabilisent
+les octets demandés ; le remplissage d’alignement physique n’ajoute donc pas une
+mesure de RSS à ces compteurs. Une exception d’allocation libère la réservation
+MemoryGuard. Les déplacements des handles transfèrent la propriété.
 
 ⚠️ Attention : le pool retient de la mémoire (comptabilisée) tant qu’il vit. Le caller doit décider quand nettoyer via `clear_scratchpad_pool()`.
 

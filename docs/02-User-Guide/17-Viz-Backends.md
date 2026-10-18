@@ -141,6 +141,20 @@ Les modules de rendu sont séparés :
 l'interface abstraite `VizWindow` via `createVizWindow()` ; CMake compile une
 seule fabrique de backend, celle demandée par `MIMIR_VIZ_BACKEND`.
 
+## Réactivité de Qt et GTK
+
+GTK transmet les clics, mouvements, molettes, touches et événements de focus
+au même flux Viz. Un clic rend le focus au canvas ; les boutons de la barre
+d’outils émettent une pression puis un relâchement de touche, puis rendent le
+focus au canvas. Qt conserve aussi le clavier sur le canvas, notamment pour
+Tab, et traduit les actions de barre d’outils dans ce flux commun.
+
+Les hôtes ne redessinent pas une scène inchangée à chaque tick. Les textures
+stables réutilisent leur image encodée et les caches de décodage Qt/Cairo ; une
+mise à jour invalide le contenu concerné, et les assets inutilisés sont évincés.
+Les captures continuent de lire les pixels actualisés. Ces caches réduisent le
+coût de rendu et de transport sans déplacer le calcul du modèle dans la GUI.
+
 ## Vérification reproductible
 
 Une cible graphique explicite évite d’ajouter une dépendance à un écran aux tests

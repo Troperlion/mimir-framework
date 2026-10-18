@@ -72,7 +72,7 @@ disponibilité d'un GPU, de SFML, de FFmpeg ou d'un bridge externe.
 | Sérialisation | Actif, exploitable | RawFolder, SafeTensors, DebugJson, vérification de formes/types/checksums selon format. | Un checkpoint externe doit correspondre à la topologie attendue. |
 | Tokenizer/Encoder | Actif, exploitable | Tokenizer natif, BPE, séquences, encodeur et assets de checkpoint. | La compatibilité d'un tokenizer externe doit être vérifiée, pas supposée. |
 | Dataset multimodal | Actif, partiel par format | Texte, image, audio et vidéo sont représentés; FFmpeg décode les médias si compilé. | Les octets compressés ne sont pas des tenseurs décodés; FFmpeg est optionnel. |
-| Viz SFML/Htop | Optionnel, exploitable | Monitoring, panneaux, métriques, contrôles et snapshots quand SFML est présent. | Headless et CI construisent généralement avec SFML désactivé. |
+| Viz SFML/Qt/GTK/Web et Htop | Optionnel, exploitable | Monitoring, panneaux, contrôles et snapshots ; backend graphique exclusif choisi par CMake. Qt/GTK utilisent un hôte desktop séparé et des caches de textures. | Les hôtes Qt/GTK/Web ciblent Linux ; `NONE` permet le headless. |
 | WebSocket API | Expérimental | Serveur Lua dans `scripts/modules/api_ws_server.lua`. | Ce n'est pas le bridge REST natif CMake. |
 
 ## Architectures

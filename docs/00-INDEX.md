@@ -136,6 +136,7 @@ complètent la couverture ; ils ne garantissent pas une amélioration de vitesse
 ## Aller plus loin
 
 - [Performance](05-Advanced/01-Performance.md)
+- [Benchmarks Colab : profils, runtimes et mesures](05-Advanced/07-Colab-Benchmarks.md)
 - [Débogage et stabilité numérique](05-Advanced/02-Debugging.md)
 - [État de préparation LLM](05-Advanced/03-LLM-Readiness.md)
 - [Carte du code source](05-Advanced/04-Source-Code-Map.md)

@@ -32,7 +32,7 @@ Points clés:
 
 - AI engine de graphes autonome (runtime + mémoire + planner),
 - registre central d'architectures (vision, NLP, diffusion),
-- outillage intégré (datasets, viz SFML, sérialisation, benchmarks),
+- outillage intégré (datasets, Viz SFML/Qt/GTK/Web, sérialisation, benchmarks),
 - approche orientée expérimentation et inspection interne des modèles.
 
 ---
@@ -372,6 +372,14 @@ Capacités clés:
 - accélération Vulkan/OpenCL sur certains chemins
 
 L'engine est **CPU-first** et optimisé pour les processeurs modernes.
+
+Les chemins CPU réduisent les copies et allocations du backward, des convolutions
+et de l’attention. Vulkan/OpenCL disposent aussi de calculs backward natifs,
+sous réserve des formes et budgets acceptés. Voir la
+[documentation performance](docs/05-Advanced/01-Performance.md) et les
+[benchmarks Colab](docs/05-Advanced/07-Colab-Benchmarks.md) : profils partagés,
+mesures distinctes des runtimes GPU, contrôles numériques et mémoire hôte.
+
 
 ---
 
