@@ -21,3 +21,4 @@ for _, dim in ipairs(levels[mode]) do
   end
 end
 log('PASS benchmark construction')
+B.report('official')

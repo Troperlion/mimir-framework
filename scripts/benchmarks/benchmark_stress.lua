@@ -20,25 +20,35 @@ for _, level in ipairs(levels) do
   local x = B.floats(dim)
   local first = loss_grad(B.forward(x, false, dim))
   local fwd, bwd, opt = 0, 0, 0
+  local fwd_samples, bwd_samples, opt_samples = {}, {}, {}
   for step=1,steps do
     assert(Mimir.Model.zero_grads())
     local start = B.now()
     local y = B.forward(x, true, dim)
-    fwd=fwd+B.now()-start
+    local elapsed = B.now()-start
+    fwd=fwd+elapsed
+    fwd_samples[#fwd_samples+1]=elapsed*1000
     local loss, grad = loss_grad(y)
     start = B.now()
     assert(Mimir.Model.backward(grad))
-    bwd=bwd+B.now()-start
+    elapsed=B.now()-start
+    bwd=bwd+elapsed
+    bwd_samples[#bwd_samples+1]=elapsed*1000
     B.vector(assert(Mimir.Model.get_gradients()))
     start = B.now()
     assert(Mimir.Model.optimizer_step(lr, 'adamw'))
-    opt=opt+B.now()-start
+    elapsed=B.now()-start
+    opt=opt+elapsed
+    opt_samples[#opt_samples+1]=elapsed*1000
     if step==1 or step==steps then log(string.format('step=%d/%d loss=%.8f',step,steps,loss)) end
   end
   local final = loss_grad(B.forward(x, false, dim))
   assert(final < first*0.99, 'MLP: diminution de loss <1%')
-  log(string.format('PASS MLP dim=%d steps=%d loss=%.8f -> %.8f cpu_ms/step forward=%.3f backward=%.3f optimizer=%.3f',
+  log(string.format('PASS MLP dim=%d steps=%d loss=%.8f -> %.8f wall_ms/step forward=%.3f backward=%.3f optimizer=%.3f',
     dim,steps,first,final,fwd*1000/steps,bwd*1000/steps,opt*1000/steps))
+  B.record('forward MLP dim='..dim, fwd_samples, {iterations=steps})
+  B.record('backward MLP dim='..dim, bwd_samples, {iterations=steps})
+  B.record('optimizer MLP dim='..dim, opt_samples, {iterations=steps})
   B.snapshot('entraînement')
 end
 local churn = B.number('--churn',nil,B.has('--quick') and 3 or 120,1,true)
@@ -53,3 +63,4 @@ B.measure('créations répétées: '..churn, function()
 end)
 B.snapshot('fin')
 log('PASS benchmark stress')
+B.report('stress')

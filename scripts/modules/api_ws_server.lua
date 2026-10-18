@@ -1,20 +1,27 @@
+-- HTTP/WS pilotage: ce module est l'entrée réseau, sans modification des bindings.
+ROOTWORK = rawget(_G, "ROOTWORK") or os.getenv("ROOTWORK")
+  or ((arg and arg[0] or ""):match("^(.*)/scripts/modules/[^/]+$")) or "."
 local Help = dofile(ROOTWORK.."/scripts/modules/help_cli.lua")
 Help.auto_exit_help()
 
--- scripts/api_ws_server.lua
+-- scripts/modules/api_ws_server.lua
 -- Serveur HTTP + WebSocket minimal pour piloter Mímir via REST (GET/POST/PUT/PATCH/DELETE)
 -- Dépendances: LuaSocket (luasocket)
--- Usage (Lua système):   lua scripts/api_ws_server.lua
--- Usage (avec Mímir):    ./bin/mimir --lua scripts/api_ws_server.lua -- --host 127.0.0.1 --port 8088
+-- Usage (Lua système):   lua scripts/modules/api_ws_server.lua
+-- Usage (avec Mímir):    ./bin/mimir --lua scripts/modules/api_ws_server.lua -- --host 127.0.0.1 --port 8088
 -- Alias flags: --api-host/--api-port
+-- Auth: --auth off|token|api_key|either, --auth-token / --auth-token-file, --api-key / --api-key-file
+-- TLS: --tls --tls-cert chemin --tls-key chemin (LuaSec requis).
+-- --max-body-bytes 16777216 limite les bodies HTTP et les messages WS assemblés.
+-- Découverte: GET /help et /capabilities. RPC: POST /rpc {"api":"Model.forward","args":[[0.1,0.2],false]}.
+-- Les retours multiples RPC sont préservés dans results (nil -> null).
+-- Serveur mono-client: une session WS monopolise la boucle; la fermer avant les requêtes HTTP.
 
-local Args
 local opts = {}
 do
   local ok_args, mod_or_err = pcall(dofile, ROOTWORK.."/scripts/modules/args.lua")
   if ok_args and type(mod_or_err) == "table" and type(mod_or_err.parse) == "function" then
-    Args = mod_or_err
-    opts = Args.parse(arg) or {}
+    opts = mod_or_err.parse(arg) or {}
   end
 end
 
@@ -56,6 +63,9 @@ end
 
 local HOST = opt_str("host", opt_str("api-host", "127.0.0.1"))
 local PORT = opt_int("port", opt_int("api-port", 8088))
+local MAX_BODY_BYTES = opt_int("max-body-bytes", 16 * 1024 * 1024)
+assert(PORT >= 1 and PORT <= 65535, "port doit être entre 1 et 65535")
+assert(MAX_BODY_BYTES > 0, "max-body-bytes doit être positif")
 
 local SERVER_NAME = opt_str("server-name", "mimir-lua-api")
 
@@ -68,7 +78,7 @@ local function safe_read_file(path)
   return (s:gsub("%s+$", ""))
 end
 
-local SERVER_VERSION = safe_read_file("VERSION") or safe_read_file("./VERSION") or "unknown"
+local SERVER_VERSION = safe_read_file(ROOTWORK.."/VERSION") or "unknown"
 
 -- =========================
 -- Auth / TLS options
@@ -141,8 +151,17 @@ end
 -- =========================
 -- JSON minimal (encode/decode)
 -- =========================
+local JSON_NULL = setmetatable({}, { __json = "null" })
+local JSON_ARRAY = { __json = "array" }
+local JSON_OBJECT = { __json = "object" }
+local function json_array(t) return setmetatable(t or {}, JSON_ARRAY) end
+
 local function is_array(t)
   if type(t) ~= "table" then return false end
+  local mt = getmetatable(t)
+  if mt == JSON_ARRAY then return true end
+  if mt == JSON_OBJECT or t == JSON_NULL then return false end
+  if next(t) == nil then return false end
   local n = 0
   for k, _ in pairs(t) do
     if type(k) ~= "number" then return false end
@@ -170,7 +189,7 @@ end
 
 local function json_encode(v)
   local tv = type(v)
-  if v == nil then return "null" end
+  if v == nil or v == JSON_NULL then return "null" end
   if tv == "boolean" then return v and "true" or "false" end
   if tv == "number" then
     if v ~= v or v == math.huge or v == -math.huge then return "null" end
@@ -192,7 +211,7 @@ local function json_encode(v)
       return "{" .. table.concat(out, ",") .. "}"
     end
   end
-  return "null"
+  error("Valeur non sérialisable en JSON: " .. tv)
 end
 
 local function json_decode(str)
@@ -233,18 +252,25 @@ local function json_decode(str)
             error("JSON: escape \\u invalide")
           end
           local code = tonumber(hex, 16)
-          if code <= 0x7F then
-            out[#out+1] = string.char(code)
-          elseif code <= 0x7FF then
-            out[#out+1] = string.char(0xC0 + math.floor(code/0x40), 0x80 + (code % 0x40))
-          else
-            out[#out+1] = string.char(0xE0 + math.floor(code/0x1000), 0x80 + (math.floor(code/0x40) % 0x40), 0x80 + (code % 0x40))
-          end
           i = i + 6
+          if code >= 0xD800 and code <= 0xDBFF then
+            local low_hex = str:sub(i + 2, i + 5)
+            if str:sub(i, i + 1) ~= "\\u" or not low_hex:match("^%x%x%x%x$") then
+              error("JSON: paire de surrogates incomplète")
+            end
+            local low = tonumber(low_hex, 16)
+            if low < 0xDC00 or low > 0xDFFF then error("JSON: surrogate bas invalide") end
+            code = 0x10000 + (code - 0xD800) * 0x400 + low - 0xDC00
+            i = i + 6
+          elseif code >= 0xDC00 and code <= 0xDFFF then
+            error("JSON: surrogate isolé")
+          end
+          out[#out+1] = utf8.char(code)
         else
           error("JSON: escape invalide")
         end
       else
+        if c:byte() < 32 then error("JSON: caractère de contrôle non échappé") end
         out[#out+1] = c
         i = i + 1
       end
@@ -255,20 +281,28 @@ local function json_decode(str)
     local start = i
     local c = str:sub(i, i)
     if c == "-" then i = i + 1 end
-    while str:sub(i, i):match("%d") do i = i + 1 end
+    if str:sub(i, i) == "0" then
+      i = i + 1
+      if str:sub(i, i):match("%d") then error("JSON: zéro initial interdit") end
+    else
+      if not str:sub(i, i):match("[1-9]") then error("JSON: nombre invalide") end
+      while str:sub(i, i):match("%d") do i = i + 1 end
+    end
     if str:sub(i, i) == "." then
       i = i + 1
+      if not str:sub(i, i):match("%d") then error("JSON: fraction invalide") end
       while str:sub(i, i):match("%d") do i = i + 1 end
     end
     local e = str:sub(i, i)
     if e == "e" or e == "E" then
       i = i + 1
-      local s = str:sub(i, i)
-      if s == "+" or s == "-" then i = i + 1 end
+      local sign = str:sub(i, i)
+      if sign == "+" or sign == "-" then i = i + 1 end
+      if not str:sub(i, i):match("%d") then error("JSON: exposant invalide") end
       while str:sub(i, i):match("%d") do i = i + 1 end
     end
     local num = tonumber(str:sub(start, i-1))
-    if num == nil then error("JSON: nombre invalide") end
+    if num == nil or num == math.huge or num == -math.huge then error("JSON: nombre invalide") end
     return num
   end
 
@@ -276,7 +310,7 @@ local function json_decode(str)
   local function parse_array()
     i = i + 1
     skip_ws()
-    local arr = {}
+    local arr = json_array()
     if str:sub(i, i) == "]" then i = i + 1; return arr end
     while true do
       arr[#arr+1] = parse_value()
@@ -291,7 +325,7 @@ local function json_decode(str)
   local function parse_object()
     i = i + 1
     skip_ws()
-    local obj = {}
+    local obj = setmetatable({}, JSON_OBJECT)
     if str:sub(i, i) == "}" then i = i + 1; return obj end
     while true do
       if str:sub(i, i) ~= '"' then error("JSON: clé attendue") end
@@ -318,7 +352,7 @@ local function json_decode(str)
     if c == "-" or c:match("%d") then return parse_number() end
     if str:sub(i, i+3) == "true" then i = i + 4; return true end
     if str:sub(i, i+4) == "false" then i = i + 5; return false end
-    if str:sub(i, i+3) == "null" then i = i + 4; return nil end
+    if str:sub(i, i+3) == "null" then i = i + 4; return JSON_NULL end
     error("JSON: valeur invalide")
   end
 
@@ -459,7 +493,11 @@ local function read_http_request(client)
   end
 
   local body = ""
-  local cl = tonumber(headers["content-length"] or "0")
+  if headers["transfer-encoding"] then return nil, "Transfer-Encoding non supporté" end
+  local length = headers["content-length"] or "0"
+  if not length:match("^%d+$") then return nil, "Content-Length invalide" end
+  local cl = tonumber(length)
+  if not cl or cl > MAX_BODY_BYTES then return nil, "payload_too_large" end
   if cl and cl > 0 then
     local chunk, berr = client:receive(cl)
     if not chunk then return nil, berr end
@@ -479,7 +517,11 @@ local function http_response(status, headers, body)
     [400] = "Bad Request",
     [404] = "Not Found",
     [405] = "Method Not Allowed",
+    [413] = "Payload Too Large",
+    [422] = "Unprocessable Entity",
+    [426] = "Upgrade Required",
     [500] = "Internal Server Error",
+    [503] = "Service Unavailable",
   }
 
   local lines = {}
@@ -618,10 +660,6 @@ local function framework_info()
   }
 end
 
-local function safe_call(fn, ...)
-  return pcall(fn, ...)
-end
-
 local request_counter = 0
 local function next_request_id()
   request_counter = request_counter + 1
@@ -646,298 +684,473 @@ local function enrich_json_body(body_json, req_meta)
   return json_encode(payload)
 end
 
-local function api_handle(method, path, headers, body)
+local ROUTES = {
+  { method = "GET", path = "/health", desc = "/health"
+  },
+  { method = "GET", path = "/help", desc = "/help"
+  },
+  { method = "GET", path = "/capabilities", desc = "/capabilities"
+  },
+  { method = "POST", path = "/rpc",
+    body = {api = "Mimir.Benchmark.now",
+    args = json_array()}, desc = "Appel d’un binding public avec arguments positionnels et retours multiples"
+  },
+  { method = "GET", path = "/architectures",
+    api = "Architectures.available", result = "architectures", desc = "Architectures.available"
+  },
+  { method = "GET", path = "/architectures/default_config",
+    api = "Architectures.default_config",
+    args = {"model_type"}, result = "config", desc = "Architectures.default_config",
+    required = {"model_type"},
+    query = {model_type = "basic_mlp"}
+  },
+  { method = "GET", path = "/architectures/info",
+    api = "Architectures.info",
+    args = {"model_type"}, result = "info", desc = "Architectures.info",
+    query = {model_type = "basic_mlp"}
+  },
+  { method = "GET", path = "/architectures/dtypes",
+    api = "Architectures.dtypes", result = "dtypes", desc = "Architectures.dtypes"
+  },
+  { method = "GET", path = "/hardware",
+    api = "Model.hardware_caps", result = "caps", desc = "Model.hardware_caps"
+  },
+  { method = "PUT", path = "/hardware",
+    api = "Model.set_hardware",
+    args = {"enable"}, result = "enabled",
+    body = {enable = false}, desc = "Model.set_hardware"
+  },
+  { method = "GET", path = "/allocator",
+    api = "Allocator.get_stats", result = "stats", desc = "Allocator.get_stats"
+  },
+  { method = "PATCH", path = "/allocator",
+    api = "Allocator.configure",
+    args = {"$body"},
+    body = {max_ram_gb = 10.0, enable_compression = true}, desc = "Allocator.configure"
+  },
+  { method = "DELETE", path = "/allocator", desc = "Ack + GC Lua ; aucun reset natif exposé"
+  },
+  { method = "POST", path = "/model/create",
+    api = "Model.create",
+    args = {"model_type", "config"},
+    body = {model_type = "basic_mlp", config = {input_dim = 4, hidden_dim = 8, output_dim = 2}}, desc = "Model.create",
+    required = {"model_type"}
+  },
+  { method = "POST", path = "/model/create_from_config",
+    api = "Model.create_from_config",
+    args = {"$body"}, result = "architecture",
+    body = {architecture = "basic_mlp", basic_mlp = {input_dim = 4, hidden_dim = 8, output_dim = 2}}, desc = "Model.create_from_config"
+  },
+  { method = "POST", path = "/model/build",
+    api = "Model.build", result = "params", desc = "Model.build"
+  },
+  { method = "POST", path = "/model/allocate_params",
+    api = "Model.allocate_params", result = "params", desc = "Model.allocate_params"
+  },
+  { method = "POST", path = "/model/init_weights",
+    api = "Model.init_weights",
+    args = {"init", "seed"},
+    body = {init = "he", seed = 42}, desc = "Model.init_weights",
+    defaults = {init = "he", seed = 0}
+  },
+  { method = "GET", path = "/model/params",
+    api = "Model.total_params", result = "params", desc = "Model.total_params"
+  },
+  { method = "GET", path = "/model/config",
+    api = "Model.get_config", result = "config", desc = "Model.get_config"
+  },
+  { method = "GET", path = "/model/layers",
+    api = "Model.get_layers", result = "layers", desc = "Model.get_layers"
+  },
+  { method = "GET", path = "/model/dtype",
+    api = "Model.dtype", result = "dtype", desc = "Model.dtype"
+  },
+  { method = "PUT", path = "/model/dtype",
+    api = "Model.dtype",
+    args = {"dtype"}, result = "dtype",
+    body = {dtype = "float32"}, desc = "Model.dtype",
+    required = {"dtype"}
+  },
+  { method = "POST", path = "/model/forward",
+    api = "Model.forward",
+    args = {"input", "training"}, result = "output",
+    body = {input = {0.1, 0.2, 0.3, 0.4}, training = false}, desc = "Model.forward",
+    required = {"input"},
+    defaults = {training = false}
+  },
+  { method = "POST", path = "/model/infer",
+    api = "Model.infer",
+    args = {"input"}, result = "output",
+    body = {input = {0.1, 0.2, 0.3, 0.4}}, desc = "Model.infer",
+    required = {"input"}
+  },
+  { method = "POST", path = "/model/backward",
+    api = "Model.backward",
+    args = {"gradient"},
+    body = {gradient = {0.1, -0.2}}, desc = "Model.backward",
+    required = {"gradient"}
+  },
+  { method = "POST", path = "/model/zero_grads",
+    api = "Model.zero_grads", desc = "Model.zero_grads"
+  },
+  { method = "POST", path = "/model/optimizer_step",
+    api = "Model.optimizer_step",
+    args = {"learning_rate", "optimizer"},
+    body = {learning_rate = 0.001, optimizer = "adamw"}, desc = "Model.optimizer_step",
+    required = {"learning_rate"},
+    defaults = {optimizer = "adamw"}
+  },
+  { method = "GET", path = "/model/gradients",
+    api = "Model.get_gradients", result = "gradients", desc = "Model.get_gradients"
+  },
+  { method = "POST", path = "/model/train",
+    api = "Model.train",
+    args = {"epochs", "learning_rate"},
+    body = {epochs = 1, learning_rate = 0.001}, desc = "Model.train",
+    required = {"epochs", "learning_rate"}
+  },
+  { method = "DELETE", path = "/model", desc = "Ack + GC Lua ; aucun reset natif du modèle exposé"
+  },
+  { method = "POST", path = "/tokenizer/create",
+    api = "Tokenizer.create",
+    args = {"max_vocab"},
+    body = {max_vocab = 256}, desc = "Tokenizer.create",
+    required = {"max_vocab"}
+  },
+  { method = "POST", path = "/tokenizer/tokenize",
+    api = "Tokenizer.tokenize",
+    args = {"text"}, result = "tokens",
+    body = {text = "bonjour monde"}, desc = "Tokenizer.tokenize",
+    required = {"text"}
+  },
+  { method = "POST", path = "/tokenizer/tokenize_ensure",
+    api = "Tokenizer.tokenize_ensure",
+    args = {"text"}, result = "tokens",
+    body = {text = "bonjour monde"}, desc = "Tokenizer.tokenize_ensure",
+    required = {"text"}
+  },
+  { method = "POST", path = "/tokenizer/detokenize",
+    api = "Tokenizer.detokenize",
+    args = {"tokens"}, result = "text",
+    body = {tokens = {1, 2}}, desc = "Tokenizer.detokenize",
+    required = {"tokens"}
+  },
+  { method = "POST", path = "/tokenizer/learn_bpe",
+    api = "Tokenizer.learn_bpe",
+    args = {"corpus", "num_merges"},
+    body = {corpus = {"bonjour monde", "bonjour Mimir"}, num_merges = 32}, desc = "Tokenizer.learn_bpe",
+    required = {"corpus"},
+    defaults = {num_merges = 32}
+  },
+  { method = "GET", path = "/tokenizer/vocab_size",
+    api = "Tokenizer.vocab_size", result = "vocab_size", desc = "Tokenizer.vocab_size"
+  },
+  { method = "POST", path = "/tokenizer/save",
+    api = "Tokenizer.save",
+    args = {"path"},
+    body = {path = "checkpoint/tokenizer.json"}, desc = "Tokenizer.save",
+    required = {"path"}
+  },
+  { method = "POST", path = "/tokenizer/load",
+    api = "Tokenizer.load",
+    args = {"path"},
+    body = {path = "checkpoint/tokenizer.json"}, desc = "Tokenizer.load",
+    required = {"path"}
+  },
+  { method = "POST", path = "/dataset/load",
+    api = "Dataset.load",
+    args = {"dir", "width", "height", "min_modalities", "use_cache", "cache_path", "max_ram_mb", "lazy_loading"}, result = "count",
+    body = {dir = "dataset/example", width = 64, height = 64, min_modalities = 1, use_cache = false, cache_path = "checkpoint/dataset-index.json", max_ram_mb = 128, lazy_loading = true}, desc = "Dataset.load",
+    required = {"dir"},
+    defaults = {width = 64, height = 64, min_modalities = 1, use_cache = false, max_ram_mb = 128, lazy_loading = true}
+  },
+  { method = "GET", path = "/dataset/item",
+    api = "Dataset.get",
+    args = {"index", "load_image"}, result = "item", desc = "Dataset.get",
+    required = {"index"},
+    defaults = {load_image = true},
+    query = {index = 1, load_image = false}
+  },
+  { method = "POST", path = "/dataset/release",
+    api = "Dataset.release",
+    args = {"index"},
+    body = {index = 1}, desc = "Dataset.release",
+    required = {"index"}
+  },
+  { method = "POST", path = "/dataset/prepare_sequences",
+    api = "Dataset.prepare_sequences",
+    args = {"max_length"}, result = "count",
+    body = {max_length = 128}, desc = "Dataset.prepare_sequences",
+    defaults = {max_length = 128}
+  },
+  { method = "GET", path = "/memory",
+    api = "Memory.get_stats", result = "stats", desc = "Memory.get_stats"
+  },
+  { method = "PATCH", path = "/memory",
+    api = "Memory.config",
+    args = {"$body"},
+    body = {max_ram_gb = 2.0}, desc = "Memory.config"
+  },
+  { method = "GET", path = "/memory/guard",
+    api = "MemoryGuard.getStats", result = "stats", desc = "MemoryGuard.getStats"
+  },
+  { method = "GET", path = "/layers",
+    api = "Layers.available", result = "layers", desc = "Layers.available"
+  },
+  { method = "GET", path = "/layers/by_type",
+    api = "Layers.by_type",
+    args = {"type"}, result = "layers", desc = "Layers.by_type",
+    required = {"type"},
+    query = {type = "Linear"}
+  },
+  { method = "POST", path = "/serialization/load",
+    api = "Serialization.load",
+    args = {"path", "format", "options"},
+    body = {path = "checkpoint/api-smoke", format = "raw_folder", options = {verify_checksums = true}}, desc = "Serialization.load",
+    required = {"path"}
+  },
+  { method = "POST", path = "/serialization/save",
+    api = "Serialization.save",
+    args = {"path", "format", "options"},
+    body = {path = "checkpoint/api-smoke", format = "raw_folder", options = {include_git_info = true}}, desc = "Serialization.save",
+    required = {"path"}
+  },
+  { method = "POST", path = "/serialization/detect_format",
+    api = "Serialization.detect_format",
+    args = {"path"}, result = "format",
+    body = {path = "checkpoint/api-smoke"}, desc = "Serialization.detect_format",
+    required = {"path"}
+  },
+  { method = "GET", path = "/viz/backend",
+    api = "Viz.backend", result = "backend", desc = "Viz.backend"
+  },
+  { method = "GET", path = "/viz/events",
+    api = "Viz.poll_events",
+    args = {"timeout_ms"}, result = "events", desc = "Viz.poll_events",
+    defaults = {timeout_ms = 0},
+    query = {timeout_ms = 0}
+  },
+  { method = "POST", path = "/viz/create",
+    api = "Viz.create",
+    args = {"$body"},
+    body = {visualization = {enabled = true, window_width = 1000, window_height = 700}}, desc = "Viz.create"
+  },
+  { method = "PATCH", path = "/viz",
+    api = "Viz.configure",
+    args = {"$body"},
+    body = {panels = {{id = 1, title = "Preview", x = 20, y = 100, w = 600, h = 400}}, controls = {{id = "apply", label = "Apply", x = 20, y = 20, w = 150, h = 40}}, events = true}, desc = "Viz.configure"
+  },
+  { method = "PUT", path = "/viz/validation",
+    api = "Viz.set_validation",
+    args = {"$body"},
+    body = {enabled = true, in_progress = false, step = 0}, desc = "Viz.set_validation"
+  },
+  { method = "GET", path = "/viz/validation",
+    api = "Viz.validation_enabled", result = "enabled", desc = "Viz.validation_enabled"
+  },
+  { method = "PUT", path = "/viz/enabled",
+    api = "Viz.set_enabled",
+    args = {"enabled"},
+    body = {enabled = false}, desc = "Viz.set_enabled",
+    required = {"enabled"}
+  },
+}
+
+local function public_api(name)
+  if type(name) ~= "string" then return nil end
+  name = name:gsub("^Mimir%.", "")
+  local namespace, method = name:match("^([%a_][%w_]*)%.([%a_][%w_]*)$")
+  local root = rawget(_G, "Mimir")
+  local ns = root and namespace and root[namespace]
+  return type(ns) == "table" and type(ns[method]) == "function" and ns[method] or nil
+end
+
+local function api_surface()
+  local surface = setmetatable({}, JSON_OBJECT)
+  for namespace, ns in pairs(rawget(_G, "Mimir") or {}) do
+    if type(ns) == "table" then
+      local methods = json_array()
+      for name, fn in pairs(ns) do
+        if type(fn) == "function" then methods[#methods + 1] = name end
+      end
+      table.sort(methods)
+      surface[namespace] = methods
+    end
+  end
+  return surface
+end
+
+local function native_value(value)
+  if value == JSON_NULL then return nil end
+  if type(value) ~= "table" then return value end
+  local out = {}
+  for key, item in pairs(value) do out[key] = native_value(item) end
+  return out
+end
+
+local function invoke_api(fn, args)
+  local result = table.pack(pcall(fn, table.unpack(args, 1, args.n or #args)))
+  if not result[1] then return nil, tostring(result[2]), 400 end
+  if (result[2] == nil or result[2] == false) and type(result[3]) == "string" then
+    return nil, result[3], 422
+  end
+  local values = json_array()
+  for i = 2, result.n do values[i - 1] = result[i] == nil and JSON_NULL or result[i] end
+  return values
+end
+
+local function api_handle_impl(method, path, headers, body)
   local clean_path, query = parse_query(path)
-  local content_type = (headers["content-type"] or ""):lower()
-
-  -- CORS preflight: ne doit pas être bloqué par l'auth, sinon le navigateur échoue avant la requête réelle.
-  if method == "OPTIONS" then
-    return 200, { ["Content-Type"] = "application/json" }, json_encode({ ok = true })
+  local function response(payload, status, extra_headers)
+    local hdrs = extra_headers or {}
+    hdrs["Content-Type"] = "application/json"
+    return status or 200, hdrs, json_encode(payload)
   end
-
+  if method == "OPTIONS" then return response({ ok = true }) end
   do
-    local ok_auth, status, hdrs, resp = auth_check(method, clean_path, headers, query)
-    if not ok_auth then
-      return status, hdrs, resp
-    end
+    local authorized, status, hdrs, resp = auth_check(method, clean_path, headers, query)
+    if not authorized then return status, hdrs, resp end
   end
 
-  local json_body = nil
-  if body and body ~= "" and content_type:find("application/json", 1, true) then
-    local ok, decoded = pcall(json_decode, body)
-    if ok then json_body = decoded else
-      return 400, { ["Content-Type"] = "application/json" }, json_encode({ ok = false, error = "JSON invalide", detail = decoded })
+  local payload
+  if body and body ~= "" then
+    if not (headers["content-type"] or ""):lower():find("application/json", 1, true) then
+      return response({ ok = false, error = "Content-Type application/json requis" }, 400)
     end
-  end
-
-  -- util: renvoie JSON standard
-  local function ok_json(payload, status)
-    return status or 200, { ["Content-Type"] = "application/json" }, json_encode(payload)
-  end
-
-  -- ====== Routes ======
-  if method == "GET" and clean_path == "/help" then
-    return ok_json({
-      ok = true,
-      server = { name = SERVER_NAME, version = SERVER_VERSION, host = HOST, port = PORT, lua = _VERSION },
-      security = {
-        tls = TLS_ENABLED,
-        auth = {
-          mode = AUTH_MODE,
-          enabled = auth_enabled(),
-          skip_paths = AUTH_SKIP_PATHS,
-          accepted = {
-            bearer = (AUTH_MODE == "token" or AUTH_MODE == "either"),
-            api_key = (AUTH_MODE == "api_key" or AUTH_MODE == "either"),
-            query_for_ws = true,
-          },
-        },
-      },
-      routes = {
-        { method = "GET", path = "/health", desc = "Santé + disponibilité de Mimir" },
-        { method = "GET", path = "/help", desc = "Liste des routes du serveur" },
-        { method = "GET", path = "/architectures", desc = "Liste des architectures disponibles (registry)" },
-        { method = "GET", path = "/architectures/default_config", desc = "Config par défaut", query = { model_type = "transformer" } },
-        { method = "GET", path = "/hardware", desc = "Capacités hardware détectées (AVX2/FMA/F16C/BMI2)" },
-        { method = "PUT", path = "/hardware", desc = "Activer/désactiver l'accélération matérielle (API actuelle)", body = { enable = true } },
-        { method = "GET", path = "/allocator", desc = "Stats allocator (DynamicTensorAllocator)" },
-        { method = "PATCH", path = "/allocator", desc = "Configurer allocator", body = { max_ram_gb = 10.0, enable_compression = true } },
-        { method = "DELETE", path = "/allocator", desc = "Ack + GC (pas de reset allocator exposé)" },
-        { method = "POST", path = "/model/create", desc = "Créer un modèle", body = { model_type = "transformer", config = { vocab_size = 32000 } } },
-        { method = "POST", path = "/model/build", desc = "Build le modèle courant" },
-        { method = "POST", path = "/model/init_weights", desc = "Init poids", body = { init = "xavier|he|normal|uniform|zeros", seed = 123 } },
-        { method = "GET", path = "/model/params", desc = "Nombre total de paramètres" },
-        { method = "POST", path = "/model/infer", desc = "Inférence", body = { input = "Hello" } },
-        { method = "DELETE", path = "/model", desc = "Ack + GC (pas de reset modèle exposé)" },
-        { method = "POST", path = "/serialization/load", desc = "Charger un checkpoint", body = { path = "checkpoint/", format = "raw_folder", options = { verify_checksums = true } } },
-        { method = "POST", path = "/serialization/save", desc = "Sauvegarder un checkpoint", body = { path = "model.safetensors", format = "safetensors", options = { include_git_info = true } } },
-      },
-      websocket = {
-        path = "/ws",
-        desc = "WebSocket: envoyer {method, path, body} en JSON et recevoir {status, response, _meta}. Auth possible via header Authorization/X-API-Key ou query ?token=.../?api_key=...",
-        example_message = { method = "GET", path = "/health" },
-      }
-    })
-  end
-
-  if method == "GET" and clean_path == "/architectures" then
-    if not mimir_available() or type(Mimir.Architectures) ~= "table" or type(Mimir.Architectures.available) ~= "function" then
-      return ok_json({ ok = false, error = "Mimir.Architectures.available indisponible" }, 500)
+    local success, decoded = pcall(json_decode, body)
+    if not success or type(decoded) ~= "table" or decoded == JSON_NULL or getmetatable(decoded) ~= JSON_OBJECT then
+      return response({ ok = false, error = "Objet JSON requis", detail = success and nil or tostring(decoded) }, 400)
     end
-    local list = Mimir.Architectures.available()
-    return ok_json({ ok = true, architectures = list })
-  end
-
-  if method == "GET" and clean_path == "/architectures/default_config" then
-    if not mimir_available() or type(Mimir.Architectures) ~= "table" or type(Mimir.Architectures.default_config) ~= "function" then
-      return ok_json({ ok = false, error = "Mimir.Architectures.default_config indisponible" }, 500)
-    end
-    local model_type = (query.model_type)
-    if not model_type or model_type == "" then
-      return ok_json({ ok = false, error = "model_type requis" }, 400)
-    end
-    local cfg = Mimir.Architectures.default_config(model_type)
-    return ok_json({ ok = type(cfg) == "table", config = cfg })
+    payload = decoded
   end
 
   if method == "GET" and clean_path == "/health" then
-    return ok_json({ ok = true, mimir = mimir_available(), time = os.date("!%Y-%m-%dT%H:%M:%SZ") })
+    return response({ ok = true, mimir = mimir_available(), time = iso_utc() })
+  end
+  if method == "GET" and clean_path == "/capabilities" then
+    return response({ ok = true, framework = framework_info(), api = api_surface() })
+  end
+  if method == "GET" and clean_path == "/help" then
+    local descriptions = json_array()
+    for _, spec in ipairs(ROUTES) do
+      descriptions[#descriptions + 1] = { method = spec.method, path = spec.path, api = spec.api,
+        desc = spec.desc, body = spec.body, query = spec.query,
+        available = spec.api == nil or public_api(spec.api) ~= nil }
+    end
+    return response({ ok = true,
+      server = { name = SERVER_NAME, version = SERVER_VERSION, host = HOST, port = PORT, lua = _VERSION },
+      routes = descriptions, api = api_surface(), max_body_bytes = MAX_BODY_BYTES,
+      security = { tls = TLS_ENABLED, auth = { mode = AUTH_MODE, enabled = auth_enabled(),
+        skip_paths = AUTH_SKIP_PATHS, accepted = { bearer = AUTH_MODE == "token" or AUTH_MODE == "either",
+        api_key = AUTH_MODE == "api_key" or AUTH_MODE == "either", query_for_ws = true } } },
+      websocket = { path = "/ws", example_message = { id = "health-1", method = "GET", path = "/health" },
+        desc = "Messages {id, method, path, body}; réponses {id, ok, status, response, _meta}. Auth de session vérifiée au handshake. Serveur mono-client: fermer WS avant les requêtes HTTP." },
+    })
   end
 
-  if method == "GET" and clean_path == "/hardware" then
-    if not mimir_available() or type(Mimir.Model.hardware_caps) ~= "function" then
-      return ok_json({ ok = false, error = "Mimir.Model.hardware_caps indisponible" }, 500)
+  if method == "POST" and clean_path == "/rpc" then
+    if not payload or type(payload.api) ~= "string" or not is_array(payload.args) then
+      return response({ ok = false, error = "body requis: {api='Model.forward', args=[...]}" }, 400)
     end
-    local caps = Mimir.Model.hardware_caps()
-    return ok_json({ ok = true, caps = caps })
+    local fn = public_api(payload.api)
+    if not fn then return response({ ok = false, error = "API publique indisponible", api = payload.api }, 404) end
+    if payload.api:gsub("^Mimir%.", "") == "Database.load" then
+      return response({ ok = false, error = "Database.load retourne un builder ; utilisez /dataset/load avec use_cache=true" }, 400)
+    end
+    local args = { n = #payload.args }
+    for i = 1, args.n do args[i] = native_value(payload.args[i]) end
+    local values, err, status = invoke_api(fn, args)
+    if not values then return response({ ok = false, error = err, api = payload.api }, status) end
+    return response({ ok = true, results = values, api = payload.api })
   end
 
-  if method == "PUT" and clean_path == "/hardware" then
-    if not mimir_available() or type(Mimir.Model.set_hardware) ~= "function" then
-      return ok_json({ ok = false, error = "Mimir.Model.set_hardware indisponible" }, 500)
+  local route, allowed = nil, {}
+  for _, spec in ipairs(ROUTES) do
+    if spec.path == clean_path then
+      allowed[#allowed + 1] = spec.method
+      if spec.method == method then route = spec end
     end
-    local function parse_bool(v)
-      if type(v) == "boolean" then return v end
-      if type(v) == "number" then return v ~= 0 end
-      if type(v) == "string" then
-        local s = v:lower()
-        if s == "1" or s == "true" or s == "yes" or s == "on" then return true end
-        if s == "0" or s == "false" or s == "no" or s == "off" then return false end
-      end
-      return nil
-    end
-
-    -- API réelle (src/scriptings/Lua/luaScripting/LuaScripting.cpp): set_hardware(enable: bool)
-    -- Compat REST: accepte aussi backend="cpu"|"auto" (map en bool), mais ne choisit pas OpenCL/Vulkan spécifiquement.
-    local enable = (type(json_body) == "table") and parse_bool(json_body.enable) or nil
-    if enable == nil then enable = parse_bool(query.enable) end
-
-    if enable == nil then
-      local backend = (type(json_body) == "table") and json_body.backend or query.backend
-      if type(backend) == "string" and backend ~= "" then
-        local b = backend:lower()
-        if b == "cpu" then enable = false
-        elseif b == "auto" then enable = true
-        else
-          return ok_json({ ok = false, error = "backend non supporté par l'API actuelle", detail = "Utilisez {enable=true|false} (set_hardware(bool))" }, 400)
-        end
-      end
-    end
-
-    if enable == nil then
-      return ok_json({ ok = false, error = "enable requis", detail = "body: {enable:true|false} ou query ?enable=true" }, 400)
-    end
-
-    local ok_call, ok_or_err, err2 = pcall(Mimir.Model.set_hardware, enable)
-    if not ok_call then
-      return ok_json({ ok = false, error = tostring(ok_or_err) }, 500)
-    end
-    return ok_json({ ok = ok_or_err ~= false, enabled = enable, error = err2 })
   end
-
-  if method == "PATCH" and clean_path == "/allocator" then
-    if not mimir_available() or type(Mimir.Allocator) ~= "table" or type(Mimir.Allocator.configure) ~= "function" then
-      return ok_json({ ok = false, error = "Mimir.Allocator.configure indisponible" }, 500)
+  if not route then
+    if #allowed > 0 then
+      return response({ ok = false, error = "Méthode non autorisée" }, 405, { Allow = table.concat(allowed, ", ") })
     end
-    if type(json_body) ~= "table" then
-      return ok_json({ ok = false, error = "body JSON requis" }, 400)
-    end
-    local ok, err = Mimir.Allocator.configure(json_body)
-    return ok_json({ ok = ok, error = err })
+    return response({ ok = false, error = "route inconnue", method = method, path = clean_path }, 404)
   end
-
-  if method == "GET" and clean_path == "/allocator" then
-    if not mimir_available() or type(Mimir.Allocator) ~= "table" or type(Mimir.Allocator.get_stats) ~= "function" then
-      return ok_json({ ok = false, error = "Mimir.Allocator.get_stats indisponible" }, 500)
-    end
-    local stats = Mimir.Allocator.get_stats()
-    return ok_json({ ok = true, stats = stats })
-  end
-
-  if method == "POST" and clean_path == "/model/create" then
-    if not mimir_available() then
-      return ok_json({ ok = false, error = "Mimir indisponible (lancer via ./bin/mimir ?)" }, 500)
-    end
-    if type(json_body) ~= "table" then
-      return ok_json({ ok = false, error = "body JSON requis" }, 400)
-    end
-    local model_type = json_body.model_type
-    local config = json_body.config
-    if type(model_type) ~= "string" or model_type == "" then
-      return ok_json({ ok = false, error = "model_type requis" }, 400)
-    end
-
-    -- Si le client n'envoie pas de config, on tente une config par défaut via le registry.
-    if config == nil and type(Mimir.Architectures) == "table" and type(Mimir.Architectures.default_config) == "function" then
-      local cfg = Mimir.Architectures.default_config(model_type)
-      if type(cfg) == "table" then
-        config = cfg
-      end
-    end
-
-    local ok, err = Mimir.Model.create(model_type, config)
-    if ok and type(config) == "table" and config.dtype ~= nil and type(Mimir.model) == "table" and type(Mimir.model.dtype) == "function" then
-      local ok_dt, dt_or_err = Mimir.model.dtype(config.dtype)
-      if ok_dt == false then
-        return ok_json({ ok = false, error = tostring(dt_or_err) }, 500)
-      end
-    end
-    return ok_json({ ok = ok, error = err })
-  end
-
-  if method == "POST" and clean_path == "/model/build" then
-    if not mimir_available() then
-      return ok_json({ ok = false, error = "Mimir indisponible" }, 500)
-    end
-    -- API actuelle: build() -> (ok, params_or_err)
-    local ok, params_or_err = Mimir.Model.build()
-    if ok then
-      return ok_json({ ok = true, params = params_or_err })
-    end
-    return ok_json({ ok = false, error = params_or_err }, 500)
-  end
-
-  if method == "POST" and clean_path == "/model/init_weights" then
-    if not mimir_available() then
-      return ok_json({ ok = false, error = "Mimir indisponible" }, 500)
-    end
-    if type(json_body) ~= "table" then
-      return ok_json({ ok = false, error = "body JSON requis" }, 400)
-    end
-    local init = json_body.init
-    local seed = json_body.seed
-    local ok, err = Mimir.Model.init_weights(init, seed)
-    return ok_json({ ok = ok, error = err })
-  end
-
-  if method == "GET" and clean_path == "/model/params" then
-    if not mimir_available() then
-      return ok_json({ ok = false, error = "Mimir indisponible" }, 500)
-    end
-    local params = Mimir.Model.total_params()
-    return ok_json({ ok = true, params = params })
-  end
-
-  if method == "POST" and clean_path == "/model/infer" then
-    if not mimir_available() then
-      return ok_json({ ok = false, error = "Mimir indisponible" }, 500)
-    end
-    if type(json_body) ~= "table" then
-      return ok_json({ ok = false, error = "body JSON requis" }, 400)
-    end
-    local input = json_body.input
-    if input == nil then
-      return ok_json({ ok = false, error = "input requis" }, 400)
-    end
-    local out = Mimir.Model.infer(input)
-    return ok_json({ ok = out ~= nil, output = out })
-  end
-
-  if method == "POST" and clean_path == "/serialization/load" then
-    if not mimir_available() or type(Mimir.Serialization) ~= "table" or type(Mimir.Serialization.load) ~= "function" then
-      return ok_json({ ok = false, error = "Mimir.Serialization.load indisponible" }, 500)
-    end
-    if type(json_body) ~= "table" then
-      return ok_json({ ok = false, error = "body JSON requis" }, 400)
-    end
-    local path0, format, options = json_body.path, json_body.format, json_body.options
-    if type(path0) ~= "string" or path0 == "" then
-      return ok_json({ ok = false, error = "path requis" }, 400)
-    end
-    local ok, err = Mimir.Serialization.load(path0, format, options)
-    return ok_json({ ok = ok, error = err })
-  end
-
-  if method == "POST" and clean_path == "/serialization/save" then
-    if not mimir_available() or type(Mimir.Serialization) ~= "table" or type(Mimir.Serialization.save) ~= "function" then
-      return ok_json({ ok = false, error = "Mimir.Serialization.save indisponible" }, 500)
-    end
-    if type(json_body) ~= "table" then
-      return ok_json({ ok = false, error = "body JSON requis" }, 400)
-    end
-    local path0, format, options = json_body.path, json_body.format, json_body.options
-    if type(path0) ~= "string" or path0 == "" then
-      return ok_json({ ok = false, error = "path requis" }, 400)
-    end
-    local ok, err = Mimir.Serialization.save(path0, format, options)
-    return ok_json({ ok = ok, error = err })
-  end
-
-  -- DELETE explicites (API complète)
-  if method == "DELETE" and clean_path == "/model" then
-    -- Mímir ne fournit pas (encore) de reset de modèle dans l'API publique.
-    -- On renvoie un ack + GC pour libérer côté Lua.
+  if method == "DELETE" then
     collectgarbage("collect")
-    return ok_json({ ok = true, note = "Aucun reset de modèle exposé; GC Lua exécuté." })
+    return response({ ok = true, note = "GC Lua exécuté ; aucun reset natif exposé pour cette route." })
+  end
+  local fn = public_api(route.api)
+  if not fn then return response({ ok = false, error = route.api .. " indisponible" }, 503) end
+  local input = payload or query
+  if method ~= "GET" and #(route.args or {}) > 0 and not payload and clean_path ~= "/hardware" then
+    return response({ ok = false, error = "body JSON requis" }, 400)
   end
 
-  if method == "DELETE" and clean_path == "/allocator" then
-    collectgarbage("collect")
-    return ok_json({ ok = true, note = "Allocator non réinitialisable via API; GC Lua exécuté." })
+  -- Compatibility: backend=cpu/auto remains an acceleration toggle, not a GPU selector.
+  if clean_path == "/hardware" and method == "PUT" then
+    local enable = input.enable
+    if type(enable) == "string" then
+      local value = enable:lower()
+      if value == "true" or value == "1" or value == "yes" or value == "on" then enable = true
+      elseif value == "false" or value == "0" or value == "no" or value == "off" then enable = false end
+    elseif type(enable) == "number" then enable = enable ~= 0 end
+    if enable == nil and input.backend ~= nil then
+      if input.backend == "cpu" then enable = false
+      elseif input.backend == "auto" then enable = true end
+    end
+    if type(enable) ~= "boolean" then
+      return response({ ok = false, error = "enable doit être un booléen (ou backend='cpu'/'auto')" }, 400)
+    end
+    input.enable = enable
   end
+  for _, name in ipairs(route.required or {}) do
+    if input[name] == nil or input[name] == JSON_NULL or input[name] == "" then
+      return response({ ok = false, error = name .. " requis" }, 400)
+    end
+  end
+  if clean_path == "/model/create" and input.config == nil then
+    local default_config = public_api("Architectures.default_config")
+    if default_config then
+      local configs, err, status = invoke_api(default_config, {input.model_type})
+      if not configs then return response({ ok = false, error = err }, status) end
+      input.config = configs[1]
+    end
+  end
+  local args = { n = #(route.args or {}) }
+  for i, name in ipairs(route.args or {}) do
+    local value = name == "$body" and payload or input[name]
+    if value == nil and route.defaults then value = route.defaults[name] end
+    if not payload and type(value) == "string" then
+      if value == "true" then value = true elseif value == "false" then value = false
+      elseif name == "index" or name == "timeout_ms" then value = tonumber(value) end
+    end
+    args[i] = native_value(value)
+  end
+  local values, err, status = invoke_api(fn, args)
+  if not values then return response({ ok = false, error = err }, status) end
+  local out = { ok = true }
+  if route.result then
+    local first = values[1]
+    if first == true and #values > 1 then first = values[2] end
+    -- JSON's empty arrays need explicit tagging because Lua native tables are ambiguous.
+    if type(first) == "table" and first ~= JSON_NULL and
+        (route.result == "architectures" or route.result == "dtypes" or route.result == "layers" or
+         route.result == "tokens" or route.result == "output" or route.result == "events") and next(first) == nil then
+      first = json_array(first)
+    end
+    out[route.result] = first
+    if clean_path == "/hardware" and method == "PUT" then out.enabled = input.enable end
+  end
+  return response(out)
+end
 
-  -- Méthode reconnue mais route inconnue
-  return 404, { ["Content-Type"] = "application/json" }, json_encode({ ok = false, error = "route inconnue", method = method, path = clean_path })
+local function api_handle(...)
+  local result = table.pack(pcall(api_handle_impl, ...))
+  if result[1] then return table.unpack(result, 2, result.n) end
+  return 500, { ["Content-Type"] = "application/json" },
+    json_encode({ ok = false, error = "Erreur interne API", detail = tostring(result[2]) })
 end
 
 -- =========================
@@ -959,38 +1172,56 @@ local function recv_exact(sock, n)
   return table.concat(chunks)
 end
 
-local function ws_send_text(sock, text)
-  local payload = text or ""
-  local len = #payload
-  local b1 = string.char(0x81) -- FIN + text
-  local header
-  if len < 126 then
-    header = b1 .. string.char(len)
-  elseif len < 65536 then
-    header = b1 .. string.char(126) .. string.char((len >> 8) & 0xff) .. string.char(len & 0xff)
-  else
-    error("Payload WS trop gros")
+local function send_all(sock, data)
+  local index = 1
+  while index <= #data do
+    local last, err, partial = sock:send(data, index)
+    if not last then return nil, err, partial end
+    if last < index then return nil, "send failed" end
+    index = last + 1
   end
-  sock:send(header .. payload)
+  return true
 end
+
+local function ws_send(sock, opcode, payload)
+  payload = payload or ""
+  local len = #payload
+  if len > MAX_BODY_BYTES then return nil, "Payload WS trop gros" end
+  local header = string.char(0x80 | opcode)
+  if len < 126 then header = header .. string.char(len)
+  elseif len < 65536 then header = header .. string.char(126) .. string.pack(">I2", len)
+  else header = header .. string.char(127) .. string.pack(">I8", len) end
+  return send_all(sock, header .. payload)
+end
+
+local function ws_send_text(sock, text) return ws_send(sock, 0x1, text) end
 
 local function ws_read_frame(sock)
   local hdr, err = recv_exact(sock, 2)
   if not hdr then return nil, err end
   local b1, b2 = hdr:byte(1,2)
+  if (b1 & 0x70) ~= 0 then return nil, "Extensions WS non supportées" end
   local fin = (b1 & 0x80) ~= 0
   local opcode = b1 & 0x0f
   local masked = (b2 & 0x80) ~= 0
+  if not masked then return nil, "Frame client WS non masquée" end
   local len = b2 & 0x7f
   if len == 126 then
     local ext, err2 = recv_exact(sock, 2)
     if not ext then return nil, err2 end
     len = (ext:byte(1) << 8) | ext:byte(2)
+    if len < 126 then return nil, "Longueur WS non canonique" end
   elseif len == 127 then
-    -- on limite volontairement: pas de frames > 65535 dans ce serveur minimal
-    return nil, "Frame WS trop grande (len=127 non supporté)"
+    local ext, err2 = recv_exact(sock, 8)
+    if not ext then return nil, err2 end
+    if ext:byte(1) >= 128 then return nil, "Longueur WS invalide" end
+    len = string.unpack(">I8", ext)
+    if len < 65536 then return nil, "Longueur WS non canonique" end
   end
 
+  if len > MAX_BODY_BYTES then return nil, "Payload WS trop gros" end
+  if opcode >= 8 and (not fin or len > 125) then return nil, "Frame de contrôle WS invalide" end
+  if opcode == 8 and len == 1 then return nil, "Payload close WS invalide" end
   local mask
   if masked then
     local m, err2 = recv_exact(sock, 4)
@@ -1006,14 +1237,12 @@ local function ws_read_frame(sock)
   end
 
   if masked and payload and mask then
-    local m1, m2, m3, m4 = mask:byte(1,4)
-    local out = {}
-    for i2 = 1, #payload do
-      local pb = payload:byte(i2)
-      local mb = ({m1,m2,m3,m4})[((i2-1) % 4) + 1]
-      out[i2] = string.char(pb ~ mb)
-    end
-    payload = table.concat(out)
+    local mask_bytes, index = {mask:byte(1, 4)}, 0
+    payload = payload:gsub(".", function(byte)
+      local masked_byte = byte:byte() ~ mask_bytes[(index % 4) + 1]
+      index = index + 1
+      return string.char(masked_byte)
+    end)
   end
 
   return { fin = fin, opcode = opcode, payload = payload }
@@ -1024,8 +1253,9 @@ end
 -- =========================
 local function handle_websocket(client, req)
   local key = req.headers["sec-websocket-key"]
-  if not key then
-    client:send(http_response(400, { ["Content-Type"] = "text/plain" }, "Missing Sec-WebSocket-Key"))
+  if req.method ~= "GET" or req.headers["sec-websocket-version"] ~= "13" or
+      not key or not key:match("^[%w+/]+==$" ) or #key ~= 24 then
+    send_all(client, http_response(400, { ["Content-Type"] = "text/plain" }, "WebSocket GET, version 13 et clé 16 bytes requis"))
     client:close()
     return
   end
@@ -1034,7 +1264,7 @@ local function handle_websocket(client, req)
   do
     local ok_auth, status, hdrs, resp = auth_check("GET", clean_path, req.headers or {}, query)
     if not ok_auth then
-      client:send(http_response(status, hdrs, resp))
+      send_all(client, http_response(status, hdrs, resp))
       client:close()
       return
     end
@@ -1049,69 +1279,68 @@ local function handle_websocket(client, req)
     "\r\n",
   }, "\r\n")
 
-  client:send(resp)
-  client:settimeout(0) -- non-bloquant
-
-  -- Boucle WS: attend des commandes JSON, renvoie une réponse JSON
+  send_all(client, resp)
+  client:settimeout(10)
+  local session_headers = { ["content-type"] = "application/json",
+    authorization = req.headers.authorization, ["x-api-key"] = req.headers["x-api-key"] }
+  local session_token = query.token or query.bearer
+  local session_key = query.api_key or query.apikey or query.key
+  if not session_headers.authorization and session_token then session_headers.authorization = "Bearer " .. session_token end
+  if not session_headers["x-api-key"] and session_key then session_headers["x-api-key"] = session_key end
+  local fragments, fragment_bytes = nil, 0
   while true do
-    socket.sleep(0.01)
-    local frame, err = ws_read_frame(client)
-    if not frame then
-      if err == "timeout" then
-        -- continuer
-      else
+    -- Wait before reading; a partial TCP frame is then completed without losing bytes.
+    local buffered = type(client.dirty) == "function" and client:dirty()
+    local ready = buffered and {client} or socket.select({client}, nil, 0.1)
+    if #ready > 0 then
+      local frame, frame_error = ws_read_frame(client)
+      if not frame then
+        ws_send(client, 0x8, string.pack(">I2", 1002))
         break
       end
-    else
-      if frame.opcode == 0x8 then -- close
-        break
-      elseif frame.opcode == 0x9 then -- ping
-        -- pong minimal
-        client:send(string.char(0x8A, 0x00))
-      elseif frame.opcode == 0x1 then -- text
-        local ok, msg = pcall(json_decode, frame.payload)
-        if not ok or type(msg) ~= "table" then
-          ws_send_text(client, json_encode({
-            ok = false,
-            error = "message JSON invalide",
-            _meta = {
-              server = { name = SERVER_NAME, version = SERVER_VERSION, host = HOST, port = PORT, lua = _VERSION },
-              framework = framework_info(),
-              received_at_utc = iso_utc(),
-            }
-          }))
-        else
-          local t0 = now_seconds()
-          local request_id = next_request_id()
-          local m = tostring(msg.method or "GET")
-          local p = tostring(msg.path or "/health")
-          local b = msg.body ~= nil and json_encode(msg.body) or ""
-          local ct_headers = { ["content-type"] = "application/json" }
-          local status, h, resp_body = api_handle(m, p, ct_headers, b)
-          local t1 = now_seconds()
-          local latency_ms = math.floor((t1 - t0) * 1000 + 0.5)
-          local decoded_ok, decoded = pcall(json_decode, resp_body)
-          if not decoded_ok then decoded = { ok = false, error = "decode JSON interne échoué", raw = tostring(resp_body) } end
-
-          ws_send_text(client, json_encode({
-            ok = true,
-            status = status,
-            response = decoded,
-            _meta = {
-              request_id = request_id,
-              method = m,
-              path = p,
-              received_at_utc = iso_utc(),
-              latency_ms = latency_ms,
-              server = { name = SERVER_NAME, version = SERVER_VERSION, host = HOST, port = PORT, lua = _VERSION },
-              framework = framework_info(),
-            }
-          }))
+      if frame.opcode == 0x8 then ws_send(client, 0x8, frame.payload); break
+      elseif frame.opcode == 0x9 then
+        if not ws_send(client, 0xA, frame.payload) then break end
+      elseif frame.opcode == 0xA then -- pong
+      elseif frame.opcode == 0x1 or frame.opcode == 0x0 then
+        if (frame.opcode == 0x0 and not fragments) or (frame.opcode == 0x1 and fragments) then
+          ws_send(client, 0x8, string.pack(">I2", 1002)); break
         end
+        fragments = fragments or {}
+        fragments[#fragments + 1] = frame.payload
+        fragment_bytes = fragment_bytes + #frame.payload
+        if fragment_bytes > MAX_BODY_BYTES then ws_send(client, 0x8, string.pack(">I2", 1009)); break end
+        if frame.fin then
+          local payload = table.concat(fragments)
+          fragments, fragment_bytes = nil, 0
+          if not utf8.len(payload) then ws_send(client, 0x8, string.pack(">I2", 1007)); break end
+          local decoded_ok, msg = pcall(json_decode, payload)
+          local response
+          if not decoded_ok or type(msg) ~= "table" or getmetatable(msg) ~= JSON_OBJECT then
+            response = { ok = false, status = 400, error = "message JSON invalide" }
+          elseif (msg.method ~= nil and type(msg.method) ~= "string") or
+                 (msg.path ~= nil and type(msg.path) ~= "string") then
+            response = { id = msg.id, ok = false, status = 400, error = "method/path doivent être des chaînes" }
+          else
+            local t0 = now_seconds()
+            local m, path = (msg.method or "GET"):upper(), msg.path or "/health"
+            local body = msg.body ~= nil and json_encode(msg.body) or ""
+            local status, _, data = api_handle(m, path, session_headers, body)
+            local data_ok, result = pcall(json_decode, data)
+            if not data_ok then result = { ok = false, error = "Réponse interne JSON invalide" }; status = 500 end
+            response = { id = msg.id, ok = status < 400 and result.ok ~= false, status = status, response = result,
+              _meta = { request_id = next_request_id(), method = m, path = path, received_at_utc = iso_utc(),
+                latency_ms = math.floor((now_seconds() - t0) * 1000 + 0.5),
+                server = { name = SERVER_NAME, version = SERVER_VERSION, host = HOST, port = PORT, lua = _VERSION },
+                framework = framework_info() } }
+          end
+          if not ws_send_text(client, json_encode(response)) then break end
+        end
+      else
+        ws_send(client, 0x8, string.pack(">I2", 1003)); break
       end
     end
   end
-
   client:close()
 end
 
@@ -1149,6 +1378,7 @@ local function serve_forever()
           client:close()
           goto continue
         end
+        wrapped:settimeout(10)
         local ok_hs, herr = wrapped:dohandshake()
         if not ok_hs then
           wrapped:close()
@@ -1173,12 +1403,13 @@ local function serve_forever()
             framework = framework_info(),
           }
         })
-        client:send(http_response(400, { ["Content-Type"] = "application/json", ["X-Response-Time-Ms"] = tostring(latency_ms) }, body))
+        send_all(client, http_response(err == "payload_too_large" and 413 or 400,
+          { ["Content-Type"] = "application/json", ["X-Response-Time-Ms"] = tostring(latency_ms) }, body))
         client:close()
       else
         local upgrade = (req.headers["upgrade"] or ""):lower()
         local connection = (req.headers["connection"] or ""):lower()
-        if req.path:match("^/ws") and upgrade == "websocket" and connection:find("upgrade", 1, true) then
+        if parse_query(req.path) == "/ws" and upgrade == "websocket" and connection:find("upgrade", 1, true) then
           handle_websocket(client, req)
         else
           local status, hdrs, resp_body = api_handle(req.method, req.path, req.headers, req.body)
@@ -1232,7 +1463,7 @@ local function serve_forever()
           }
 
           local enriched = enrich_json_body(resp_body, meta)
-          client:send(http_response(status, hdrs, enriched))
+          send_all(client, http_response(status, hdrs, enriched))
           client:close()
         end
       end

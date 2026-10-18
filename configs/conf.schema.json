@@ -19,6 +19,8 @@
       "description": "Description libre de la configuration."
     },
 
+    "js": { "$ref": "#/definitions/jsBlock" },
+
     "lua": {
       "$ref": "#/definitions/luaBlock",
       "description": "Scripts Lua à exécuter (variante principale). Mutuellement exclusif avec 'run.lua'."
@@ -28,6 +30,7 @@
       "type": "object",
       "description": "Variante alternative : scripts Lua imbriqués sous run.lua.",
       "properties": {
+        "js": { "$ref": "#/definitions/jsBlock" },
         "lua": { "$ref": "#/definitions/luaBlock" }
       },
       "additionalProperties": false
@@ -51,7 +54,10 @@
         "d_model":      { "type": "integer", "minimum": 1 },
         "num_layers":   { "type": "integer", "minimum": 1 },
         "num_heads":    { "type": "integer", "minimum": 1 },
-        "mlp_hidden":   { "type": "integer", "minimum": 1 }
+        "mlp_hidden":   { "type": "integer", "minimum": 1 },
+        "latent_spatial_context": { "type": "boolean", "description": "VAEConv: contexte résiduel local et dilaté dans le latent." },
+        "latent_context_channels": { "type": "integer", "minimum": 2, "description": "VAEConv: largeur des features du contexte latent (défaut 32)." },
+        "latent_detail_path": { "type": "boolean", "description": "VAEConv: chemin de détails sous-pixel passant exclusivement par le latent." }
       },
       "additionalProperties": true
     },
@@ -232,6 +238,8 @@
   },
 
   "oneOf": [
+    { "required": ["js"] },
+    { "required": ["run"], "properties": { "run": { "required": ["js"] } } },
     { "required": ["lua"] },
     { "required": ["run"], "properties": { "run": { "required": ["lua"] } } }
   ],
@@ -249,6 +257,7 @@
           "type": "string",
           "description": "Description courte affichée dans les logs et dans --help."
         },
+        "js": { "$ref": "#/definitions/jsBlock" },
         "lua": {
           "$ref": "#/definitions/luaBlock",
           "description": "Scripts Lua à exécuter pour cette tâche."
@@ -257,16 +266,23 @@
           "type": "object",
           "description": "Variante alternative : scripts imbriqués sous run.lua.",
           "properties": {
+            "js": { "$ref": "#/definitions/jsBlock" },
             "lua": { "$ref": "#/definitions/luaBlock" }
           },
           "additionalProperties": false
         }
       },
       "oneOf": [
+        { "required": ["js"] },
         { "required": ["lua"] },
         { "required": ["run"] }
       ],
       "additionalProperties": false
+    },
+
+    "jsBlock": {
+      "description": "Scripts JavaScript exécutés par le bridge Node.js.",
+      "allOf": [{ "$ref": "#/definitions/luaBlock" }]
     },
 
     "luaBlock": {
@@ -373,6 +389,11 @@
           "type": "boolean",
           "default": true,
           "description": "Affiche le graphe de la loss en temps réel."
+        },
+        "show_detection_overlay": {
+          "type": "boolean",
+          "default": true,
+          "description": "Affiche les encadrés publiés par les modèles de détection."
         },
         "graph_history_size": {
           "type": "integer",

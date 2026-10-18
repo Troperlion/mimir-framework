@@ -601,7 +601,12 @@ public:
             destroy_buf(buf_in, mem_in); destroy_buf(buf_w, mem_w); destroy_buf(buf_b, mem_b); destroy_buf(buf_o, mem_o);
             return false;
         }
-        vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+        if (vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+            vkDestroyFence(device, fence, nullptr);
+            vkFreeCommandBuffers(device, cmd_pool_, 1, &cmd);
+            destroy_buf(buf_in, mem_in); destroy_buf(buf_w, mem_w); destroy_buf(buf_b, mem_b); destroy_buf(buf_o, mem_o);
+            return false;
+        }
 
         vkDestroyFence(device, fence, nullptr);
         vkFreeCommandBuffers(device, cmd_pool_, 1, &cmd);
@@ -1276,7 +1281,11 @@ private:
             vkFreeCommandBuffers(device, cmd_pool_, 1, &cmd);
             destroy_buf(buf_a, mem_a); destroy_buf(buf_b, mem_b); destroy_buf(buf_o, mem_o); return false;
         }
-        vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+        if (vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+            vkDestroyFence(device, fence, nullptr);
+            vkFreeCommandBuffers(device, cmd_pool_, 1, &cmd);
+            destroy_buf(buf_a, mem_a); destroy_buf(buf_b, mem_b); destroy_buf(buf_o, mem_o); return false;
+        }
 
         vkDestroyFence(device, fence, nullptr);
         vkFreeCommandBuffers(device, cmd_pool_, 1, &cmd);
@@ -1404,7 +1413,11 @@ private:
             vkFreeCommandBuffers(device, cmd_pool_, 1, &cmd);
             destroy_buf(buf_in, mem_in); destroy_buf(buf_o, mem_o); return false;
         }
-        vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+        if (vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+            vkDestroyFence(device, fence, nullptr);
+            vkFreeCommandBuffers(device, cmd_pool_, 1, &cmd);
+            destroy_buf(buf_in, mem_in); destroy_buf(buf_o, mem_o); return false;
+        }
 
         vkDestroyFence(device, fence, nullptr);
         vkFreeCommandBuffers(device, cmd_pool_, 1, &cmd);
@@ -1532,7 +1545,11 @@ private:
             vkFreeCommandBuffers(device, cmd_pool_, 1, &cmd);
             return false;
         }
-        vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+        if (vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+            vkDestroyFence(device, fence, nullptr);
+            vkFreeCommandBuffers(device, cmd_pool_, 1, &cmd);
+            return false;
+        }
 
         vkDestroyFence(device, fence, nullptr);
         vkFreeCommandBuffers(device, cmd_pool_, 1, &cmd);

@@ -98,6 +98,7 @@ set(MIMIR_RUNTIME_OUTPUT_DIRECTORY
 
 include(CheckCXXCompilerFlag)
 
+# CUDA includes CPU dispatch headers: nvcc must pass SIMD options to its host compiler.
 if(ENABLE_SIMD)
     check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
     check_cxx_compiler_flag("-mfma" COMPILER_SUPPORTS_FMA)
@@ -105,22 +106,26 @@ if(ENABLE_SIMD)
     check_cxx_compiler_flag("-mbmi2" COMPILER_SUPPORTS_BMI2)
     
     if(COMPILER_SUPPORTS_AVX2)
-        add_compile_options(-mavx2)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-mavx2>)
+        add_compile_options("$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CUDA_COMPILER_ID:NVIDIA>>:-Xcompiler=-mavx2>")
         message(STATUS "AVX2 support: Enabled")
     endif()
     
     if(COMPILER_SUPPORTS_FMA)
-        add_compile_options(-mfma)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-mfma>)
+        add_compile_options("$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CUDA_COMPILER_ID:NVIDIA>>:-Xcompiler=-mfma>")
         message(STATUS "FMA support: Enabled")
     endif()
     
     if(COMPILER_SUPPORTS_F16C)
-        add_compile_options(-mf16c)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-mf16c>)
+        add_compile_options("$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CUDA_COMPILER_ID:NVIDIA>>:-Xcompiler=-mf16c>")
         message(STATUS "F16C support: Enabled")
     endif()
     
     if(COMPILER_SUPPORTS_BMI2)
-        add_compile_options(-mbmi2)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-mbmi2>)
+        add_compile_options("$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CUDA_COMPILER_ID:NVIDIA>>:-Xcompiler=-mbmi2>")
         message(STATUS "BMI2 support: Enabled")
     endif()
 endif()
@@ -132,18 +137,18 @@ endif()
 # Flags communs
 if(MSVC)
     add_compile_options(
-        /W4
-        /wd4100 # unreferenced formal parameter
-        /wd4101 # unreferenced local variable
-        /wd4996 # deprecated API warnings
+        $<$<COMPILE_LANGUAGE:CXX>:/W4>
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4100> # unreferenced formal parameter
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4101> # unreferenced local variable
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4996> # deprecated API warnings
     )
 else()
     add_compile_options(
-        -Wall
-        -Wextra
-        -Wpedantic
-        -Wno-unused-parameter
-        -Wno-unused-variable
+        $<$<COMPILE_LANGUAGE:CXX>:-Wall>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wextra>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wpedantic>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-unused-parameter>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-unused-variable>
     )
 endif()
 
@@ -361,6 +366,21 @@ if(ENABLE_CUDA)
 
     find_package(CUDAToolkit)
     if(CUDAToolkit_FOUND)
+        # CudaRuntime contains __global__ kernels and kernel launch syntax.
+        # Finding the libraries alone does not enable CUDA compilation.
+        if(NOT CMAKE_CUDA_COMPILER AND CUDAToolkit_NVCC_EXECUTABLE)
+            set(CMAKE_CUDA_COMPILER "${CUDAToolkit_NVCC_EXECUTABLE}"
+                CACHE FILEPATH "CUDA compiler")
+        endif()
+        enable_language(CUDA)
+        set(CMAKE_CUDA_STANDARD 17)
+        set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+        set_source_files_properties(src/runtimes/cuda/CudaRuntime.cpp
+            PROPERTIES LANGUAGE CUDA)
+        # Explicitly select CUDA syntax for this .cpp file, including on CMake
+        # versions predating CMP0119. NVIDIA nvcc accepts -x cu.
+        set_property(SOURCE src/runtimes/cuda/CudaRuntime.cpp APPEND PROPERTY
+            COMPILE_OPTIONS "$<$<CUDA_COMPILER_ID:NVIDIA>:-x;cu>")
         message(STATUS "CUDAToolkit found: ${CUDAToolkit_VERSION}")
     else()
         message(WARNING "CUDAToolkit not found - CUDA compute disabled")
@@ -433,6 +453,9 @@ elseif(MIMIR_VIZ_BACKEND STREQUAL "WEB")
 endif()
 
 set(MIMIR_SOURCES
+    src/runtimes/optimizers/OptimizerHost.cpp
+    src/runtimes/optimizers/OptimizerDispatch.cpp
+    src/runtimes/losses/LossDispatch.cpp
     src/Model.cpp
     src/ModelRuntimeConfig.cpp
     src/Models/VAETraining.cpp
@@ -450,9 +473,15 @@ set(MIMIR_SOURCES
     src/ConfigOverrides.cpp
     src/Helpers.cpp
     src/stb_image_impl.cpp
+    src/runtimes/portable/PortableRuntime.cpp
+    src/runtimes/portable/PortableDevice.cpp
     src/runtimes/AbstractRuntime.cpp
     src/runtimes/Autograd.cpp
     src/runtimes/RuntimeRouter.cpp
+    src/runtimes/tpu/TpuRuntime.cpp
+    src/runtimes/fpga/FpgaRuntime.cpp
+    src/runtimes/fpga/FpgaSession.cpp
+    src/runtimes/fpga/FpgaIo.cpp
     src/runtimes/ops_loss_and_grad.cpp
     src/runtimes/cpu/CpuRuntime.cpp
     src/Models/Registry/ModelArchitectures.cpp
@@ -467,6 +496,7 @@ set(MIMIR_SOURCES
     src/Models/Vision/ViTModel.cpp
     src/Models/Vision/VAEModel.cpp
     src/Models/Vision/VAEConvModel.cpp
+    src/Models/Vision/GanStyleModel.cpp
     src/Models/Vision/GanLatentModel.cpp
     src/Models/Vision/CNN/ResNetModel.cpp
     src/Models/Vision/UNetModel.cpp
@@ -474,6 +504,7 @@ set(MIMIR_SOURCES
     src/Models/Vision/CNN/VGG16Model.cpp
     src/Models/Vision/CNN/VGG19Model.cpp
     src/Models/Vision/CNN/VGG16FeatModel.cpp
+    src/Models/Vision/CNN/MedicalDetectorModel.cpp
     src/Models/Vision/PatchDiscriminatorModel.cpp
     src/Models/Diffusion/DiffusionModel.cpp
     src/Models/Diffusion/CondDiffusionModel.cpp
@@ -538,6 +569,7 @@ set(MIMIR_HEADERS
     src/Models/NLP/VAETextModel.hpp
     src/Models/Vision/ViTModel.hpp
     src/Models/Vision/VAEModel.hpp
+    src/Models/Vision/GanStyleModel.hpp
     src/Models/Vision/GanLatentModel.hpp
     src/Models/Vision/CNN/ResNetModel.hpp
     src/Models/Vision/UNetModel.hpp
@@ -545,6 +577,7 @@ set(MIMIR_HEADERS
     src/Models/Vision/CNN/VGG16Model.hpp
     src/Models/Vision/CNN/VGG19Model.hpp
     src/Models/Vision/CNN/VGG16FeatModel.hpp
+    src/Models/Vision/CNN/MedicalDetectorModel.hpp
     src/Models/Vision/PatchDiscriminatorModel.hpp
     src/Models/Diffusion/DiffusionModel.hpp
     src/Models/Diffusion/CondDiffusionModel.hpp
@@ -753,7 +786,7 @@ if(ENABLE_ROCM AND HIP_LIBRARY AND ROCBLAS_LIBRARY)
         target_compile_definitions(mimir_core PUBLIC __HIP_PLATFORM_AMD__)
     endif()
     target_include_directories(mimir_core PUBLIC ${HIP_INCLUDE_DIR} ${ROCBLAS_INCLUDE_DIR})
-    target_link_libraries(mimir_core PUBLIC ${HIP_LIBRARY} ${ROCBLAS_LIBRARY})
+    target_link_libraries(mimir_core PUBLIC ${HIP_LIBRARY} ${ROCBLAS_LIBRARY} ${CMAKE_DL_LIBS})
 endif()
 
 if(ENABLE_LZ4 AND LZ4_LIBRARY)
@@ -1087,3 +1120,8 @@ message(STATUS "  Examples:          ${BUILD_EXAMPLES}")
 message(STATUS "")
 message(STATUS "Install prefix:      ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "")
+
+set_source_files_properties(src/runtimes/tpu/TpuRuntime.cpp PROPERTIES
+    COMPILE_DEFINITIONS "MIMIR_TPU_WORKER=\"${CMAKE_CURRENT_SOURCE_DIR}/src/runtimes/tpu/worker.py\"")
+
+install(FILES src/runtimes/tpu/worker.py DESTINATION share/mimir/tpu COMPONENT Runtime)

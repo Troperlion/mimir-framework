@@ -9,6 +9,8 @@
 #include "TypedTensor.hpp"
 
 struct Layer;
+struct RuntimeOptimizerRequest;
+namespace RuntimeLossGrad {struct Request;struct LossWithGrad;}
 
 struct RuntimeForwardContext {
     bool skip_connections_enabled = true;
@@ -30,7 +32,8 @@ enum class RuntimeKind : uint8_t {
     OpenCL,
     CUDA,
     ROCm,
-    FPGA,
+    FPGA, // Legacy FPGA I/O identity; no longer a layer backend.
+    TPU,
 };
 
 enum class RuntimeCapabilityLevel : uint8_t {
@@ -209,6 +212,13 @@ public:
         bool training,
         AbstractRuntime** selected_runtime = nullptr
     );
+
+    // CPU inherits the host optimizer adapter; accelerator runtimes override it.
+    virtual bool supportsOptimizer() const;
+    virtual bool optimizerStep(const RuntimeOptimizerRequest&);
+
+    virtual bool supportsReconstructionLoss() const;
+    virtual bool reconstructionLoss(const RuntimeLossGrad::Request&, RuntimeLossGrad::LossWithGrad&);
 
 protected:
     RuntimeCapabilityLevel queryConfiguredForwardOperationCapability(

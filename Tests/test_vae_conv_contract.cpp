@@ -5,6 +5,7 @@
 #include "Models/Vision/VAEConvModel.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -59,6 +60,22 @@ int main() {
     rectangular_vae.buildFromConfig(rectangular_cfg);
     TASSERT_TRUE(!rectangular_vae.getLayers().empty());
 
+    // Decoder-only checkpoints must preserve the full model topology even for
+    // base channel counts below the historical decoder minimum of eight.
+    VAEConvModel::Config checkpoint_cfg = rectangular_cfg;
+    checkpoint_cfg.base_channels = 6;
+    checkpoint_cfg.dec_norm = "layernorm";
+    VAEConvModel checkpoint_full_model;
+    checkpoint_full_model.buildFromConfig(checkpoint_cfg);
+    Model checkpoint_decoder_model;
+    VAEConvModel::buildDecoderInto(checkpoint_decoder_model, checkpoint_cfg);
+    for (const Layer& full_layer : checkpoint_full_model.getLayers()) {
+        if (full_layer.name.find("vae_conv/dec/") != 0) continue;
+        const Layer* decoder_layer = checkpoint_decoder_model.getLayerByName(full_layer.name);
+        TASSERT_TRUE(decoder_layer != nullptr);
+        TASSERT_TRUE(decoder_layer->params_count == full_layer.params_count);
+    }
+
     // Decoder upsampling is selectable while preserving the same output shape.
     const auto assert_upsample_graph = [&](const std::string& mode,
                                            const std::string& up_type) -> int {
@@ -101,6 +118,31 @@ int main() {
     TASSERT_TRUE(assert_upsample_graph("bilinear_conv", "UpsampleBilinear") == 0);
     TASSERT_TRUE(assert_upsample_graph("pixel_shuffle", "PixelShuffle") == 0);
 
+    VAEConvModel::Config layernorm_cfg = rectangular_cfg;
+    layernorm_cfg.enc_norm = "layernorm";
+    layernorm_cfg.dec_norm = "layernorm";
+    Model layernorm_decoder;
+    VAEConvModel::buildDecoderInto(layernorm_decoder, layernorm_cfg);
+    for (const Layer& layer : layernorm_decoder.getLayers()) {
+        if (layer.type_enum != LayerType::LayerNorm) continue;
+        const int spatial_size = layer.input_height * layer.input_width;
+        TASSERT_TRUE(spatial_size > 0);
+        TASSERT_TRUE(layer.in_features == spatial_size);
+        TASSERT_TRUE(layer.params_count == static_cast<size_t>(spatial_size) * 2);
+    }
+    layernorm_decoder.allocateParams();
+    layernorm_decoder.initializeWeights("xavier", 123u);
+    const std::vector<float> layernorm_latent(
+        static_cast<size_t>(layernorm_cfg.latent_w) * layernorm_cfg.latent_h *
+            layernorm_cfg.latent_c,
+        0.25f);
+    const std::vector<float> layernorm_output =
+        layernorm_decoder.forwardPass(layernorm_latent, false);
+    TASSERT_TRUE(layernorm_output.size() ==
+                 static_cast<size_t>(layernorm_cfg.image_w) * layernorm_cfg.image_h *
+                     layernorm_cfg.image_c);
+    for (float value : layernorm_output) TASSERT_TRUE(std::isfinite(value));
+
     bool invalid_upsample_rejected = false;
     try {
         VAEConvModel::Config invalid_cfg = rectangular_cfg;
@@ -131,6 +173,34 @@ int main() {
     }
     TASSERT_TRUE(saw_encoder_norm);
     TASSERT_TRUE(!saw_decoder_norm);
+
+    // The log-variance head receives spatially indexed, activated and
+    // normalized latent features before its final linear 1x1 projection.
+    VAEConvModel::Config latent_stats_cfg = rectangular_cfg;
+    latent_stats_cfg.enc_norm = "groupnorm";
+    latent_stats_cfg.resnet = false;
+    VAEConvModel latent_stats_vae;
+    latent_stats_vae.buildFromConfig(latent_stats_cfg);
+    const Layer* logvar_pre_conv =
+        latent_stats_vae.getLayerByName("vae_conv/enc/logvar_pre_conv");
+    const Layer* logvar_pre_act =
+        latent_stats_vae.getLayerByName("vae_conv/enc/logvar_pre_conv/act");
+    const Layer* logvar_pre_norm =
+        latent_stats_vae.getLayerByName("vae_conv/enc/logvar_pre_norm/gn");
+    const Layer* logvar_head = latent_stats_vae.getLayerByName("vae_conv/enc/logvar");
+    TASSERT_TRUE(logvar_pre_conv != nullptr);
+    TASSERT_TRUE(logvar_pre_conv->type == "Conv2d");
+    TASSERT_TRUE(logvar_pre_conv->kernel_size == 3);
+    TASSERT_TRUE(logvar_pre_conv->padding == 1);
+    TASSERT_TRUE(logvar_pre_conv->input_height == latent_stats_cfg.latent_h);
+    TASSERT_TRUE(logvar_pre_conv->input_width == latent_stats_cfg.latent_w);
+    TASSERT_TRUE(logvar_pre_act != nullptr);
+    TASSERT_TRUE(logvar_pre_act->type == "SiLU");
+    TASSERT_TRUE(logvar_pre_norm != nullptr);
+    TASSERT_TRUE(logvar_pre_norm->type == "GroupNorm");
+    TASSERT_TRUE(logvar_head != nullptr);
+    TASSERT_TRUE(logvar_head->inputs.size() == 1);
+    TASSERT_TRUE(logvar_head->inputs[0] == "vae_conv/enc/logvar_pre_norm/gn_out");
 
     // A fixed Constant must remain fixed, while an explicitly trainable one
     // receives the exact upstream gradient and is updated by the optimizer.
@@ -192,6 +262,12 @@ int main() {
     for (size_t i = 0; i < input.size(); ++i) {
         input[i] = static_cast<float>(i) / 15.0f - 0.5f;
     }
+
+    const std::vector<float> inference_output = vae.forwardPass(input, false);
+    const std::vector<float> inference_recon = vae.getTensor("vae_conv/recon");
+    TASSERT_TRUE(inference_output == inference_recon);
+    TASSERT_TRUE(inference_output.size() == input.size());
+    TASSERT_TRUE(vae.getTensor("x") == input);
 
     const std::vector<float> packed = vae.forwardPass(input, true);
     const std::vector<float> mu = vae.getTensor("vae_conv/mu");
@@ -261,8 +337,12 @@ int main() {
         std::string layer_name = base_label.substr(blocks + 8, type_sep - (blocks + 8));
         tapped_layers.insert(std::move(layer_name));
     }
+    const std::string inference_tensor =
+        vae.modelConfig.value("inference_output_tensor", std::string("x"));
     for (const auto& layer : vae.getLayers()) {
         TASSERT_TRUE(tapped_layers.find(layer.name) != tapped_layers.end());
+        const std::string output_name = layer.output.empty() ? "x" : layer.output;
+        if (output_name == inference_tensor) break;
     }
 
     // Training RGB previews must preserve geometry and channel order through
@@ -306,6 +386,15 @@ int main() {
         const auto* tanh = find_frame("vae_conv/dec/tanh");
         const auto* recon = find_frame("vae_conv/recon_to_hwc");
         TASSERT_TRUE(raw && chw && tanh && recon);
+        for (const auto* frame : {raw, chw, tanh, recon}) {
+            TASSERT_TRUE(frame->tensor_sample_channels == 3);
+            TASSERT_TRUE(frame->tensor_values.size() == static_cast<size_t>(frame->w)*frame->h*3);
+            TASSERT_TRUE(frame->tensor_indices.size() == frame->tensor_values.size());
+        }
+        TASSERT_NEAR(raw->tensor_values[0],1.f,1e-6f);
+        TASSERT_NEAR(raw->tensor_values[1],0.f,1e-6f);
+        TASSERT_NEAR(raw->tensor_values[2],-1.f,1e-6f);
+        TASSERT_TRUE(chw->tensor_indices[0]==0 && chw->tensor_indices[1]==64 && chw->tensor_indices[2]==128);
         const auto* feature = find_frame("vae_conv/enc/conv_in");
         TASSERT_TRUE(feature != nullptr);
         TASSERT_TRUE(feature->heatmap_kind == 1);
@@ -349,6 +438,14 @@ int main() {
         TASSERT_TRUE(frames.size() == 1);
         TASSERT_TRUE(frames[0].w == 4 && frames[0].h == 4);
         TASSERT_TRUE(frames[0].pixels_real.size() == 48);
+        TASSERT_TRUE(frames[0].tensor_sample_channels == 4);
+        TASSERT_TRUE(frames[0].tensor_values.size() == 64);
+        for (size_t i=0; i<frames[0].tensor_values.size(); ++i) {
+            TASSERT_TRUE(frames[0].tensor_indices[i] < values.size());
+            TASSERT_NEAR(frames[0].tensor_values[i],values[frames[0].tensor_indices[i]],1e-6f);
+        }
+        TASSERT_TRUE(frames[0].tensor_indices[0]==0 && frames[0].tensor_indices[16]==0);
+        TASSERT_TRUE(frames[0].tensor_indices[32]==16);
         TASSERT_TRUE(frames[0].pixels_real[0] < frames[0].pixels_real[1]);
         TASSERT_TRUE(frames[0].pixels_real[1] < frames[0].pixels_real[2]);
     }

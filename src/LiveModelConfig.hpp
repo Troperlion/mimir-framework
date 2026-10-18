@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdint>
 #include <map>
+#include <memory>
+#include <atomic>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -12,7 +14,42 @@
 // UI threads submit typed requests; only the training thread applies them.
 class LiveModelConfig {
 public:
+    // The UI queues exports; model access stays on the training thread.
+    bool requestDebugJson(const std::string& path = "checkpoints/debug/model.debug.json") {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (debug_pending_ || debug_busy_) return false;
+        debug_path_ = path;
+        debug_pending_ = true;
+        debug_status_ = "DebugJSON en attente";
+        return true;
+    }
+    bool consumeDebugJson(std::string* path = nullptr) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!debug_pending_) return false;
+        if (path) *path = debug_path_;
+        debug_pending_ = false;
+        debug_busy_ = true;
+        debug_status_ = "DebugJSON en cours";
+        return true;
+    }
+    void finishDebugJson(const std::string& result) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        debug_busy_ = false;
+        debug_status_ = result;
+    }
+    std::string debugJsonStatus() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return debug_status_;
+    }
     using Json = nlohmann::json;
+    void requestModelGraph(bool enabled) { graph_requested_.store(enabled); }
+    bool modelGraphRequested() const { return graph_requested_.load(); }
+    void publishModelGraph(Json graph) {
+        auto snapshot=std::make_shared<const Json>(std::move(graph));
+        std::atomic_store(&model_graph_,std::move(snapshot));
+    }
+    std::shared_ptr<const Json> modelGraph() const { return std::atomic_load(&model_graph_); }
+
     enum class Owner { ReadOnly, Model, Optimizer, Training };
     struct Entry {
         std::string key;
@@ -106,9 +143,13 @@ public:
         return text.size() > 1024 ? text.substr(0, 1021) + "..." : text;
     }
 private:
+    std::shared_ptr<const Json> model_graph_;
+    std::atomic<bool> graph_requested_{false};
     mutable std::mutex mutex_;
     std::map<std::string, Entry> entries_;
     Json overrides_ = Json::object();
+    bool debug_pending_ = false, debug_busy_ = false;
+    std::string debug_status_, debug_path_;
 };
 
 // One editor per interface; the request queue and effective values are shared.

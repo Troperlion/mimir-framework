@@ -106,6 +106,10 @@ if format == "raw_folder" then
   if type(checkpoint_cfg) ~= "table" then die("model_config absent ou illisible dans " .. architecture_path) end
   if checkpoint_cfg.type ~= "vae_conv" then die("checkpoint attendu: vae_conv") end
   for key, value in pairs(checkpoint_cfg) do cfg[key] = value end
+  -- A new launch config must not enable latent branches absent from a legacy checkpoint.
+  cfg.latent_spatial_context = checkpoint_cfg.latent_spatial_context == true
+  cfg.latent_detail_path = checkpoint_cfg.latent_detail_path == true
+  cfg.latent_context_channels = checkpoint_cfg.latent_context_channels or 32
   if type(architecture.layers) == "table" then
     cfg.dec_norm = "none"
     for _, layer in ipairs(architecture.layers) do

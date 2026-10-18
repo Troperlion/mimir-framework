@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Serialization.hpp"
+#include "CheckpointHashTree.hpp"
 #include "../include/json.hpp"
 #include <unordered_map>
 #include <vector>
@@ -31,6 +32,7 @@ public:
     );
     
 private:
+    CheckpointHashTree hash_tree_;
     struct TensorMetadata {
         std::string name;
         DType dtype;

@@ -1,3 +1,4 @@
+#include "runtimes/optimizers/OptimizerDispatch.hpp"
 #include "runtimes/AbstractRuntime.hpp"
 
 #include "Layers.hpp"
@@ -329,14 +330,17 @@ RuntimeCapabilityLevel AbstractRuntime::queryConfiguredForwardOperationCapabilit
         }
         case LayerType::LayerNorm:
         case LayerType::RMSNorm: {
-            if (!config_.norm_enabled || !layer.affine ||
+            if (!config_.norm_enabled ||
                 !meets(static_cast<long long>(first.size()), config_.norm_min_elements)) {
                 return RuntimeCapabilityLevel::Unsupported;
             }
             const int normalized = layer.in_features > 0
                 ? layer.in_features : static_cast<int>(first.size());
+            const size_t required_weights = layer.affine
+                ? static_cast<size_t>(normalized) * (layer.use_bias ? 2u : 1u)
+                : 0u;
             return normalized > 0 && first.size() % static_cast<size_t>(normalized) == 0 &&
-                    has_weights(static_cast<size_t>(normalized))
+                    (!layer.affine || has_weights(required_weights))
                 ? capability : RuntimeCapabilityLevel::Unsupported;
         }
         case LayerType::SelfAttention:
@@ -492,4 +496,20 @@ bool AbstractRuntime::dispatchBackwardLayer(
     }
 
     return false;
+}
+
+bool AbstractRuntime::supportsOptimizer() const {
+    return std::string(name())=="CPU" && isInitialized() && !config_.disabled;
+}
+bool AbstractRuntime::optimizerStep(const RuntimeOptimizerRequest& request) {
+    if(std::string(name())!="CPU" || !supportsOptimizer() || !optimizerRequestValid(request))return false;
+    optimizerHostStep(request);return true;
+}
+
+#include "runtimes/losses/LossDispatch.hpp"
+bool AbstractRuntime::supportsReconstructionLoss() const {
+    return std::string(name())=="CPU" && isInitialized() && !config_.disabled;
+}
+bool AbstractRuntime::reconstructionLoss(const RuntimeLossGrad::Request& r,RuntimeLossGrad::LossWithGrad& out) {
+    return supportsReconstructionLoss() && std::string(name())=="CPU" && RuntimeLossGrad::host(r,out);
 }

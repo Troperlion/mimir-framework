@@ -1,6 +1,6 @@
 {
   "$schema": "./conf.schema.json",
-  "description": "Lumen RGB Diffusion Transformer with text conditioning and DDIM sampling",
+  "description": "Lumen v5: VAEConv latents, per-block time-conditioned Diffusion Transformer, variable-length prompts and DDIM",
   "architecture": "lumen_diffusion",
   "lumen_diffusion": {
     "seed": 1337,
@@ -29,8 +29,8 @@
     "hidden_size": 384,
     "depth": 8,
     "mlp_ratio": 4.0,
-    "vocab_size": 32000,
     "text_seq_len": 77,
+    "dynamic_text_seq_len": true,
     "text_layers": 2,
     "num_heads": 8,
     "diffusion_steps": 1000,
@@ -42,9 +42,7 @@
     "viz_taps_max_side": 96
   },
   "tokenizer": {
-    "path": "checkpoint/base_tokenizer/tokenizer.json",
-    "max_vocab": 32000,
-    "max_sequence_length": 77
+    "path": "checkpoint/base_tokenizer/tokenizer.json"
   },
   "training": {
     "optimizer": "adamw",

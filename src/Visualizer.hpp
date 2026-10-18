@@ -1,7 +1,11 @@
 #ifndef __TENSOR_VISUALIZER_HPP__
 #define __TENSOR_VISUALIZER_HPP__
 #include "SkipConnectionControl.hpp"
+#include "MetricsHistory.hpp"
+#include "viz/TensorSelection.hpp"
 #include "LiveModelConfig.hpp"
+#include "DebugJsonExportDialog.hpp"
+#include "viz/DatasetBBoxOverlay.hpp"
 
 #ifdef ENABLE_VIZ
 #include "viz/Graphics.hpp"
@@ -51,15 +55,22 @@ public:
 
     // Requête d'arrêt de l'entraînement depuis l'UI (bouton dans le panneau Metrics).
     void requestStopTraining();
+    bool stopTrainingRequested() const { return stop_training_requested_.load(); }
     bool consumeStopTrainingRequested();
+    void setTrainingPauseControl(std::shared_ptr<std::atomic<bool>> control) { std::atomic_store(&training_paused_, std::move(control)); }
+    void setMetricsHistory(const std::vector<MetricsRecord>& records, size_t offset = 0);
 
     // Validation runtime: la configuration initialise l'état, puis tout clic
     // utilisateur devient prioritaire jusqu'à la fin de l'entraînement.
     void setRuntimeConfiguration(std::shared_ptr<LiveModelConfig> config) {
-        std::atomic_store(&runtime_config_, std::move(config));
+        if (!config) config=std::make_shared<LiveModelConfig>();
+        auto previous=std::atomic_exchange(&runtime_config_,config);
+        if(previous && previous!=config) previous->requestModelGraph(false);
     }
     std::shared_ptr<LiveModelConfig> runtime_config_ = std::make_shared<LiveModelConfig>();
     RuntimeConfigEditor config_editor_;
+    DebugJsonExportDialog debug_json_dialog_;
+    void renderDebugJsonDialog();
     void setSkipConnectionControl(std::shared_ptr<SkipConnectionControl> control) {
         std::atomic_store(&skip_control_, std::move(control));
     }
@@ -97,10 +108,12 @@ public:
     // Compat legacy: l'ancienne API supposait une image carrée en 1 canal (w/h inférés via sqrt).
     void addGeneratedImage(const std::vector<uint8_t>& image, const std::string& prompt);
     // Nouvelle API: dimensions explicites (supporte RGB).
-    void addGeneratedImage(const std::vector<uint8_t>& image, int w, int h, int channels, const std::string& prompt);
+    void addGeneratedImage(const std::vector<uint8_t>& image, int w, int h, int channels, const std::string& prompt, bool validation = false);
+
+    void beginValidationImages();
 
     // Définir l'image du dataset actuellement utilisée (RGB ou grayscale).
-    void setDatasetImage(const std::vector<uint8_t>& pixels, int w, int h, int channels, const std::string& label);
+    void setDatasetImage(const std::vector<uint8_t>& pixels, int w, int h, int channels, const std::string& label, bool bbox_supervision = false, const DatasetBBoxOverlay::Boxes& boxes = {});
 
     // Si le modele utilise du texte provenant du dataset: afficher le prompt,
     // les tags normalises, une forme tokenisee (ids) et un resume de l'encodage.
@@ -112,6 +125,36 @@ public:
     // Définir une visualisation de “compréhension” (feature/projection) en heatmap/grille.
     void setUnderstandingImage(const std::vector<uint8_t>& pixels, int w, int h, int channels, const std::string& label);
 
+    struct Detection {
+        float x1 = 0.0f;
+        float y1 = 0.0f;
+        float x2 = 0.0f;
+        float y2 = 0.0f;
+        float score = -1.0f;
+        int class_id = -1;
+        std::string label;
+    };
+    enum class DetectionTarget { Dataset, Output, Both };
+    void setDetections(const std::vector<Detection>& detections, DetectionTarget target);
+    void setDetectionOverlayEnabled(bool enabled);
+    void setDetectionScoreThreshold(float threshold);
+
+    struct DetectionMetrics {
+        bool enabled = false;
+        float object_loss = 0.0f;
+        float box_loss = 0.0f;
+        float class_loss = 0.0f;
+        int positive_cells = 0;
+        bool validation_has = false;
+        float precision = 0.0f;
+        float recall = 0.0f;
+        float f1 = 0.0f;
+        float mean_iou = 0.0f;
+        int true_positive = 0;
+        int false_positive = 0;
+        int false_negative = 0;
+    };
+
     // Définir les images intermédiaires (traitement par blocs/layers)
     struct BlockFrame {
         std::vector<uint8_t> pixels;      // heatmap (ou naturel pour image_like)
@@ -122,6 +165,9 @@ public:
         std::string label;
         int heatmap_kind = 0; // 0: image/scalar, 1: signed mean + energy
         std::string tensor_info;
+        std::vector<float> tensor_values; // interleaved raw samples, before colour mapping
+        std::vector<size_t> tensor_indices;
+        int tensor_sample_channels = 0;
     };
     void setLayerBlockImages(const std::vector<BlockFrame>& frames);
 
@@ -144,7 +190,8 @@ public:
                       int val_done = 0,
                       int val_total = 0,
                       float kl_beta_effective = 0.0f,
-                      const std::string& val_feedback = std::string());
+                      const std::string& val_feedback = std::string(),
+                      const DetectionMetrics* detection_metrics = nullptr);
 
     // Ajouter un point au graphique de loss
     void addLossPoint(float loss);
@@ -164,8 +211,27 @@ public:
     void setLossLogFile(const std::string& filepath);
 
 private:
+    friend struct VisualizerEventTestAccess;
     std::string loss_log_file;  // Chemin du fichier de log
-    bool loss_log_enabled_ = true;
+    bool loss_log_enabled_ = false;
+    std::shared_ptr<std::atomic<bool>> training_paused_ = std::make_shared<std::atomic<bool>>(false);
+    std::optional<vizgfx::FloatRect> last_debug_json_button_rect_;
+    std::optional<vizgfx::FloatRect> last_pause_button_rect_;
+    std::optional<vizgfx::FloatRect> last_commands_rect_;
+    std::optional<vizgfx::FloatRect> last_picker_rect_;
+    std::string last_picker_text_;
+    vizgfx::Vector2f picker_mouse_{-1.f, -1.f};
+    std::optional<vizgfx::FloatRect> picker_image_rect_, picker_image_clip_;
+    float picker_image_scale_ = 1.f;
+    BlockFrame picker_source_, picker_selection_source_;
+    bool picker_source_raw_ = false, picker_selection_raw_ = false;
+    bool picker_selecting_ = false, picker_selection_active_ = false;
+    int picker_anchor_x_ = 0, picker_anchor_y_ = 0;
+    int picker_end_x_ = 0, picker_end_y_ = 0;
+    std::optional<vizgfx::FloatRect> picker_selection_rect_;
+    TensorSelection::Summary picker_selection_summary_;
+    void updatePickerSelection(vizgfx::Vector2f point);
+
     // Configuration
     bool enabled;
     int window_width;
@@ -242,13 +308,21 @@ private:
     std::optional<vizgfx::FloatRect> last_live_recon_loss_box_;
 
     // Toggles UI (panneau Blocks/Layers)
+    std::optional<vizgfx::FloatRect> last_blocks_mode_box_, last_blocks_smooth_box_, last_blocks_palette_box_;
     std::optional<vizgfx::FloatRect> last_blocks_hide_act_box_;
     std::optional<vizgfx::FloatRect> last_blocks_hide_norm_box_;
     std::optional<vizgfx::FloatRect> last_blocks_tips_limit_box_;
+    std::optional<vizgfx::FloatRect> last_detection_toggle_box_;
+    std::optional<vizgfx::FloatRect> last_detection_threshold_track_;
+    std::optional<vizgfx::FloatRect> last_detection_threshold_thumb_;
+    bool dragging_detection_threshold_ = false;
 
     // Label parsing / architecture hints
     bool hide_activation_blocks = false;
     bool hide_normalisation_blocks = false;
+    bool show_detection_overlay_ = true;
+    bool show_feature_probe_ = false;
+    float detection_score_threshold_ = 0.60f;
     int blocks_tips_visible_limit_ = 0; // 0 = illimite
     bool blocks_tips_limit_editing_ = false;
     std::string blocks_tips_limit_input_;
@@ -345,10 +419,13 @@ private:
         }
     };
     std::vector<ImageData> generated_images;
+    size_t validation_image_count_ = 0; // Pinned prefix: latest validation originals/results.
 
     // Images contextuelles (dataset + projection)
     ImageData dataset_image;
     bool has_dataset_image = false;
+    bool dataset_bbox_supervision_ = false;
+    DatasetBBoxOverlay::Boxes dataset_boxes_;
     std::string dataset_label;
 
     ImageData projection_image;
@@ -368,6 +445,9 @@ private:
     ImageData output_thumb_;
     bool has_output_thumb_ = false;
     std::string output_thumb_label_;
+
+    std::vector<Detection> detections_;
+    DetectionTarget detection_target_ = DetectionTarget::Dataset;
 
     // Texte dataset (optionnel)
     bool has_dataset_text = false;
@@ -432,6 +512,7 @@ private:
     float current_val_kl;
     float current_val_align;
     std::string current_val_feedback;
+    DetectionMetrics current_detection_metrics_;
 
     // Lissage visuel des barres Training (évite les sauts brusques).
     float progress_epoch_display_ = 0.0f;
@@ -444,44 +525,7 @@ private:
     float loss_max_ = 0.0f;
     
     // Historique complet pour CSV (epoch, batch, loss, lr, mse, etc.)
-    struct LossRecord {
-        int step;
-        int epoch;
-        int total_epochs;
-        int batch;
-        int total_batches;
-        float loss;
-        float avg_loss;
-        float lr;
-        int batch_time_ms;
-        float bps;
-        size_t memory_mb;
-        double allocator_memory_mb;
-        size_t params;
-        float mse;
-        float kl_divergence;
-        float kl_beta_effective;
-        float wasserstein;
-        float entropy_diff;
-        float moment_mismatch;
-        float spatial_coherence;
-        float temporal_consistency;
-        float timestep;
-        float grad_norm;
-        float grad_max;
-        int opt_type;
-        int opt_step;
-        float opt_beta1;
-        float opt_beta2;
-        float opt_eps;
-        float opt_weight_decay;
-        // Métriques de validation (non nulles uniquement quand is_val=true)
-        float val_loss        = 0.f;
-        float val_mse         = 0.f;
-        int   val_step_id     = -1;  // step global auquel la validation a eu lieu
-        bool  is_val          = false;
-        std::string val_feedback;
-    };
+    using LossRecord = MetricsRecord;
     std::vector<LossRecord> full_loss_history;
     int last_recorded_validation_step_ = -1;
 
@@ -489,6 +533,8 @@ private:
     void renderBackground();
     void renderContextImages();
     void renderOutputImage();
+    void renderDetectionOverlay(const ImageData& image, float x, float y, float box_size,
+                                DetectionTarget rendered_target);
     void renderLayerBlocks();
     void renderGeneratedImages();
     void renderTrainingProgress();
@@ -502,6 +548,10 @@ private:
 
     // UI
     bool show_help_overlay_ = false;
+    float help_scroll_y_ = 0.f, help_scroll_max_ = 0.f;
+    int help_columns_ = 1;
+    std::optional<vizgfx::FloatRect> help_body_rect_, help_close_rect_;
+    std::vector<vizgfx::FloatRect> help_row_rects_;
     std::mutex script_mutex_;
     std::optional<json> script_pending_;
     json script_scene_ = json::object();
@@ -509,10 +559,19 @@ private:
     void applyScriptScene();
     void renderScriptControls();
     void renderConfigurationOverlay();
+    void renderModelGraphOverlay();
+    bool show_model_graph_ = false;
+    float model_graph_x_ = 0.f, model_graph_y_ = 0.f;
+    float model_graph_max_x_ = 0.f, model_graph_max_y_ = 0.f;
+    size_t model_graph_selected_ = 0;
+    std::vector<std::pair<vizgfx::FloatRect,size_t>> model_graph_hits_;
+    std::shared_ptr<const json> model_graph_display_;
+
     std::vector<std::pair<vizgfx::FloatRect, size_t>> config_row_rects_;
     void emitScriptEvent(const json& event);
     bool show_prompt_text_ = true;
     bool zoom_active_ = false;
+    bool zoom_actual_size_ = false;
     float zoom_info_scroll_ = 0.0f;
     float zoom_info_scroll_max_ = 0.0f;
     bool smooth_layer_block_previews_ = true;
@@ -567,6 +626,7 @@ private:
     vizgfx::FloatRect panelContentRect(PanelId id) const;
     vizgfx::FloatRect panelResizeHandleRect(PanelId id) const;
     vizgfx::FloatRect panelCloseButtonRect(PanelId id) const;
+    std::optional<PanelId> hitTestPanel(const vizgfx::Vector2f& mouse) const;
     std::optional<PanelId> hitTestPanelTitle(const vizgfx::Vector2f& mouse) const;
     std::optional<PanelId> hitTestPanelResizeHandle(const vizgfx::Vector2f& mouse) const;
     std::optional<PanelId> hitTestPanelCloseButton(const vizgfx::Vector2f& mouse) const;
@@ -692,7 +752,10 @@ public:
     bool consumeResyncRequested() { return false; }
 
     void requestStopTraining() {}
+    bool stopTrainingRequested() const { return false; }
     bool consumeStopTrainingRequested() { return false; }
+    void setTrainingPauseControl(std::shared_ptr<std::atomic<bool>>) {}
+    void setMetricsHistory(const std::vector<MetricsRecord>&, size_t = 0) {}
     void setRuntimeConfiguration(std::shared_ptr<LiveModelConfig> config) {
         std::atomic_store(&runtime_config_, std::move(config));
     }
@@ -724,12 +787,43 @@ public:
     void updateRuntimeTrainParams(float, int, float, int, const std::string&) {}
     void showValidationFeedback(ValidationFeedbackIcon) {}
 
-    void addGeneratedImage(const std::vector<uint8_t>&, int, int, int, const std::string&) {}
+    void addGeneratedImage(const std::vector<uint8_t>&, int, int, int, const std::string&, bool = false) {}
+    void beginValidationImages() {}
 
-    void setDatasetImage(const std::vector<uint8_t>&, int, int, int, const std::string&) {}
+    void setDatasetImage(const std::vector<uint8_t>&, int, int, int, const std::string&, bool = false, const DatasetBBoxOverlay::Boxes& = {}) {}
     void setDatasetText(const std::string&, const std::string&, const std::string&, const std::string&) {}
     void setProjectionImage(const std::vector<uint8_t>&, int, int, int, const std::string&) {}
     void setUnderstandingImage(const std::vector<uint8_t>&, int, int, int, const std::string&) {}
+
+    struct Detection {
+        float x1 = 0.0f;
+        float y1 = 0.0f;
+        float x2 = 0.0f;
+        float y2 = 0.0f;
+        float score = -1.0f;
+        int class_id = -1;
+        std::string label;
+    };
+    enum class DetectionTarget { Dataset, Output, Both };
+    void setDetections(const std::vector<Detection>&, DetectionTarget) {}
+    void setDetectionOverlayEnabled(bool) {}
+    void setDetectionScoreThreshold(float) {}
+
+    struct DetectionMetrics {
+        bool enabled = false;
+        float object_loss = 0.0f;
+        float box_loss = 0.0f;
+        float class_loss = 0.0f;
+        int positive_cells = 0;
+        bool validation_has = false;
+        float precision = 0.0f;
+        float recall = 0.0f;
+        float f1 = 0.0f;
+        float mean_iou = 0.0f;
+        int true_positive = 0;
+        int false_positive = 0;
+        int false_negative = 0;
+    };
 
     struct BlockFrame {
         std::vector<uint8_t> pixels;
@@ -740,6 +834,9 @@ public:
         std::string label;
         int heatmap_kind = 0; // 0: image/scalar, 1: signed mean + energy
         std::string tensor_info;
+        std::vector<float> tensor_values; // interleaved raw samples, before colour mapping
+        std::vector<size_t> tensor_indices;
+        int tensor_sample_channels = 0;
     };
     void setLayerBlockImages(const std::vector<BlockFrame>&) {}
 
@@ -760,7 +857,8 @@ public:
                       int = 0,
                       int = 0,
                       float = 0.0f,
-                      const std::string& = std::string()) {}
+                      const std::string& = std::string(),
+                      const DetectionMetrics* = nullptr) {}
 
     void addLossPoint(float) {}
     void setLossLogFile(const std::string&) {}

@@ -12,12 +12,14 @@
 #include "Models/Vision/VAEModel.hpp"
 #include "Models/Vision/VAEConvModel.hpp"
 #include "Models/Vision/GanLatentModel.hpp"
+#include "Models/Vision/GanStyleModel.hpp"
 #include "Models/Vision/CNN/ResNetModel.hpp"
 #include "Models/Vision/UNetModel.hpp"
 #include "Models/Vision/CNN/MobileNetModel.hpp"
 #include "Models/Vision/CNN/VGG16Model.hpp"
 #include "Models/Vision/CNN/VGG19Model.hpp"
 #include "Models/Vision/CNN/VGG16FeatModel.hpp"
+#include "Models/Vision/CNN/MedicalDetectorModel.hpp"
 #include "Models/Diffusion/DiffusionModel.hpp"
 #include "Models/Diffusion/CondDiffusionModel.hpp"
 #include "Models/Diffusion/HFSDXLTransformerBlockModel.hpp"
@@ -413,6 +415,9 @@ static VAEConvModel::Config vaeConvCfgFromJson(const json& cfg) {
     out.latent_w = jget<int>(cfg, "latent_w", out.latent_w);
     out.latent_c = jget<int>(cfg, "latent_c", out.latent_c);
     out.base_channels = jget<int>(cfg, "base_channels", out.base_channels);
+    out.latent_spatial_context = jget<bool>(cfg, "latent_spatial_context", out.latent_spatial_context);
+    out.latent_detail_path = jget<bool>(cfg, "latent_detail_path", out.latent_detail_path);
+    out.latent_context_channels = jget<int>(cfg, "latent_context_channels", out.latent_context_channels);
 
     // Latent stochasticity (reparameterization noise)
     out.stochastic_latent = jget<bool>(cfg, "stochastic_latent", out.stochastic_latent);
@@ -453,6 +458,9 @@ static json vaeConvDefaultConfigJson() {
                 {"latent_w", d.latent_w},
                 {"latent_c", d.latent_c},
                 {"base_channels", d.base_channels},
+                {"latent_spatial_context", d.latent_spatial_context},
+                {"latent_detail_path", d.latent_detail_path},
+                {"latent_context_channels", d.latent_context_channels},
                 {"stochastic_latent", d.stochastic_latent},
                 {"resnet", d.resnet},
                 {"attention", d.attention},
@@ -570,6 +578,31 @@ static VGG16Model::Config vgg16CfgFromJson(const json& cfg) {
 static json vgg16DefaultConfigJson() {
     VGG16Model::Config d;
     return json{{"image_w", d.image_w}, {"image_h", d.image_h}, {"image_c", d.image_c}, {"base_channels", d.base_channels}, {"num_classes", d.num_classes}, {"fc_hidden", d.fc_hidden}, {"dropout", d.dropout}};
+}
+
+static MedicalDetectorModel::Config medicalDetectorCfgFromJson(const json& cfg) {
+    MedicalDetectorModel::Config out;
+    out.image_w = jget<int>(cfg, "image_w", out.image_w);
+    out.image_h = jget<int>(cfg, "image_h", out.image_h);
+    out.image_c = jget<int>(cfg, "image_c", out.image_c);
+    out.base_channels = jget<int>(cfg, "base_channels", out.base_channels);
+    out.num_classes = jget<int>(cfg, "num_classes", out.num_classes);
+    out.object_loss_weight = jget<float>(cfg, "object_loss_weight", out.object_loss_weight);
+    out.box_loss_weight = jget<float>(cfg, "box_loss_weight", out.box_loss_weight);
+    out.class_loss_weight = jget<float>(cfg, "class_loss_weight", out.class_loss_weight);
+    out.object_pos_weight = jget<float>(cfg, "object_pos_weight", out.object_pos_weight);
+    return out;
+}
+
+static json medicalDetectorDefaultConfigJson() {
+    MedicalDetectorModel::Config d;
+    return json{{"image_w", d.image_w}, {"image_h", d.image_h},
+                {"image_c", d.image_c}, {"base_channels", d.base_channels},
+                {"num_classes", d.num_classes},
+                {"object_loss_weight", d.object_loss_weight},
+                {"box_loss_weight", d.box_loss_weight},
+                {"class_loss_weight", d.class_loss_weight},
+                {"object_pos_weight", d.object_pos_weight}};
 }
 
 static VGG19Model::Config vgg19CfgFromJson(const json& cfg) {
@@ -692,6 +725,9 @@ static LumenLatentDiffusionModel::Config lumenCfgFromJson(const json& cfg) {
     out.latent_h = jget<int>(cfg, "latent_h", out.latent_h);
     out.latent_c = jget<int>(cfg, "latent_c", out.latent_c);
     out.vae_base_channels = jget<int>(cfg, "vae_base_channels", out.vae_base_channels);
+    out.vae_latent_spatial_context = jget<bool>(cfg, "vae_latent_spatial_context", out.vae_latent_spatial_context);
+    out.vae_latent_detail_path = jget<bool>(cfg, "vae_latent_detail_path", out.vae_latent_detail_path);
+    out.vae_latent_context_channels = jget<int>(cfg, "vae_latent_context_channels", out.vae_latent_context_channels);
     out.vae_stochastic_latent = jget<bool>(cfg, "vae_stochastic_latent", out.vae_stochastic_latent);
     out.vae_resnet = jget<bool>(cfg, "vae_use_resnet",
                          jget<bool>(cfg, "vae_resnet", out.vae_resnet));
@@ -716,6 +752,7 @@ static LumenLatentDiffusionModel::Config lumenCfgFromJson(const json& cfg) {
     out.mlp_ratio = jget<float>(cfg, "mlp_ratio", out.mlp_ratio);
     out.vocab_size = jget<int>(cfg, "vocab_size", out.vocab_size);
     out.text_seq_len = jget<int>(cfg, "text_seq_len", out.text_seq_len);
+    out.dynamic_text_seq_len = jget<bool>(cfg,"dynamic_text_seq_len",out.dynamic_text_seq_len);
     out.text_layers = jget<int>(cfg, "text_layers", out.text_layers);
     out.num_heads = jget<int>(cfg, "num_heads", out.num_heads);
     out.diffusion_steps = jget<int>(cfg, "diffusion_steps", out.diffusion_steps);
@@ -733,6 +770,9 @@ static json lumenDefaultConfigJson() {
         {"seed", d.seed}, {"image_w", d.image_w}, {"image_h", d.image_h},
         {"image_c", d.image_c}, {"latent_w", d.latent_w}, {"latent_h", d.latent_h},
         {"latent_c", d.latent_c}, {"vae_base_channels", d.vae_base_channels},
+        {"vae_latent_spatial_context", d.vae_latent_spatial_context},
+        {"vae_latent_detail_path", d.vae_latent_detail_path},
+        {"vae_latent_context_channels", d.vae_latent_context_channels},
         {"vae_stochastic_latent", d.vae_stochastic_latent},
         {"vae_resnet", d.vae_resnet}, {"vae_attention", d.vae_attention},
         {"vae_use_skip_connections", d.vae_use_skip_connections},
@@ -748,7 +788,7 @@ static json lumenDefaultConfigJson() {
         {"vae_checkpoint", d.vae_checkpoint}, {"patch_size", d.patch_size},
         {"hidden_size", d.hidden_size}, {"depth", d.depth},
         {"mlp_ratio", d.mlp_ratio}, {"vocab_size", d.vocab_size},
-        {"text_seq_len", d.text_seq_len}, {"text_layers", d.text_layers},
+        {"text_seq_len", d.text_seq_len}, {"dynamic_text_seq_len", d.dynamic_text_seq_len}, {"text_layers", d.text_layers},
         {"num_heads", d.num_heads}, {"diffusion_steps", d.diffusion_steps},
         {"beta_start", d.beta_start}, {"beta_end", d.beta_end},
         {"preview_timestep", d.preview_timestep}, {"kl_beta", d.kl_beta},
@@ -1148,6 +1188,20 @@ void Registry::ensureBuiltinsRegistered() const {
         );
 
         entries_.emplace(
+            "medical_detector",
+            Entry{
+                "medical_detector",
+                "Medical anomaly detector with a native spatial detection grid",
+                medicalDetectorDefaultConfigJson(),
+                [](const json& cfg) -> std::shared_ptr<Model> {
+                    auto m = std::make_shared<MedicalDetectorModel>();
+                    m->buildFromConfig(medicalDetectorCfgFromJson(cfg));
+                    return m;
+                },
+            }
+        );
+
+        entries_.emplace(
             "vgg16_feat",
             Entry{
                 "vgg16_feat",
@@ -1258,6 +1312,20 @@ void Registry::ensureBuiltinsRegistered() const {
                 },
             }
         );
+
+        entries_.emplace("Gan_Style", Entry{
+            "Gan_Style", "Native image-to-image style GAN (convolutional generator and patch discriminator)",
+            {{"image_w",64},{"image_h",64},{"image_c",3},{"base_channels",16},
+             {"discriminator_channels",16},{"content_weight",10.f},{"discriminator_lr",0.001f}},
+            [](const json& cfg) -> std::shared_ptr<Model> {
+                GanStyleModel::Config c;
+                c.image_w=cfg.value("image_w",64); c.image_h=cfg.value("image_h",64);
+                c.image_c=cfg.value("image_c",3); c.base_channels=cfg.value("base_channels",16);
+                c.discriminator_channels=cfg.value("discriminator_channels",16);
+                c.content_weight=cfg.value("content_weight",10.f);
+                c.discriminator_lr=cfg.value("discriminator_lr",0.001f);
+                auto model=std::make_shared<GanStyleModel>(); model->buildFromConfig(c); return model;
+            }});
 
         entries_.emplace(
             "gan_latent",

@@ -67,7 +67,7 @@ Point clé : l'objectif n'est pas de forcer "100% GPU", mais d'obtenir le meille
 
 ```text
 [Layer Linear 4096×4096] → CUDA actif ? Seuil atteint ? → oui → cuBLAS SGEMM ✓
-[Layer GroupNorm]         → CUDA actif ? Fast-path dispo ? → non → CPU       ✓
+[Layer GroupNorm]         → CUDA actif ? Forme acceptée ? → oui → kernel CUDA ✓
 [Layer Linear 16×16]      → CUDA actif ? Seuil atteint ?  → non → CPU        ✓
 ```
 
@@ -116,7 +116,8 @@ Checklist rapide avant toute investigation performance :
 
 Vulkan est disponible via le runtime routeur avec des kernels compute dédiés.
 
-Scope actuel Vulkan (forward):
+Chemins spécialisés Vulkan (forward), complétés par les kernels de référence
+pour les autres types et le backward :
 
 - `Linear`
 - `MatMul`
@@ -206,66 +207,57 @@ Méthode simple de tuning :
 
 ## Matrice de couverture runtime (etat actuel)
 
-Objectif: visualiser clairement ce qui est utilisable aujourd'hui, par runtime et par famille d'ops.
+La couverture suivante décrit les implémentations du checkout courant. Les
+capacités publiées par le binaire dépendent des backends compilés. Le dispatcher
+vérifie ensuite configuration, formes et disponibilité du device.
 
-Legende des statuts:
+### Couverture actuelle par type
 
-- **Complet**: implementation native dans le runtime pour cette direction (forward ou backward).
-- **Partiel**: seulement une sous-partie de la famille d'ops est native.
-- **Conditionnel**: implementation stricte disponible, mais necessite un etat/cache/intermediaire explicite.
-- **Placeholder**: chemin branche mais non natif (souvent fallback CPU), ou branche qui ne couvre pas la famille de facon exploitable en GPU.
-- **Absent**: pas de support explicite dans le runtime pour cette direction.
+| Backend | Forward | Backward | Particularités |
+| --- | --- | --- | --- |
+| CPU | 72 types exécutables | 73 types | `Lambda` forward refusé par le dispatcher ; NMS stop-gradient. |
+| CUDA | 72 types natifs | 72 types natifs | `Lambda` backward indisponible ; NMS forward/backward implémenté. |
+| OpenCL | 72 types natifs | 73 types natifs | Kernels de référence pour les nouvelles opérations. |
+| Vulkan | 72 types natifs | 73 types natifs | Kernels de référence pour les nouvelles opérations. |
+| ROCm | Couverture partielle | Couverture partielle | Consulter l'inventaire du binaire et les traces ; repli possible. |
 
-Convention de validation backward CPU:
+Les backends Vulkan et OpenCL conservent leurs chemins spécialisés et utilisent
+`PortableRuntime` pour les autres opérations et les passes arrière. Leur
+couverture par type correspond au dispatcher CPU exécutable : **72 types en
+forward et 73 en backward**, dont NMS avec stop-gradient. `Lambda` est refusé
+en forward par le dispatcher CPU lui-même ; son backward identité est supporté
+sur CPU, Vulkan et OpenCL. CUDA possède les mêmes familles de kernels mais
+n'implémente pas le backward `Lambda`.
 
-- Le switch backward CPU est en mode **strict explicite**: `1 LayerType = 1 case` (pas de regroupement de labels).
-- Les ops non supportees en strict retournent explicitement `false` (pas d'approximation silencieuse).
+Les familles couvertes comprennent convolutions, normalisations, attention,
+projections/embeddings, pooling, transformations de tenseurs, récurrence,
+upsampling, dropout et reparamétrisation. Les configurations, formes de tenseurs
+et limites du device restent vérifiées ; cette couverture par type ne garantit
+pas que toute forme soit acceptée.
 
-### Forward
+Les nouveaux kernels de référence OpenCL/Vulkan exécutent leur calcul sur le
+device avec une invocation qui traite le travail logique séquentiellement.
+Ils privilégient la conformité numérique ; leur couverture ne garantit pas des
+performances supérieures au CPU. Le staging des tenseurs et l'accumulation des
+gradients de paramètres retournés restent sur l'hôte. Les calculs forward et
+backward ne sont pas remplacés par un appel arithmétique CPU caché.
 
-| Famille d'ops | CPU | CUDA | ROCm | OpenCL | Vulkan |
-| --- | --- | --- | --- | --- | --- |
-| Linear / MatMul / BatchMatMul | Complet | Complet | Complet | Complet | Complet |
-| Convolutions (Conv2d, ConvTranspose2d, Conv1d, Depthwise) | Complet | Partiel (Conv2d) | Partiel (Conv2d) | Absent | Partiel (Conv2d + ConvTranspose2d) |
-| Normes (BatchNorm, LayerNorm, GroupNorm, InstanceNorm, RMSNorm) | Complet | Partiel (LayerNorm + RMSNorm) | Partiel (LayerNorm + RMSNorm) | Absent | Absent |
-| Element-wise binaires (Add/Subtract/Multiply/Divide) | Complet | Complet | Complet | Complet | Partiel (Add + Multiply) |
-| Activations unaires (ReLU, LeakyReLU, GELU, SiLU, Sigmoid, Tanh, Softplus, Mish, Hard*) | Complet | Complet | Complet | Complet | Partiel (ReLU, SiLU, GELU, Sigmoid, Tanh) |
-| Attention (Self/MultiHead/Cross) | Complet | Complet | Complet | Absent | Absent |
-| Pooling / Reshape / Routing (Flatten, View, Permute, Concat, Split, etc.) | Complet | Absent (fallback router) | Absent (fallback router) | Absent | Absent |
-| RNN (LSTM/GRU/RNN) | Complet | Absent | Absent | Absent | Absent |
+NMS renvoie des indices discrets en forward. Son backward stop-gradient
+produit des zéros pour les boîtes, scores et classes ; placez les losses de
+détection avant NMS. Ce contrat est commun à CPU, CUDA, OpenCL et Vulkan.
 
-### Backward
+Pour consulter les déclarations du binaire :
 
-| Famille d'ops | CPU | CUDA | ROCm | OpenCL | Vulkan |
-| --- | --- | --- | --- | --- | --- |
-| Convolutions (Conv2d, ConvTranspose2d, Conv1d, Depthwise) | Complet | Placeholder (fallback CPU selon op) | Placeholder (fallback CPU selon op) | Absent | Absent |
-| Linear / Bilinear / MatMul / BatchMatMul | Complet | Complet | Placeholder | Placeholder | Absent |
-| Embedding / EmbeddingBag | Complet | Placeholder | Placeholder | Absent | Absent |
-| Element-wise binaires (Add/Subtract/Multiply/Divide) | Complet | Complet | Placeholder | Placeholder | Absent |
-| Activations unaires (ReLU, LeakyReLU, GELU, GEGLU, SiLU, Sigmoid, Tanh, Softplus, Mish, Hard*) | Complet | Complet | Placeholder | Placeholder | Absent |
-| Normes (BatchNorm/LayerNorm/RMSNorm/GroupNorm/InstanceNorm) | Complet | Placeholder | Placeholder | Absent | Absent |
-| Pooling (2D/1D/Global/Adaptive/TokenMean) | Complet | Placeholder | Placeholder | Absent | Absent |
-| Shape/Tensor ops (Flatten/Reshape/View/Squeeze/Unsqueeze/Transpose/Permute/Concat/Split/Chunk/Stack) | Complet | Placeholder | Placeholder | Absent | Absent |
-| Upsampling (Nearest/Bilinear/Bicubic/PixelShuffle) | Complet | Placeholder | Placeholder | Absent | Absent |
-| PatchEmbed | Complet | Placeholder | Placeholder | Absent | Absent |
-| Reparameterize | Complet | Placeholder | Placeholder | Absent | Absent |
-| Dropout / Dropout2d / AlphaDropout | Complet | Placeholder | Placeholder | Absent | Absent |
-| Attention (Self/MultiHead/Cross) | Complet | Placeholder | Placeholder | Absent | Absent |
-| RNN (LSTM/GRU/RNN) | Complet | Absent | Absent | Absent | Absent |
-| Constant / Lambda | Complet | Absent | Absent | Absent | Absent |
+```bash
+./bin/mimir --lua scripts/tools/inspect_architectures.lua -- --runtime
+```
 
-Notes de lecture importantes:
+`Native` signifie un calcul natif ; `NativeOptimized` identifie un chemin
+optimisé. `HostFallback` et `Unsupported` restent distincts. Les tests
+`RuntimeTest.OPENCLNativeOps` et `RuntimeTest.VULKANNativeOps` comparent les
+résultats au CPU et contrôlent le backend effectivement exécuté.
 
-- Le routeur runtime peut rendre une operation "utilisable" globalement via fallback CPU, meme si le runtime GPU courant est en **Absent** ou **Placeholder**.
-- Cote backward, le runtime CPU couvre explicitement la majorite des familles (conv, matmul, activations, normes, pooling, shape/tensor, upsampling, patch embed), avec dispatch strict `1:1` par `LayerType`.
-- Cote CPU, les familles backward Reparameterize, Dropout, Attention, RNN, Constant et Lambda sont maintenant implementees explicitement dans le runtime.
-- Vulkan n'override pas `backwardLayer`, donc backward Vulkan est **Absent** (retour `false` de l'implementation par defaut).
-
-Comment utiliser la matrice :
-
-1. Vérifier d'abord le support forward de la famille d'ops dominante de votre modèle.
-2. Si vous entraînez le modèle, vérifiez ensuite le support de la passe arrière.
-3. En absence de support GPU backward, prévoir fallback CPU explicite.
+Voir [les kernels et validations](../04-Architecture-Internals/21-GPU-Runtimes.md#opencl-et-vulkan-kernels-de-référence-partagés).
 
 ---
 

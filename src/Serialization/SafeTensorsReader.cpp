@@ -1,11 +1,15 @@
+#include "runtimes/fpga/FpgaIo.hpp"
 #include "SafeTensorsReader.hpp"
 #include "../Model.hpp"
 #include "CheckpointState.hpp"
 #include "../Encoder.hpp"
 #include "HardwareOpt.hpp"
+#include "../Sha256.hpp"
 #include <fstream>
 #include <algorithm>
 #include <cstring>
+#include <iomanip>
+#include <iostream>
 #include <limits>
 #include <unordered_set>
 
@@ -24,6 +28,8 @@ bool SafeTensorsReader::load(
     const LoadOptions& requested_options,
     std::string* error
 ) {
+    hash_tree_.begin(path);
+    CheckpointHashTree::Scope hash_scope{hash_tree_};
     auto options = requested_options;
     try {
         const uint16_t endian_probe = 1;
@@ -344,6 +350,8 @@ bool SafeTensorsReader::load_tensor_data(
             }
             return false;
         }
+
+        hash_tree_.add(tensor.name, "sha256", sha256(dest_buffer, bytes_to_read));
         
         return true;
         
@@ -413,13 +421,13 @@ bool SafeTensorsReader::apply_tensors_to_model(
             if (tensor.dtype == DType::Float16) {
                 std::vector<uint16_t> tmp(element_count);
                 if (!load_tensor_data(path, data_offset, tensor, tmp.data(), tmp.size() * sizeof(uint16_t), error)) return false;
-                HardwareOpt::fp16_to_fp32_f16c(out.data(), tmp.data(), element_count);
+                if (!Mimir::fpgaDecode16(out.data(), tmp.data(), element_count, false)) HardwareOpt::fp16_to_fp32_f16c(out.data(), tmp.data(), element_count);
                 return true;
             }
             if (tensor.dtype == DType::BFloat16) {
                 std::vector<uint16_t> tmp(element_count);
                 if (!load_tensor_data(path, data_offset, tensor, tmp.data(), tmp.size() * sizeof(uint16_t), error)) return false;
-                HardwareOpt::bf16_to_fp32(out.data(), tmp.data(), element_count);
+                if (!Mimir::fpgaDecode16(out.data(), tmp.data(), element_count, true)) HardwareOpt::bf16_to_fp32(out.data(), tmp.data(), element_count);
                 return true;
             }
             if (tensor.dtype == DType::Float64) {
@@ -636,7 +644,7 @@ bool SafeTensorsReader::apply_tensors_to_model(
                     )) {
                         return false;
                     }
-                    HardwareOpt::fp16_to_fp32_f16c(data_ptr, tmp.data(), actual_size);
+                    if (!Mimir::fpgaDecode16(data_ptr, tmp.data(), actual_size, false)) HardwareOpt::fp16_to_fp32_f16c(data_ptr, tmp.data(), actual_size);
                 } else if (tensor->dtype == DType::BFloat16) {
                     std::vector<uint16_t> tmp(actual_size);
                     if (!load_tensor_data(
@@ -646,7 +654,7 @@ bool SafeTensorsReader::apply_tensors_to_model(
                     )) {
                         return false;
                     }
-                    HardwareOpt::bf16_to_fp32(data_ptr, tmp.data(), actual_size);
+                    if (!Mimir::fpgaDecode16(data_ptr, tmp.data(), actual_size, true)) HardwareOpt::bf16_to_fp32(data_ptr, tmp.data(), actual_size);
                 } else if (tensor->dtype == DType::Float64) {
                     std::vector<double> tmp(actual_size);
                     if (!load_tensor_data(
@@ -765,7 +773,7 @@ bool SafeTensorsReader::apply_tensors_to_model(
                     )) {
                         return false;
                     }
-                    HardwareOpt::fp16_to_fp32_f16c(enc.token_embeddings.data(), tmp.data(), expected_size);
+                    if (!Mimir::fpgaDecode16(enc.token_embeddings.data(), tmp.data(), expected_size, false)) HardwareOpt::fp16_to_fp32_f16c(enc.token_embeddings.data(), tmp.data(), expected_size);
                 } else if (tensor->dtype == DType::BFloat16) {
                     std::vector<uint16_t> tmp(expected_size);
                     if (!load_tensor_data(
@@ -775,7 +783,7 @@ bool SafeTensorsReader::apply_tensors_to_model(
                     )) {
                         return false;
                     }
-                    HardwareOpt::bf16_to_fp32(enc.token_embeddings.data(), tmp.data(), expected_size);
+                    if (!Mimir::fpgaDecode16(enc.token_embeddings.data(), tmp.data(), expected_size, true)) HardwareOpt::bf16_to_fp32(enc.token_embeddings.data(), tmp.data(), expected_size);
                 } else if (tensor->dtype == DType::Float64) {
                     std::vector<double> tmp(expected_size);
                     if (!load_tensor_data(
@@ -850,7 +858,7 @@ bool SafeTensorsReader::apply_tensors_to_model(
                     if (!load_tensor_data(path, data_offset, *t, tmp.data(), tmp.size() * sizeof(uint16_t), error)) {
                         return false;
                     }
-                    HardwareOpt::fp16_to_fp32_f16c(dst.data(), tmp.data(), expected);
+                    if (!Mimir::fpgaDecode16(dst.data(), tmp.data(), expected, false)) HardwareOpt::fp16_to_fp32_f16c(dst.data(), tmp.data(), expected);
                     return true;
                 }
 
@@ -859,7 +867,7 @@ bool SafeTensorsReader::apply_tensors_to_model(
                     if (!load_tensor_data(path, data_offset, *t, tmp.data(), tmp.size() * sizeof(uint16_t), error)) {
                         return false;
                     }
-                    HardwareOpt::bf16_to_fp32(dst.data(), tmp.data(), expected);
+                    if (!Mimir::fpgaDecode16(dst.data(), tmp.data(), expected, true)) HardwareOpt::bf16_to_fp32(dst.data(), tmp.data(), expected);
                     return true;
                 }
 

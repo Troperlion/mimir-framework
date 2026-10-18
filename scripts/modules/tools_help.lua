@@ -88,6 +88,7 @@ local specs = {
     options = {
       "-a, --show-archs Liste les architectures disponibles (+ dtypes)",
       "-l, --list <arch> Sélectionne une architecture par son nom",
+      "--extern-model <path> Inspecte les tenseurs d’un fichier SafeTensors externe",
       "-e, --export <path> Exporte l'architecture sélectionnée",
       "-p, --params Affiche les paramètres de l'archi sélectionnée",
       "--layers Affiche les layers de l'archi sélectionnée",
@@ -98,12 +99,14 @@ local specs = {
       "-d, --dtypes Liste les dtypes pris en charge par le framework",
       "--optimizers Liste les algorithmes d'optimisation disponibles",
       "--recon-losses Liste les fonctions de reconstruction disponibles",
+      "--all Tous les rapports ; toutes architectures sans --list ; aucun export implicite",
       "--json Export JSON complet du registre",
       "--compact  Alias de --ops-compact",
       "Export : .json → DebugJSON ; .safetensors → SafeTensors ; dossier → RawFolder.",
     },
     examples = {
       "./bin/mimir --lua scripts/tools/inspect_architectures.lua -- --show-archs",
+      "./bin/mimir --lua scripts/tools/inspect_architectures.lua -- --extern-model model.safetensors --all",
       "./bin/mimir --lua scripts/tools/inspect_architectures.lua -- --list vae_conv --layers --stats",
       "./bin/mimir --lua scripts/tools/inspect_architectures.lua -- --list transformer --export exports/transformer.json",
     },

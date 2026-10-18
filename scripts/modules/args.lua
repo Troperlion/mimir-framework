@@ -17,8 +17,8 @@ Help.auto_exit_help({
   script_path = caller_script_path,
   common_flags = {
     "--help, -h : affiche cette aide",
-    "--htop/--tux : active le moniteur TUI",
-    "--viz : active la visualisation (et htop sauf si --no-htop)",
+    "--htop/--tux : active uniquement le moniteur TUI",
+    "--viz : active uniquement la visualisation",
     "--no-htop, --no-viz : desactive explicitement un mode",
     "--csv, --csv-path, --csv-enabled : options export CSV",
     "--override key=value : override de configuration (repete)",
@@ -30,24 +30,11 @@ local function maybe_start_htop(opts)
   if rawget(_G, "__MIMIR_MONITOR_STARTED") == true then
     return
   end
-  -- Historiquement, la viz est pilotée via AsyncMonitor (htop). Beaucoup de scripts
-  -- passent juste `--viz` en pensant que ça "active la viz". On traite donc `--viz`
-  -- comme un alias pratique qui démarre htop+viz.
   local requested_htop = (opts.htop == true) or (opts.tux == true)
   local requested_viz = (opts.viz == true) or (opts.visualiser == true) or (opts.visualizer == true) or (opts["enable-viz"] == true)
 
-  -- Si l'utilisateur a explicitement fait `--no-htop`, on ne doit pas démarrer le TUI,
-  -- même si `--viz` est demandé (on garde la viz uniquement).
-  local htop_explicitly_disabled = (opts.htop == false) or (opts.tux == false)
-
   local enable_viz = requested_viz
-  local enable_htop = false
-  if requested_htop then
-    enable_htop = true
-  elseif requested_viz and not htop_explicitly_disabled then
-    -- Compat: `--viz` seul démarre aussi htop, sauf si `--no-htop`.
-    enable_htop = true
-  end
+  local enable_htop = requested_htop
 
   if not (enable_htop or enable_viz) then return end
 
@@ -64,6 +51,7 @@ local function maybe_start_htop(opts)
   local cfg = {
     enable_viz = requested_viz,
     enable_htop = enable_htop,
+    defer_htop = enable_htop,
     viz_config = {
       visualization = {
         enabled = true,
@@ -116,7 +104,7 @@ local function maybe_start_htop(opts)
 
   do
     local l = rawget(_G, "log")
-    local msg = "[args] start monitor: htop=" .. tostring(enable_htop) .. " viz=" .. tostring(requested_viz)
+    local msg = "[args] monitor configured: htop=" .. tostring(enable_htop) .. " viz=" .. tostring(requested_viz)
     if type(l) == "function" then
       l(msg)
     else
@@ -284,7 +272,7 @@ function M.parse(argv)
   -- Option commune: démarrer l'interface TUI (HtopDisplay) si demandée.
   -- Ex:
   --   --htop (ou --tux)
-  --   --viz (active la viz en plus)
+  --   --viz (active uniquement la viz; combiner avec --htop pour les deux)
   --   --csv / --no-csv, --csv-path=..., --csv-enabled
   local ok, err = pcall(maybe_start_htop, opts)
   if not ok then

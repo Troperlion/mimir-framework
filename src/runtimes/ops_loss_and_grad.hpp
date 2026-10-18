@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include "training/SpatialRelation.hpp"
 #include <string>
 #include <vector>
 
@@ -14,12 +15,16 @@ struct GlobalSSIM {
 struct LossWithGrad {
     double loss = 0.0;
     std::vector<float> grad;
+    double relation_loss = 0.0;
 };
 
 struct PixelLossOptions {
     float huber_delta = 1.0f;
     float charbonnier_eps = 1e-3f;
     float gaussian_nll_sigma = 1.0f;
+    const std::vector<float>* weights = nullptr;
+    const std::vector<SpatialRelation>* relations = nullptr;
+    bool relation_only = false;
 };
 
 float sigmoid_scalar(float x);

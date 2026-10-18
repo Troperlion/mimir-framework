@@ -428,7 +428,12 @@ inline std::vector<float> layernorm_forward(
 
     std::vector<float> output(static_cast<size_t>(N));
 
+    const size_t required_weights = static_cast<size_t>(normalized) *
+        (layer.use_bias ? 2ULL : 1ULL);
     const float* weights = layer.affine ? layer.getWeights() : nullptr;
+    if (layer.affine && (!weights || layer.getWeightsSize() < required_weights)) {
+        throw std::runtime_error("LayerNorm: affine weights size mismatch");
+    }
     const float* bias = (layer.affine && layer.use_bias) ? (weights + normalized) : nullptr;
 
     for (int g = 0; g < groups; ++g) {

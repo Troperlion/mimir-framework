@@ -139,8 +139,8 @@ Adapter le backend et le chemin pour `SFML`, `GTK` ou `WEB`. Le test requiert
 et la fermeture ; pour WEB, il vérifie le protocole HTTP et les images BMP.
 Il ne lance pas de navigateur automatiquement.
 
-Les résultats de la reprise, les fichiers concernés et les limites de validation
-sont consignés dans [le journal de reprise](../VIZ_BACKENDS_PROGRESS.md).
+Le fonctionnement des panneaux et du monitoring est décrit dans
+[Monitoring, htop et visualisation](../04-Architecture-Internals/04-Monitoring-Htop-Visualizer.md).
 
 ## Pilotage par script et édition d'image
 

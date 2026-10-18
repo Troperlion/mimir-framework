@@ -41,8 +41,10 @@ Ce document décrit l'architecture interne du système de runtimes de Mímir : c
 | `src/runtimes/cuda/CudaRuntime.cpp` | Fast-paths cuBLAS (CUDA) |
 | `src/runtimes/rocm/RocmRuntime.cpp` | Fast-paths rocBLAS (ROCm/HIP) |
 | `src/runtimes/vulkan/VulkanCompute.hpp` | Compute Vulkan (Linear, MatMul/BatchMatMul, Add/Multiply, ReLU/SiLU/GELU/Sigmoid/Tanh) |
-| `src/runtimes/opencl/OpenCLCompute.hpp` | Compute OpenCL (legacy) |
-| `CMakeLists.txt` | Flags de compilation : `ENABLE_CUDA`, `ENABLE_ROCM`, `ENABLE_VULKAN` |
+| `src/runtimes/opencl/OpenCLCompute.hpp` | Chemins compute OpenCL spécialisés |
+| `src/runtimes/portable/PortableRuntime.cpp` | Forward/backward de référence OpenCL et Vulkan |
+| `src/runtimes/portable/PortableDevice.cpp` | Exécution des kernels via les API OpenCL et Vulkan |
+| `CMakeLists.txt` | Flags de compilation : `ENABLE_CUDA`, `ENABLE_ROCM`, `ENABLE_VULKAN`, `ENABLE_OPENCL` |
 
 ---
 
@@ -281,45 +283,44 @@ Les boucles dans `LayerOps` sont parallélisées via **OpenMP** si activé au bu
 
 Ces backends sont exposés via runtimes dédiés (`VulkanRuntime` / `OpenCLRuntime`) et routés par `RuntimeRouter`.
 
-En pratique:
+En pratique :
 
-- Vulkan déclare le forward pour `Linear`, `MatMul`, `BatchMatMul`, `Conv2d`,
-  `ConvTranspose2d`, les quatre opérations binaires et plusieurs activations.
-- OpenCL déclare le forward pour `Linear`, `MatMul`, `BatchMatMul`, les opérations
-  binaires et plusieurs activations. Son backward couvre aussi ces familles et
-  plusieurs poolings.
+Les backends Vulkan et OpenCL conservent leurs chemins spécialisés et utilisent
+`PortableRuntime` pour les autres opérations et les passes arrière. Leur
+couverture par type correspond au dispatcher CPU exécutable : **72 types en
+forward et 73 en backward**, dont NMS avec stop-gradient. `Lambda` est refusé
+en forward par le dispatcher CPU lui-même ; son backward identité est supporté
+sur CPU, Vulkan et OpenCL. CUDA possède les mêmes familles de kernels mais
+n'implémente pas le backward `Lambda`.
 
-| Backend | Build flag | Scope | Variables |
+Les familles couvertes comprennent convolutions, normalisations, attention,
+projections/embeddings, pooling, transformations de tenseurs, récurrence,
+upsampling, dropout et reparamétrisation. Les configurations, formes de tenseurs
+et limites du device restent vérifiées ; cette couverture par type ne garantit
+pas que toute forme soit acceptée.
+
+Les nouveaux kernels de référence OpenCL/Vulkan exécutent leur calcul sur le
+device avec une invocation qui traite le travail logique séquentiellement.
+Ils privilégient la conformité numérique ; leur couverture ne garantit pas des
+performances supérieures au CPU. Le staging des tenseurs et l'accumulation des
+gradients de paramètres retournés restent sur l'hôte. Les calculs forward et
+backward ne sont pas remplacés par un appel arithmétique CPU caché.
+
+| Backend | Build flag | Couverture native par type | Variables |
 |---|---|---|---|
-| Vulkan | `ENABLE_VULKAN` | Dense, convolutions, binaires et activations (forward, selon shaders/config) | `MIMIR_VULKAN_LINEAR_SPV`, `MIMIR_VULKAN_LINEAR`, `MIMIR_VULKAN_CONV` |
-| OpenCL | `ENABLE_OPENCL` | Dense, binaires, activations ; backward partiel | `MIMIR_OPENCL_LINEAR` |
+| Vulkan | `ENABLE_VULKAN` | 72 forward / 73 backward | `MIMIR_VULKAN_LINEAR_SPV`, `MIMIR_VULKAN_LINEAR`, `MIMIR_VULKAN_CONV` |
+| OpenCL | `ENABLE_OPENCL` | 72 forward / 73 backward | `MIMIR_OPENCL_LINEAR` |
 
----
+`Unsupported`, `HostFallback`, `Native` et `NativeOptimized` désignent des
+niveaux de capacité distincts. Pour l'inventaire actuel du binaire :
 
-## Tableau de synthèse
+```bash
+./bin/mimir --lua scripts/tools/inspect_architectures.lua -- --runtime
+```
 
-| Layer | CPU | CUDA | ROCm | Vulkan |
-|---|---|---|---|---|
-| `Linear` | ✓ ref | ✓ routé via RuntimeRouter | ✓ routé via RuntimeRouter | ✓ routé via RuntimeRouter |
-| `Conv2d` | ✓ ref | ✓ routé via RuntimeRouter | ✓ routé via RuntimeRouter | ✓ forward si activé |
-| `ConvTranspose2d` | ✓ ref | fallback partagé | fallback partagé | ✓ forward si activé |
-| `LayerNorm` | ✓ ref | ✓ routé via RuntimeRouter | ✓ routé via RuntimeRouter | ✗ |
-| `RMSNorm` | ✓ ref | ✓ routé via RuntimeRouter | ✓ routé via RuntimeRouter | ✗ |
-| `GroupNorm` | ✓ ref | ✗ fallback | ✗ fallback | ✗ |
-| `BatchNorm2d` | ✓ ref | ✗ fallback | ✗ fallback | ✗ |
-| `SelfAttention` | ✓ ref | ✓ routé via RuntimeRouter | ✓ routé via RuntimeRouter | ✗ |
-| `MultiHeadAttention` | ✓ ref | ✓ routé via RuntimeRouter | ✓ routé via RuntimeRouter | ✗ |
-| `CrossAttention` | ✓ ref | ✓ routé via RuntimeRouter | ✓ routé via RuntimeRouter | ✗ |
-| `Add` | ✓ ref | ✓ GPU ou fallback partagé | ✓ GPU ou fallback partagé | ✓ routé via RuntimeRouter |
-| `Multiply` | ✓ ref | ✓ GPU ou fallback partagé | ✓ GPU ou fallback partagé | ✓ routé via RuntimeRouter |
-| `ReLU` | ✓ ref | ✓ GPU ou fallback partagé | ✓ GPU ou fallback partagé | ✓ routé via RuntimeRouter |
-| Tous les autres | ✓ ref | ✗ fallback | ✗ fallback | ✗ |
-
-> **Note explicite :** la présence d’un type dans `supportsForwardLayerType()` est un
-> vote de routage, pas la garantie qu’un kernel GPU sera utilisé. Les seuils,
-> dimensions, flags, mode training et erreurs de backend peuvent faire refuser le
-> fast-path. CUDA et ROCm disposent aussi de chemins partagés vers
-> `RuntimeLayerDispatch`; utilise les traces runtime pour connaître le chemin réel.
+Cet inventaire déclare les capacités ; les traces et les tests avec
+`selected_runtime` prouvent le backend réellement exécuté. Le routeur propose
+au backend suivant toute opération refusée ou en échec.
 
 ---
 

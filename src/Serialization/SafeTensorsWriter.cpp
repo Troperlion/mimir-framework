@@ -1,3 +1,4 @@
+#include "runtimes/fpga/FpgaIo.hpp"
 #include "SafeTensorsWriter.hpp"
 #include "../Model.hpp"
 #include "CheckpointState.hpp"
@@ -96,13 +97,13 @@ std::vector<SafeTensorsWriter::TensorData> SafeTensorsWriter::collect_tensors(
 
         if (float_storage == DType::Float16) {
             owned_u16_buffers_.emplace_back(count);
-            HardwareOpt::fp32_to_fp16_f16c(owned_u16_buffers_.back().data(), data_ptr, count);
+            if (!Mimir::fpgaEncode16(owned_u16_buffers_.back().data(), data_ptr, count, false)) HardwareOpt::fp32_to_fp16_f16c(owned_u16_buffers_.back().data(), data_ptr, count);
             td.dtype = DType::Float16;
             td.byte_size = count * sizeof(uint16_t);
             td.data_ptr = owned_u16_buffers_.back().data();
         } else if (float_storage == DType::BFloat16) {
             owned_u16_buffers_.emplace_back(count);
-            HardwareOpt::fp32_to_bf16(owned_u16_buffers_.back().data(), data_ptr, count);
+            if (!Mimir::fpgaEncode16(owned_u16_buffers_.back().data(), data_ptr, count, true)) HardwareOpt::fp32_to_bf16(owned_u16_buffers_.back().data(), data_ptr, count);
             td.dtype = DType::BFloat16;
             td.byte_size = count * sizeof(uint16_t);
             td.data_ptr = owned_u16_buffers_.back().data();

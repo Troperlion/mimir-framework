@@ -1,4 +1,10 @@
+#include "runtimes/tpu/TpuRuntime.hpp"
+#include "runtimes/fpga/FpgaSession.hpp"
+#include "runtimes/fpga/FpgaRuntime.hpp"
 #include "Model.hpp"
+#include "runtimes/optimizers/OptimizerDispatch.hpp"
+#include "viz/ModelGraph.hpp"
+#include "training/BBoxSupervision.hpp"
 #include "HardwareOpt.hpp"
 #include "SIMD_Ops.hpp"
 #include "Layers.hpp"
@@ -318,7 +324,7 @@ static inline void refresh_runtime_router_bindings() {
 #endif
     cpu = g_cpu_engine.get();
 
-    RuntimeRouter::instance().setRuntimes(rocm, cuda, vulkan, opencl, cpu);
+    RuntimeRouter::instance().setRuntimes(rocm, cuda, vulkan, opencl, Mimir::tpuSessionRuntime(), cpu);
 }
 }
 
@@ -338,6 +344,7 @@ Model::Model()
     tw = 64; th = 64;
     // ConditioningEncoder toujours présent + embeddings spéciaux (SEQ/MOD/MAG) disponibles.
     encoder.ensureSpecialEmbeddings();
+    Mimir::initializeFpgaSession();
     // Tenter d'initialiser les runtimes disponibles
     RuntimeRouter::instance().activateAvailableRuntimes();
 }
@@ -1138,8 +1145,112 @@ const std::vector<float>& Model::forwardPassNamedView(
     return forwardPassView(empty, training);
 }
 
-std::optional<Model::TrainStepResult> Model::trainStep(const TrainStepRequest&) {
-    return std::nullopt;
+std::optional<Model::TrainStepResult> Model::trainStep(const TrainStepRequest& request) {
+    applyRuntimeConfiguration();
+    if (request.optimizer == nullptr || request.target == nullptr) return std::nullopt;
+
+    const std::vector<float>* input = nullptr;
+    for (const char* name : {"__input__", "image", "input", "x"}) {
+        const auto it = request.float_inputs.find(name);
+        if (it != request.float_inputs.end() && it->second != nullptr) {
+            input = it->second;
+            break;
+        }
+    }
+    if (input == nullptr) return std::nullopt;
+
+    const std::vector<float>* forward_input = input;
+    std::vector<float> masked_input;
+    const std::vector<float>* output_weights = nullptr;
+    if (request.loss_weights != nullptr && !request.loss_weights->empty()) {
+        if (request.loss_weights->size() == request.target->size()) {
+            output_weights = request.loss_weights;
+        } else if (request.loss_weights->size() == input->size()) {
+            masked_input.resize(input->size());
+            for (size_t i = 0; i < input->size(); ++i) {
+                masked_input[i] = (*input)[i] * std::max(0.0f, (*request.loss_weights)[i]);
+            }
+            forward_input = &masked_input;
+        } else {
+            throw std::invalid_argument(
+                "Model::trainStep: loss_weights size must match the input or target size");
+        }
+    }
+
+    BBoxSupervision::Weights bbox_weights;
+    std::vector<float> combined_output_weights;
+    if (request.annotation) {
+        bool at_output = true;
+        bbox_weights = BBoxSupervision::forModel(request.annotation, modelConfig,
+            input->size(), request.target->size(), &at_output);
+        if (!bbox_weights.values.empty()) {
+            if (at_output) {
+                combined_output_weights = bbox_weights.values;
+                if (output_weights) for (size_t i=0;i<combined_output_weights.size();++i)
+                    combined_output_weights[i] *= (*output_weights)[i];
+                output_weights = &combined_output_weights;
+            } else {
+                const std::vector<float> original = *forward_input;
+                masked_input.resize(original.size());
+                for (size_t i=0;i<original.size();++i) masked_input[i]=original[i]*bbox_weights.values[i];
+                forward_input=&masked_input;
+            }
+        }
+    }
+
+    if (request.mode == TrainStepMode::Optimize) zeroGradients();
+    const std::vector<float>& prediction = forwardPassView(*forward_input, true);
+    if (prediction.size() != request.target->size()) {
+        throw std::invalid_argument(
+            "Model::trainStep: prediction and target sizes differ");
+    }
+
+    std::string loss_type = "mse";
+    try {
+        if (modelConfig.contains("loss")) loss_type = modelConfig["loss"].get<std::string>();
+        else if (modelConfig.contains("recon_loss")) loss_type = modelConfig["recon_loss"].get<std::string>();
+    } catch (...) {
+    }
+
+    RuntimeLossGrad::PixelLossOptions options;
+    options.weights = output_weights;
+    options.relations = request.relations ? request.relations : &bbox_weights.relations;
+    try {
+        if (modelConfig.contains("huber_delta")) options.huber_delta = std::max(1e-6f, modelConfig["huber_delta"].get<float>());
+        if (modelConfig.contains("smoothl1_delta")) options.huber_delta = std::max(1e-6f, modelConfig["smoothl1_delta"].get<float>());
+        if (modelConfig.contains("smoothl1_beta")) options.huber_delta = std::max(1e-6f, modelConfig["smoothl1_beta"].get<float>());
+        if (modelConfig.contains("charbonnier_eps")) options.charbonnier_eps = std::max(1e-12f, modelConfig["charbonnier_eps"].get<float>());
+        if (modelConfig.contains("nll_sigma")) options.gaussian_nll_sigma = std::max(1e-6f, modelConfig["nll_sigma"].get<float>());
+        if (modelConfig.contains("gaussian_nll_sigma")) options.gaussian_nll_sigma = std::max(1e-6f, modelConfig["gaussian_nll_sigma"].get<float>());
+    } catch (...) {
+    }
+
+    auto loss = RuntimeLossGrad::pixel_loss_and_grad(
+        prediction, *request.target, loss_type, options);
+    if (request.grad_scale != 1.0f) {
+        for (float& gradient : loss.grad) gradient *= request.grad_scale;
+    }
+    backwardPass(loss.grad);
+
+    TrainStepResult result;
+    result.loss = static_cast<float>(loss.loss);
+    result.metrics["bbox_count"] = static_cast<float>(bbox_weights.bbox_count);
+    result.metrics["bbox_loss_weight"] = bbox_weights.strength;
+    result.metrics["relation_loss"] = static_cast<float>(loss.relation_loss);
+    result.metrics["relation_count"] = static_cast<float>(request.relations ? request.relations->size() : bbox_weights.relation_count);
+    result.metrics[RuntimeLossGrad::canonical_pixel_loss_name(loss_type)] = result.loss;
+    double sum_squares = 0.0;
+    for (const auto& layer : layers) {
+        for (float gradient : layer.grad_weights) {
+            sum_squares += static_cast<double>(gradient) * static_cast<double>(gradient);
+            result.grad_max_abs = std::max(result.grad_max_abs, std::abs(gradient));
+        }
+    }
+    result.grad_norm = static_cast<float>(std::sqrt(sum_squares));
+    if (request.mode == TrainStepMode::Optimize) {
+        optimizerStep(*request.optimizer, request.learning_rate);
+    }
+    return result;
 }
 
 Layer* Model::getLayerByName(const std::string& name) {
@@ -1257,6 +1368,11 @@ void Model::allocateParams() {
             
             // Lier le tensor au layer
             layers[i].weight_block = &layer_weight_blocks[i];
+            // Frozen imported graph components may carry their checkpoint values.
+            if (modelConfig.is_object() && modelConfig.value("initialize_from_layer_weights", false) &&
+                layers[i].weights.size() == layer_param_count) {
+                std::copy(layers[i].weights.begin(), layers[i].weights.end(), layers[i].getWeights());
+            }
             
             if (!Model::frameworkLogsSuppressed()) {
                 std::cerr << "  Layer " << i << " (" << layers[i].name << "): " 
@@ -1695,217 +1811,12 @@ void Model::optimizerStep(Optimizer &opt, float learning_rate, const Gradients* 
             moments = &opt.ensureMomentsFor(weights, weight_count);
         }
         
-        switch (opt.type) {
-            case OptimizerType::SGD: {
-                // SGD simple
-                #pragma omp simd
-                for (size_t i = 0; i < n; ++i) {
-                    float grad = layer.grad_weights[i];
-                    weights[i] -= effective_lr * grad;
-                }
-                break;
-            }
-            
-            case OptimizerType::ADAM: {
-                // Adam standard
-                const float b1 = opt.beta1, b2 = opt.beta2;
-                float bias_correction1 = 1.0f - std::pow(b1, static_cast<float>(opt.step));
-                float bias_correction2 = 1.0f - std::pow(b2, static_cast<float>(opt.step));
-                if (bias_correction1 <= 0.0f) bias_correction1 = 1e-8f;
-                if (bias_correction2 <= 0.0f) bias_correction2 = 1e-8f;
-                
-                #pragma omp simd
-                for (size_t i = 0; i < n; ++i) {
-                    float grad = layer.grad_weights[i];
-
-                    float& mi = (*moments).m[i];
-                    float& vi = (*moments).v[i];
-                    mi = b1 * mi + (1.0f - b1) * grad;
-                    vi = b2 * vi + (1.0f - b2) * grad * grad;
-
-                    float m_hat = mi / bias_correction1;
-                    float v_hat = vi / bias_correction2;
-                    
-                    float denom = std::sqrt(v_hat) + opt.eps;
-                    weights[i] -= effective_lr * (m_hat / denom);
-                }
-                break;
-            }
-            
-            case OptimizerType::ADAMW: {
-                // AdamW avec weight decay découplé
-                const float b1 = opt.beta1, b2 = opt.beta2;
-                float bias_correction1 = 1.0f - std::pow(b1, static_cast<float>(opt.step));
-                float bias_correction2 = 1.0f - std::pow(b2, static_cast<float>(opt.step));
-                if (bias_correction1 <= 0.0f) bias_correction1 = 1e-8f;
-                if (bias_correction2 <= 0.0f) bias_correction2 = 1e-8f;
-                
-                #pragma omp simd
-                for (size_t i = 0; i < n; ++i) {
-                    float grad = layer.grad_weights[i];
-                    float current = weights[i];
-
-                    float& mi = (*moments).m[i];
-                    float& vi = (*moments).v[i];
-                    mi = b1 * mi + (1.0f - b1) * grad;
-                    vi = b2 * vi + (1.0f - b2) * grad * grad;
-
-                    float m_hat = mi / bias_correction1;
-                    float v_hat = vi / bias_correction2;
-
-                    float denom = std::sqrt(v_hat) + opt.eps;
-                    float weight_decay_term = opt.weight_decay * current;
-                    float adam_update = effective_lr * (m_hat / denom);
-
-                    weights[i] = current - adam_update - effective_lr * weight_decay_term;
-                }
-                break;
-            }
-
-            case OptimizerType::LION: {
-                const float b1 = std::clamp(opt.beta1, 0.0f, 1.0f);
-                const float b2 = std::clamp(opt.beta2, 0.0f, 1.0f);
-                #pragma omp simd
-                for (size_t i = 0; i < n; ++i) {
-                    const float grad = layer.grad_weights[i];
-                    float& mi = moments->m[i];
-                    const float update = b1 * mi + (1.0f - b1) * grad;
-                    const float direction = (update > 0.0f) - (update < 0.0f);
-                    weights[i] -= effective_lr * (direction + opt.weight_decay * weights[i]);
-                    mi = b2 * mi + (1.0f - b2) * grad;
-                }
-                break;
-            }
-
-            case OptimizerType::ADAFACTOR: {
-                const float decay = std::clamp(
-                    1.0f - std::pow(static_cast<float>(opt.step), opt.adafactor_decay_rate),
-                    0.0f, 1.0f);
-                double update_sq_sum = 0.0;
-                double param_sq_sum = 0.0;
-                for (size_t i = 0; i < n; ++i) {
-                    const float grad = layer.grad_weights[i];
-                    float& vi = moments->v[i];
-                    vi = decay * vi + (1.0f - decay) * grad * grad;
-                    const float update = grad / std::sqrt(vi + std::max(1e-30f, opt.eps));
-                    update_sq_sum += static_cast<double>(update) * update;
-                    param_sq_sum += static_cast<double>(weights[i]) * weights[i];
-                }
-                const float update_rms = n > 0 ? static_cast<float>(std::sqrt(update_sq_sum / n)) : 0.0f;
-                const float clip = std::max(1e-6f, opt.adafactor_clip_threshold);
-                const float clip_scale = 1.0f / std::max(1.0f, update_rms / clip);
-                const float param_scale = opt.adafactor_scale_parameter && n > 0
-                    ? std::max(opt.adafactor_eps2, static_cast<float>(std::sqrt(param_sq_sum / n)))
-                    : 1.0f;
-                const float relative_lr = opt.adafactor_relative_step
-                    ? std::min(1e-2f, 1.0f / std::sqrt(static_cast<float>(opt.step)))
-                    : effective_lr;
-                #pragma omp simd
-                for (size_t i = 0; i < n; ++i) {
-                    float update = clip_scale * layer.grad_weights[i]
-                        / std::sqrt(moments->v[i] + std::max(1e-30f, opt.eps));
-                    if (opt.adafactor_beta1 > 0.0f) {
-                        float& momentum = moments->m[i];
-                        momentum = opt.adafactor_beta1 * momentum
-                            + (1.0f - opt.adafactor_beta1) * update;
-                        update = momentum;
-                    }
-                    weights[i] -= relative_lr * param_scale * update;
-                }
-                break;
-            }
-
-            case OptimizerType::RADAM: {
-                const float b1 = std::clamp(opt.beta1, 0.0f, 1.0f);
-                const float b2 = std::clamp(opt.beta2, 0.0f, 1.0f - 1e-7f);
-                const float b1_power = std::pow(b1, static_cast<float>(opt.step));
-                const float b2_power = std::pow(b2, static_cast<float>(opt.step));
-                const float bias_correction1 = std::max(1e-8f, 1.0f - b1_power);
-                const float rho_inf = 2.0f / (1.0f - b2) - 1.0f;
-                const float rho = rho_inf - 2.0f * static_cast<float>(opt.step) * b2_power
-                    / std::max(1e-8f, 1.0f - b2_power);
-                const float rectification = rho > 5.0f
-                    ? std::sqrt(((rho - 4.0f) * (rho - 2.0f) * rho_inf)
-                                / ((rho_inf - 4.0f) * (rho_inf - 2.0f) * rho))
-                    : 1.0f;
-                #pragma omp simd
-                for (size_t i = 0; i < n; ++i) {
-                    const float grad = layer.grad_weights[i];
-                    float& mi = moments->m[i];
-                    float& vi = moments->v[i];
-                    mi = b1 * mi + (1.0f - b1) * grad;
-                    vi = b2 * vi + (1.0f - b2) * grad * grad;
-                    const float m_hat = mi / bias_correction1;
-                    const float update = rho > 5.0f
-                        ? rectification * m_hat / (std::sqrt(vi / std::max(1e-8f, 1.0f - b2_power)) + opt.eps)
-                        : m_hat;
-                    weights[i] -= effective_lr * update;
-                }
-                break;
-            }
-
-            case OptimizerType::NADAM: {
-                const float b1 = std::clamp(opt.beta1, 0.0f, 1.0f);
-                const float b2 = std::clamp(opt.beta2, 0.0f, 1.0f);
-                const float bc1 = std::max(1e-8f, 1.0f - std::pow(b1, static_cast<float>(opt.step)));
-                const float bc2 = std::max(1e-8f, 1.0f - std::pow(b2, static_cast<float>(opt.step)));
-                #pragma omp simd
-                for (size_t i = 0; i < n; ++i) {
-                    const float grad = layer.grad_weights[i];
-                    float& mi = moments->m[i];
-                    float& vi = moments->v[i];
-                    mi = b1 * mi + (1.0f - b1) * grad;
-                    vi = b2 * vi + (1.0f - b2) * grad * grad;
-                    const float nesterov = b1 * (mi / bc1) + (1.0f - b1) * grad / bc1;
-                    weights[i] -= effective_lr * nesterov / (std::sqrt(vi / bc2) + opt.eps);
-                }
-                break;
-            }
-
-            case OptimizerType::RMSPROP: {
-                const float alpha = std::clamp(opt.rmsprop_alpha, 0.0f, 1.0f);
-                #pragma omp simd
-                for (size_t i = 0; i < n; ++i) {
-                    const float grad = layer.grad_weights[i];
-                    float& vi = moments->v[i];
-                    vi = alpha * vi + (1.0f - alpha) * grad * grad;
-                    weights[i] -= effective_lr * grad / (std::sqrt(vi) + opt.eps);
-                }
-                break;
-            }
-
-            case OptimizerType::LAMB: {
-                const float b1 = std::clamp(opt.beta1, 0.0f, 1.0f);
-                const float b2 = std::clamp(opt.beta2, 0.0f, 1.0f);
-                const float bc1 = std::max(1e-8f, 1.0f - std::pow(b1, static_cast<float>(opt.step)));
-                const float bc2 = std::max(1e-8f, 1.0f - std::pow(b2, static_cast<float>(opt.step)));
-                double weight_norm_sq = 0.0;
-                double update_norm_sq = 0.0;
-                for (size_t i = 0; i < n; ++i) {
-                    const float grad = layer.grad_weights[i];
-                    float& mi = moments->m[i];
-                    float& vi = moments->v[i];
-                    mi = b1 * mi + (1.0f - b1) * grad;
-                    vi = b2 * vi + (1.0f - b2) * grad * grad;
-                    const float update = (mi / bc1) / (std::sqrt(vi / bc2) + opt.eps)
-                        + opt.weight_decay * weights[i];
-                    weight_norm_sq += static_cast<double>(weights[i]) * weights[i];
-                    update_norm_sq += static_cast<double>(update) * update;
-                }
-                const float weight_norm = static_cast<float>(std::sqrt(weight_norm_sq));
-                const float update_norm = static_cast<float>(std::sqrt(update_norm_sq));
-                const float trust_ratio = weight_norm > 0.0f && update_norm > 0.0f
-                    ? weight_norm / update_norm : 1.0f;
-                #pragma omp simd
-                for (size_t i = 0; i < n; ++i) {
-                    const float update = (moments->m[i] / bc1)
-                        / (std::sqrt(moments->v[i] / bc2) + opt.eps)
-                        + opt.weight_decay * weights[i];
-                    weights[i] -= effective_lr * trust_ratio * update;
-                }
-                break;
-            }
-        }
+        RuntimeOptimizerRequest update{&opt,effective_lr,weights,layer.grad_weights.data(),
+            moments && !moments->m.empty()?moments->m.data():nullptr,
+            moments && !moments->v.empty()?moments->v.data():nullptr,n};
+        AbstractRuntime* optimizer_runtime=nullptr;
+        if(n && !RuntimeRouter::instance().dispatchOptimizer(update,&optimizer_runtime))
+            throw std::runtime_error("No runtime completed optimizer update");
         
         // NOTE: ne pas réinitialiser ici.
         // Les boucles d'entraînement modernes appellent zeroGradients() en début de step.
@@ -2369,12 +2280,13 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
     applyRuntimeConfiguration();
     const bool skip_connections_enabled = skipConnectionControl()->enabled.load();
     if (skip_control_->available.load()) modelConfig["skip_connections_enabled"] = skip_connections_enabled;
-    const bool viz_capture_requested = viz_taps_enabled_ && viz_taps_max_frames_ > 0;
+    const bool viz_capture_allowed = !modelConfig.is_object() || !modelConfig.value("viz_taps_suppressed", false);
+    const bool viz_capture_requested = viz_capture_allowed && viz_taps_enabled_ && viz_taps_max_frames_ > 0;
     if (viz_capture_requested && g_viz_capture_root == nullptr) {
         g_viz_capture_root = this;
     }
     Model* const viz_capture_root = g_viz_capture_root;
-    const bool nested_viz_model = viz_capture_root != nullptr && viz_capture_root != this;
+    const bool nested_viz_model = viz_capture_allowed && viz_capture_root != nullptr && viz_capture_root != this;
     if (nested_viz_model) {
         setVizTapsEnabled(true);
         setVizTapsLimits(viz_capture_root->viz_taps_max_frames_,
@@ -2530,6 +2442,7 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
             framework_log_write_file_only((line + "\n").c_str(), line.size() + 1);
         }
     };
+    bool graph_plan_changed = false;
     if (planner_enabled) {
         if (!static_plan_.built ||
             static_plan_.built_for_training != training ||
@@ -2542,6 +2455,7 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
             Mimir::Planning::plan_host_buffer_reuse(static_plan_.execution, planner_buffer_reuse);
             Mimir::Planning::apply_global_scratch_plan(static_plan_.execution, layers);
             static_plan_.built = true;
+            graph_plan_changed = true;
             static_plan_.built_for_training = training;
             static_plan_.built_with_fusion = fusion_enabled;
             static_plan_.built_with_buffer_reuse = planner_buffer_reuse;
@@ -2567,6 +2481,8 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
 #ifdef ENABLE_OPENCL
             if (g_opencl_engine) planner_runtimes.push_back(g_opencl_engine.get());
 #endif
+            if (auto* tpu = Mimir::tpuSessionRuntime(); tpu && tpu->isInitialized())
+                planner_runtimes.push_back(tpu);
             if (g_cpu_engine) planner_runtimes.push_back(g_cpu_engine.get());
             Mimir::Planning::apply_runtime_placement(static_plan_.execution, planner_runtimes);
         }
@@ -2611,7 +2527,22 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
             }
         }
     } else {
+        graph_plan_changed = static_plan_.built;
         static_plan_.built = false;
+    }
+
+    // Keep the last built plan available even if the UI opens after inference.
+    // Otherwise refresh metadata at most twice per second while inspected.
+    const auto graph_now=std::chrono::steady_clock::now();
+    if (graph_plan_changed || graph_snapshot_time_.time_since_epoch().count()==0 ||
+        (runtime_config_->modelGraphRequested() &&
+         graph_now-graph_snapshot_time_ >= std::chrono::milliseconds(500))) {
+        runtime_config_->publishModelGraph(Mimir::Viz::modelGraphSnapshot(layers,
+            planner_enabled && static_plan_.built ? &static_plan_.execution : nullptr,
+            planner_enabled ? (planner_mode==Mimir::Planning::PlannerMode::Cost ? "cost" :
+                planner_mode==Mimir::Planning::PlannerMode::Static ? "static" : "legacy") : "desactive",
+            training,fusion_enabled,planner_buffer_reuse));
+        graph_snapshot_time_=graph_now;
     }
 
     const bool runtime_verbose = !Model::frameworkLogsSuppressed();
@@ -2875,7 +2806,7 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
     };
 
     const bool exhaustive_model_viz = viz_taps_enabled_ && viz_taps_max_frames_ > 0;
-    if (exhaustive_model_viz) {
+    if (exhaustive_model_viz && (!modelConfig.is_object() || !modelConfig.value("viz_registered_tips_only", false))) {
         viz_taps_max_frames_ = std::max(
             viz_taps_max_frames_,
             static_cast<int>(std::min(layers.size() + static_cast<size_t>(64),
@@ -2895,7 +2826,26 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
     const bool planner_device_residency = env_flag_true("MIMIR_PLANNER_DEVICE_RESIDENCY", false);
     std::vector<uint8_t> resident_chain_skip(layers.size(), 0);
 
-    for (size_t layer_idx = 0; layer_idx < layers.size(); ++layer_idx) {
+    std::string forward_output_name = modelConfig.is_object()
+        ? modelConfig.value("forward_output_tensor", std::string("x")) : "x";
+    size_t forward_layer_limit = layers.size();
+    if (!training && modelConfig.contains("inference_output_tensor")) {
+        forward_output_name = modelConfig.value("inference_output_tensor", std::string("x"));
+        bool producer_found = false;
+        for (size_t layer_idx = 0; layer_idx < layers.size(); ++layer_idx) {
+            const std::string output_name = layers[layer_idx].output.empty() ? "x" : layers[layer_idx].output;
+            if (output_name == forward_output_name) {
+                forward_layer_limit = layer_idx + 1;
+                producer_found = true;
+            }
+        }
+        if (!producer_found) {
+            throw std::runtime_error(
+                "Inference output tensor has no producer: " + forward_output_name);
+        }
+    }
+
+    for (size_t layer_idx = 0; layer_idx < forward_layer_limit; ++layer_idx) {
         if (resident_chain_skip[layer_idx] != 0) continue;
         // Une fusion retire les consumers du parcours. En mode VIZ exhaustif,
         // executer chaque noeud garantit une vignette (L) par layer.
@@ -3102,6 +3052,7 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
 #ifdef ENABLE_OPENCL
                     case RuntimeKind::OpenCL: planned_runtime = g_opencl_engine.get(); break;
 #endif
+                    case RuntimeKind::TPU: planned_runtime = Mimir::tpuSessionRuntime(); break;
                     case RuntimeKind::CPU: planned_runtime = g_cpu_engine.get(); break;
                     default: break;
                 }
@@ -3149,6 +3100,12 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
                         return oss.str();
                     };
 
+                    std::ostringstream input_sizes;
+                    for (size_t input_index = 0; input_index < inputs.size(); ++input_index) {
+                        if (input_index) input_sizes << ",";
+                        input_sizes << (inputs[input_index] ? inputs[input_index]->size() : 0);
+                    }
+
                     const char* reason = active_runtimes.empty()
                         ? "no_active_runtime"
                         : "runtime_execution_error_route_pruned";
@@ -3158,6 +3115,7 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
                               << "' type='" << (layer.type.empty() ? type_to_string(layer.type_enum) : layer.type)
                               << "' reason=" << reason
                               << " active_priority=[" << join_runtime_names(active_runtimes) << "]"
+                              << " input_sizes=[" << input_sizes.str() << "]"
                               << std::endl;
                 }
                 return false;
@@ -3196,7 +3154,7 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
         // NOTE: Beaucoup d'archis ne renseignent pas output_w/output_h pour tous les layers
         // (ex: activations). On garde un "dernier HxW connu" pour afficher plus de blocs
         // sans modifier les builders.
-        if (viz_taps_enabled_ && viz_taps_max_frames_ > 0) {
+        if (viz_capture_allowed && viz_taps_enabled_ && viz_taps_max_frames_ > 0) {
             if (!viz_tips_init_done_) {
                 clearVizTipsRegistry();
                 viz_tips_custom_enabled_ = InitVizTips();
@@ -3279,7 +3237,12 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
                  layer.name.find("out_pack") != std::string::npos ||
                  layer.output == "x");
 
-            if (is_viz_candidate_layer(layer.type_enum) && (!is_packed_output_concat || exhaustive_model_viz)) {
+            // Opt-in sparse capture: skip conversion/allocation for unregistered layers.
+            const bool registered_tips_only = modelConfig.is_object() && modelConfig.value("viz_registered_tips_only", false);
+            const bool registered_tip = viz_tips_by_layer_name_.count(layer.name) != 0;
+            if ((!registered_tips_only || registered_tip) &&
+                (is_viz_candidate_layer(layer.type_enum) || registered_tip) &&
+                (!is_packed_output_concat || exhaustive_model_viz)) {
 
                 auto canonical_viz_label = [&]() -> std::string {
                     std::string model_key = modelConfig.value("type", std::string());
@@ -3323,6 +3286,18 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
                                 real[(static_cast<size_t>(y) * target_w + x) * rc + channel] =
                                     vf.pixels_real[(static_cast<size_t>(y * vf.h / target_h) * vf.w + x * vf.w / target_w) * rc + channel];
                         vf.pixels_real = std::move(real);
+                    }
+                    if (vf.tensor_sample_channels > 0) {
+                        const size_t tc = static_cast<size_t>(vf.tensor_sample_channels);
+                        std::vector<float> values(static_cast<size_t>(target_w) * target_h * tc);
+                        std::vector<size_t> indices(values.size());
+                        for (int y = 0; y < target_h; ++y) for (int x = 0; x < target_w; ++x)
+                            for (size_t channel = 0; channel < tc; ++channel) {
+                                const size_t src = (static_cast<size_t>(y * vf.h / target_h) * vf.w + x * vf.w / target_w) * tc + channel;
+                                const size_t dst = (static_cast<size_t>(y) * target_w + x) * tc + channel;
+                                values[dst] = vf.tensor_values[src]; indices[dst] = vf.tensor_indices[src];
+                            }
+                        vf.tensor_values = std::move(values); vf.tensor_indices = std::move(indices);
                     }
                     vf.pixels = std::move(up);
                     vf.w = target_w;
@@ -3822,6 +3797,17 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
                             vf.channels = 1;
                         }
 
+                        vf.tensor_sample_channels = std::max(1, std::min(c, 16));
+                        for (int y = 0; y < vh; ++y) for (int x = 0; x < vw; ++x) {
+                            const size_t base = static_cast<size_t>(y * sy) * ow + x * sx;
+                            for (int channel = 0; channel < vf.tensor_sample_channels; ++channel) {
+                                vf.tensor_values.push_back(sample_value(channel, base));
+                                vf.tensor_indices.push_back(channels_first
+                                    ? static_cast<size_t>(channel) * spatial + base
+                                    : base * std::max(1, c) + channel);
+                            }
+                        }
+
                         // UX: forcer toutes les vignettes tips en format carré XxX,
                         // avec X = largeur courante de la preview.
                         // Exemples: 32x3x3 -> 32x32x3, 128x36x3 -> 128x128x3.
@@ -3877,6 +3863,12 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
                     vf.h = vh;
                     vf.channels = 1;
 
+                    vf.tensor_values = map;
+                    vf.tensor_sample_channels = 1;
+                    for (size_t i = 0; i < map.size(); ++i) {
+                        vf.tensor_indices.push_back(nvals <= map.size()
+                            ? std::min(i, nvals - 1) : (i * nvals) / map.size());
+                    }
                     vf.tensor_info = describe_tensor();
                     vf.label = canonical_viz_label() + "/vec";
 
@@ -4126,6 +4118,11 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
         auto add_mu_frame = [&](const char* prefix) {
             const std::string mu_name = std::string(prefix) + "/mu";
             const std::string mu_layer = std::string(prefix) + "/enc/mu";
+            const bool has_canonical_mu_frame = std::any_of(
+                viz_taps_.begin(), viz_taps_.end(), [&](const VizFrame& frame) {
+                    return frame.label.find(mu_layer + "/") != std::string::npos;
+                });
+            if (has_canonical_mu_frame) return;
             if (!hasTensor(mu_name)) return;
             const auto& mu = getTensor(mu_name);
             int muW = 0, muH = 0, muC = 0;
@@ -4212,7 +4209,7 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
         }
     }
 
-    return getTensor("x");
+    return getTensor(forward_output_name);
 }
 
 std::vector<float> Model::forwardPromptImageSeed(const std::vector<float>& prompt_vec,

@@ -4,6 +4,10 @@
 
 class VulkanRuntime final : public AbstractRuntime {
 public:
+    bool supportsReconstructionLoss() const override { return isInitialized() && !config_.disabled; }
+    bool reconstructionLoss(const RuntimeLossGrad::Request&, RuntimeLossGrad::LossWithGrad&) override;
+    bool supportsOptimizer() const override { return isInitialized() && !config_.disabled; }
+    bool optimizerStep(const RuntimeOptimizerRequest&) override;
     ~VulkanRuntime() override { shutdown(); }
 
     const char* name() const override { return "VULKAN"; }
@@ -29,6 +33,10 @@ public:
         const Layer& layer,
         bool training
     ) override;
+
+    bool forwardLayerWithContext(
+        const std::vector<const std::vector<float>*>& inputs,std::vector<std::vector<float>>& outputs,
+        const Layer& layer,bool training,const RuntimeForwardContext& context = {}) override;
 
     RuntimeCapabilityLevel queryBackwardOperationCapability(
         const Layer& layer, const std::vector<const std::vector<float>*>& inputs,

@@ -1,3 +1,4 @@
+#include "runtimes/fpga/FpgaIo.hpp"
 #include "RawCheckpointReader.hpp"
 #include "../Model.hpp"
 #include "CheckpointState.hpp"
@@ -7,6 +8,7 @@
 #include "../Sha256.hpp"
 #include <fstream>
 #include <algorithm>
+#include <iomanip>
 #include <iostream>
 
 namespace Mimir {
@@ -24,6 +26,8 @@ bool RawCheckpointReader::load(
     const LoadOptions& requested_options,
     std::string* error
 ) {
+    hash_tree_.begin(path);
+    CheckpointHashTree::Scope hash_scope{hash_tree_};
     auto options = requested_options;
     try {
         fs::path root(path);
@@ -467,6 +471,14 @@ bool RawCheckpointReader::load_tensor_data(
             }
             return false;
         }
+
+        const std::string checksum_algo = metadata.checksum_algo.empty()
+            ? "sha256"
+            : metadata.checksum_algo;
+        const std::string checksum = metadata.checksum.empty()
+            ? sha256(dest_buffer, metadata.byte_size)
+            : metadata.checksum;
+        hash_tree_.add(metadata.name, checksum_algo, checksum);
         
         return true;
         
@@ -609,7 +621,7 @@ bool RawCheckpointReader::apply_tensors_to_model(
                             }
                         }
 
-                        HardwareOpt::fp16_to_fp32_f16c(dst->data(), tmp.data(), expected_size);
+                        if (!Mimir::fpgaDecode16(dst->data(), tmp.data(), expected_size, false)) HardwareOpt::fp16_to_fp32_f16c(dst->data(), tmp.data(), expected_size);
                     } else if (t_metadata.dtype == DType::BFloat16) {
                         if (t_metadata.byte_size != expected_size * sizeof(uint16_t)) {
                             if (error) *error = "Byte size mismatch for: " + tensor_name;
@@ -637,7 +649,7 @@ bool RawCheckpointReader::apply_tensors_to_model(
                             }
                         }
 
-                        HardwareOpt::bf16_to_fp32(dst->data(), tmp.data(), expected_size);
+                        if (!Mimir::fpgaDecode16(dst->data(), tmp.data(), expected_size, true)) HardwareOpt::bf16_to_fp32(dst->data(), tmp.data(), expected_size);
                     } else if (t_metadata.dtype == DType::Float64) {
                         if (t_metadata.byte_size != expected_size * sizeof(double)) {
                             if (error) *error = "Byte size mismatch for: " + tensor_name;
@@ -742,7 +754,7 @@ bool RawCheckpointReader::apply_tensors_to_model(
                             }
                         }
 
-                        HardwareOpt::fp16_to_fp32_f16c(enc.token_embeddings.data(), tmp.data(), expected_size);
+                        if (!Mimir::fpgaDecode16(enc.token_embeddings.data(), tmp.data(), expected_size, false)) HardwareOpt::fp16_to_fp32_f16c(enc.token_embeddings.data(), tmp.data(), expected_size);
                     } else if (t_metadata.dtype == DType::BFloat16) {
                         if (t_metadata.byte_size != expected_size * sizeof(uint16_t)) {
                             if (error) *error = "Byte size mismatch for: " + tensor_name;
@@ -770,7 +782,7 @@ bool RawCheckpointReader::apply_tensors_to_model(
                             }
                         }
 
-                        HardwareOpt::bf16_to_fp32(enc.token_embeddings.data(), tmp.data(), expected_size);
+                        if (!Mimir::fpgaDecode16(enc.token_embeddings.data(), tmp.data(), expected_size, true)) HardwareOpt::bf16_to_fp32(enc.token_embeddings.data(), tmp.data(), expected_size);
                     } else if (t_metadata.dtype == DType::Float64) {
                         if (t_metadata.byte_size != expected_size * sizeof(double)) {
                             if (error) *error = "Byte size mismatch for: " + tensor_name;
@@ -903,7 +915,7 @@ bool RawCheckpointReader::apply_tensors_to_model(
                     }
                 }
 
-                HardwareOpt::fp16_to_fp32_f16c(data_ptr, tmp.data(), actual_size);
+                if (!Mimir::fpgaDecode16(data_ptr, tmp.data(), actual_size, false)) HardwareOpt::fp16_to_fp32_f16c(data_ptr, tmp.data(), actual_size);
             } else if (t_metadata.dtype == DType::BFloat16) {
                 if (t_metadata.byte_size != actual_size * sizeof(uint16_t)) {
                     if (error) *error = "Byte size mismatch for: " + tensor_name;
@@ -932,7 +944,7 @@ bool RawCheckpointReader::apply_tensors_to_model(
                     }
                 }
 
-                HardwareOpt::bf16_to_fp32(data_ptr, tmp.data(), actual_size);
+                if (!Mimir::fpgaDecode16(data_ptr, tmp.data(), actual_size, true)) HardwareOpt::bf16_to_fp32(data_ptr, tmp.data(), actual_size);
             } else if (t_metadata.dtype == DType::Float64) {
                 if (t_metadata.byte_size != actual_size * sizeof(double)) {
                     if (error) *error = "Byte size mismatch for: " + tensor_name;

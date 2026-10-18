@@ -25,6 +25,7 @@ Mimir = {}
 ---@class Mimir
 ---@field Model MimirModelAPI
 ---@field model MimirModelAPI @Alias de `Mimir.Model`
+---@field Benchmark MimirBenchmarkAPI
 ---@field Architectures MimirArchitecturesAPI
 ---@field Layers MimirLayersAPI
 ---@field Checkpoint MimirCheckpointAPI
@@ -53,6 +54,14 @@ Mimir = {}
 ---@alias TokenIds TokenId[]
 ---@alias TokenText string
 
+---@class MimirBenchmarkAPI
+Mimir.Benchmark = {}
+
+---Retourne le temps mural monotone en secondes avec une résolution haute précision.
+---Cette valeur sert à mesurer des intervalles; son origine est volontairement non définie.
+---@return number seconds
+function Mimir.Benchmark.now() end
+
 ---@alias ArchitectureName
 ---| "basic_mlp"
 ---| "causal_lm"
@@ -77,6 +86,7 @@ Mimir = {}
 ---| "diffusion"
 ---| "lumen_diffusion"
 ---| "gan_latent"
+---| "Gan_Style"
 ---| "cond_diffusion"
 ---| "sd3_5"
 ---| "external_safetensors_base"
@@ -220,6 +230,19 @@ Mimir = {}
 ---@field image_dim? int
 ---@field output_dim? int
 ---@field target_tensor? string
+---@field bbox_input_w? integer
+---@field bbox_input_h? integer
+---@field bbox_input_c? integer
+---@field bbox_input_layout? string @HWC ou CHW
+---@field bbox_input_prefix_tokens? integer @Tokens globaux préservés ; défaut 1 pour ViT
+---@field bbox_output_w? integer
+---@field bbox_output_h? integer
+---@field bbox_output_c? integer
+---@field bbox_output_layout? string @HWC ou CHW
+---@field relation_primary_weight? float @Poids relationnel du sujet principal ; défaut 3
+---@field relation_secondary_weight? float @Poids relationnel du sujet secondaire ; défaut 2
+---@field relation_other_weight? float @Poids relationnel des autres rôles ; défaut 1
+---@field bbox_loss_weight? float @Pondération des régions annotées ; défaut 1, 0 désactive
 ---@field align_weight? float
 ---@field kl_beta? float
 ---@field kl_warmup_steps? int
@@ -292,6 +315,25 @@ Mimir = {}
 ---@field image_c? int
 ---@field base_channels? int
 ---@field num_classes? int
+
+---@class MedicalDetectorConfig: ModelConfig
+---@field image_w? int
+---@field image_h? int
+---@field image_c? int
+---@field base_channels? int
+---@field num_classes? int
+---@field class_names? string[]
+---@field object_loss_weight? number
+---@field box_loss_weight? number
+---@field class_loss_weight? number
+---@field object_pos_weight? number
+---@field validation_fraction? number
+---@field validation_items? int
+---@field validate_every_epochs? int
+---@field score_threshold? number
+---@field nms_iou_threshold? number
+---@field match_iou_threshold? number
+---@field max_detections? int
 
 ---@class VGG16Config: ModelConfig
 ---@field image_w? int
@@ -430,7 +472,20 @@ Mimir = {}
 -- Stats / Structs
 --=============================================================================
 
+---@class FpgaCaps
+---@field detected boolean
+---@field connected boolean
+---@field status string
+---@field device? string
+---@field protocol? string
+---@field layer_acceleration boolean @false: FPGA used for I/O, not model layers
+---@field dataset_buffer? boolean
+---@field checkpoint_controller? boolean
+---@field tensor_conversion? boolean @F32 <-> F16/BF16 on FPGA
+---@field buffer_input_bytes? integer @256-byte blocks (BRAM, not SDRAM)
+
 ---@class HardwareCaps
+---@field fpga? FpgaCaps
 ---@field avx2 bool @Support AVX2 SIMD instructions
 ---@field fma bool @Support FMA (Fused Multiply-Add)
 ---@field f16c bool @Support Half-precision floats
@@ -487,6 +542,7 @@ Mimir = {}
 
 ---@class HtopCreateConfig
 ---@field enable_htop? boolean @Active l'interface terminal; défaut true
+---@field defer_htop? boolean @Diffère l'interface terminal jusqu'à la première métrique; défaut false
 ---@field enable_viz? boolean @Active le backend Viz compilé (alias: viz)
 ---@field viz? boolean @Alias de enable_viz
 ---@field viz_config? table @Config passée au Visualizer (mêmes clés que config.json/visualization)
@@ -528,6 +584,12 @@ Mimir = {}
 ---@field scale float
 
 ---@class LumenStepStats
+---@field skeleton_region_count integer @Régions des points, segments et associations du squelette
+---@field mse_unweighted float @MSE globale avant pondération spatiale
+---@field bbox_count integer
+---@field bbox_loss_weight float
+---@field relation_count integer @Relations entre deux régions utilisées
+---@field relation_loss float @Contribution de la perte relationnelle
 ---@field loss float
 ---@field mse float
 ---@field kl float
@@ -546,6 +608,8 @@ Mimir = {}
 ---@field learning_rate? float @LR réellement appliqué après contrôle live Viz
 
 ---@class LumenStepMonitorOptions
+---@field annotation? DatasetAnnotation
+---@field bbox_loss_weight? number @Défaut 1 ; 0 désactive la pondération
 ---@field epoch? integer
 ---@field total_epochs? integer
 ---@field batch? integer
@@ -558,6 +622,15 @@ Mimir = {}
 --=============================================================================
 -- Module: Mimir.Model
 --=============================================================================
+
+---@class GanStyleConfig
+---@field image_w? integer
+---@field image_h? integer
+---@field image_c? integer @3 (RGB CHW, valeurs [-1,1])
+---@field base_channels? integer @Largeur du générateur (16)
+---@field discriminator_channels? integer @Largeur du discriminateur (16)
+---@field content_weight? number @Poids L1 (10)
+---@field discriminator_lr? number @SGD discriminateur (0.001)
 
 ---@class MimirModelAPI
 Mimir.Model = {}
@@ -587,6 +660,7 @@ Mimir.Model = {}
 ---@overload fun(model_type: "lumen_diffusion", config?: LumenDiffusionConfig): (boolean, string?)
 ---@overload fun(model_type: "cond_diffusion", config?: CondDiffusionConfig): (boolean, string?)
 ---@overload fun(model_type: "gan_latent", config?: GanLatentConfig): (boolean, string?)
+---@overload fun(model_type: "Gan_Style", config?: GanStyleConfig): (boolean, string?)
 ---@overload fun(model_type: "sd3_5", config?: SD35Config): (boolean, string?)
 ---@overload fun(model_type: "external_safetensors_base", config: ExternalSafeTensorsBaseConfig): (boolean, string?)
 ---@overload fun(model_type: "hf_clip_text_encoder_1", config?: HFCLIPTextEncoder1Config): (boolean, string?)
@@ -634,6 +708,22 @@ function Mimir.Model.build() end
 ---@return boolean ok
 ---@return integer|string? step_or_err @Step global final si ok, message sinon
 function Mimir.Model.train(epochs, learning_rate) end
+
+---@class VisionStepOptions
+---@field annotation? DatasetAnnotation
+---@field learning_rate? number @Défaut 0.0001
+---@field optimizer? string @Défaut adamw
+---@field loss_weights? number[] @Masque ou pondération supplémentaire
+---@field text_ids? integer[] @Conditionnement VAE optionnel
+
+---Entraîner un modèle de vision natif avec des tensors dans son format d'entrée/sortie.
+---@param input number[] @Valeurs déjà normalisées ; disposition attendue par le modèle
+---@param target number[] @Cible propre à la tâche du modèle
+---@param options? VisionStepOptions
+---@return table|nil stats
+---@return string? error
+function Mimir.Model.vision_train_step(input, target, options) end
+
 
 ---Inférence sur un prompt (string) ou une séquence de tokens.
 ---Retour: string (texte), nil pour une entrée invalide, ou `(false, err)` sans modèle.
@@ -799,7 +889,8 @@ function Mimir.Model.lumen_text2img(prompt, seed, steps, guidance) end
 ---@param seed integer
 ---@return LumenStepStats|nil stats
 ---@return string? err
-function Mimir.Model.lumen_validate_step(image, prompt, seed) end
+---@param options? LumenStepMonitorOptions @Annotation et pondération spatiale
+function Mimir.Model.lumen_validate_step(image, prompt, seed, options) end
 
 ---Step optimiseur (si exposé). Le LR peut être transmis.
 ---@param learning_rate number
@@ -814,9 +905,37 @@ function Mimir.Model.optimizer_step(learning_rate, opt_type) end
 ---@return boolean ok
 function Mimir.Model.set_hardware(enable) end
 
----Retourne les capacités détectées (AVX2/FMA/F16C/BMI2).
+---Retourne les capacités CPU et le statut de connexion/contrôle FPGA.
 ---@return HardwareCaps caps
 function Mimir.Model.hardware_caps() end
+
+---Construire le contexte natif : entités, bbox, squelettes, relations, attributs et description.
+---Indépendant du poids de loss spatiale ; le modèle tokenise ensuite ce texte.
+---@param caption string
+---@param annotation? table @Annotation structurée du dataset
+---@return string|nil prompt
+---@return string? err
+function Mimir.Model.conditioning_prompt(caption, annotation) end
+
+
+---@alias RuntimeOperationCapability 'Unsupported'|'HostFallback'|'Native'|'NativeOptimized'
+
+---@class RuntimeOperationInfo
+---@field type string @Type de couche enregistré
+---@field forward RuntimeOperationCapability
+---@field backward RuntimeOperationCapability
+
+---@class RuntimeOperationsInfo
+---@field name 'CPU'|'CUDA'|'ROCM'|'VULKAN'|'OPENCL'
+---@field compiled boolean @Backend inclus dans cette compilation
+---@field scope string @Portée des déclarations de capacités
+---@field ops RuntimeOperationInfo[]
+
+---Lister les capacités déclarées par type de couche pour les cinq backends.
+---Les périphériques, configurations et formes de tenseurs ne sont pas testés par cet appel.
+---@return RuntimeOperationsInfo[] runtimes
+function Mimir.Model.runtime_ops() end
+
 
 ---Lire ou définir le dtype par défaut du modèle courant.
 ---Getter: `Mimir.Model.dtype()` -> string
@@ -856,6 +975,7 @@ function Mimir.Architectures.available() end
 ---@overload fun(name: "diffusion"): DiffusionConfig
 ---@overload fun(name: "cond_diffusion"): CondDiffusionConfig
 ---@overload fun(name: "gan_latent"): GanLatentConfig
+---@overload fun(name: "Gan_Style"): GanStyleConfig
 ---@overload fun(name: "sd3_5"): SD35Config
 ---@overload fun(name: "external_safetensors_base"): ExternalSafeTensorsBaseConfig
 ---@overload fun(name: "hf_clip_text_encoder_1"): HFCLIPTextEncoder1Config
@@ -1365,12 +1485,31 @@ function Mimir.Tokenizer.extract_keywords(text, top_k) end
 -- Module: Mimir.Dataset
 --=============================================================================
 
+---@class DatasetAnnotationEntity
+---@field class_id? integer @Classe du détecteur ; défaut 0
+---@field id string
+---@field phrase string
+---@field role string
+---@field bbox? number[] @Coordonnées [x_min, y_min, x_max, y_max] dans [0,1]
+
+---@class DatasetAnnotation
+---@field image string @Nom de fichier de l'image associée
+---@field captions {primary: string, alternatives?: string[]}
+---@field entities? DatasetAnnotationEntity[]
+---@field attributes? {entity: string, property: string, value: string}[]
+---@field relations? {subject: string, predicate: string, object: string}[]
+---@field lighting? {description: string, source: string, target: string}
+---@field composition? {description: string}
+---@field quality? {caption_verified: boolean, relations_verified: boolean}
+
 ---@class DatasetItem
 ---@field text_file? string Chemin du fichier texte
 ---@field image_file? string Chemin du fichier image
 ---@field audio_file? string Chemin du fichier audio
 ---@field video_file? string Chemin du fichier vidéo
----@field text? string Contenu texte (si chargé)
+---@field text? string @Description captions.primary si annotation JSON, sinon texte historique
+---@field annotation_file? string @Chemin du JSON structuré prioritaire
+---@field annotation? DatasetAnnotation @Document complet chargé à la demande, champs supplémentaires conservés
 ---@field image? integer[] Pixels RGB u8 redimensionnés, si demandés et décodables
 ---@field width? int Largeur de l'image
 ---@field height? int Hauteur de l'image
@@ -1409,6 +1548,7 @@ function Mimir.Dataset.load(dir, target_w, target_h, min_modalities, use_cache, 
 
 ---Récupérer un item du dataset par son index (1-based).
 ---Charge les pixels RGB par défaut; passer false pour ne lire que texte et métadonnées.
+---Une annotation JSON structurée est prioritaire sur le .txt; son captions.primary devient item.text.
 ---@param index integer Index de l'item (commence à 1)
 ---@param load_image? boolean Charge et retourne le tableau image (défaut: true)
 ---@return DatasetItem|nil item Item du dataset
@@ -1810,6 +1950,37 @@ function Mimir.Viz.update() end
 ---@return boolean ok
 ---@return string? err
 function Mimir.Viz.add_image(pixels, width, height, channels, prompt) end
+
+---@class VizDetection
+---@field x1 number @Bord gauche normalisé [0,1]
+---@field y1 number @Bord haut normalisé [0,1]
+---@field x2 number @Bord droit normalisé [0,1]
+---@field y2 number @Bord bas normalisé [0,1]
+---@field score? number @Confiance, généralement [0,1]
+---@field class_id? integer @Identifiant de classe utilisé pour la couleur
+---@field label? string @Nom de classe affiché
+
+---Publier les détections à superposer sur l'image dataset, la sortie, ou les deux.
+---Un tableau vide efface les détections précédentes. Les coordonnées sont normalisées.
+---@param detections VizDetection[]
+---@param target? 'dataset'|'output'|'both' @Défaut: dataset
+---@return boolean ok
+---@return string? err
+function Mimir.Viz.set_detections(detections, target) end
+
+---Afficher ou masquer l'overlay de détection sans effacer ses données.
+---@param enabled boolean
+---@return boolean ok
+---@return string? err
+function Mimir.Viz.show_detections(enabled) end
+
+---Définir le seuil de confiance des détections affichées dans VIZ.
+---Une valeur non finie ou hors de [0,1] déclenche une erreur Lua.
+---@param threshold number @Nombre fini entre 0 et 1
+---@return boolean ok @false si le visualiseur n’est pas créé
+---@return string? err
+function Mimir.Viz.set_detection_threshold(threshold) end
+
 
 ---Mettre à jour les métriques d'entraînement affichées.
 ---@param metrics VizMetrics|table @Métriques: epoch, loss, lr, memory_mb, etc.

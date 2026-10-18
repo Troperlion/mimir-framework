@@ -38,5 +38,13 @@ int main() {
     TASSERT_TRUE(encoding.find("[11]=") != std::string::npos);
     TASSERT_TRUE(encoding.find(",...") == std::string::npos);
 
+    Model model;
+    model.setHasEncoder(false);
+    model.storeTensorInt("text_ids", {quoted_id, token_ids[0]});
+    model.storeTensor("lumen/text/context", {0.25f, -2.5f, 4.f});
+    const auto actual = VizTextPayload::buildDatasetTextPayload(&model, &tokenizer, "display prompt", nullptr, -1);
+    TASSERT_TRUE(actual.tokens.find("count=2") != std::string::npos);
+    TASSERT_TRUE(actual.encoding.find("Tensor: lumen/text/context") != std::string::npos);
+    TASSERT_TRUE(actual.encoding.find("[1]=-2.50000000") != std::string::npos);
     return 0;
 }

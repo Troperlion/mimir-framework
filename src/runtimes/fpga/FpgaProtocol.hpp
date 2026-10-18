@@ -27,7 +27,8 @@ inline constexpr uint8_t kProtocolMajor = 1;
 enum Capability : uint32_t {
     DotProductInt8 = 1U << 0,
     ResidentDotProductInt8 = 1U << 1,
-    ResidentMatrixVectorInt8 = 1U << 2
+    ResidentMatrixVectorInt8 = 1U << 2,
+    BufferedIoConversion = 1U << 3
 };
 
 struct Capabilities {

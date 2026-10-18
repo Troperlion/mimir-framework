@@ -70,6 +70,12 @@ public:
         std::vector<int32_t>& output
     );
 
+    // mode: 0 dataset bytes, 1 F32->BF16, 2 BF16->F32,
+    // 3 F32->F16, 4 F16->F32, 5 checkpoint bytes. <=256 input bytes.
+    bool transferBlock(uint8_t mode, const uint8_t* input, size_t size, std::vector<uint8_t>& output);
+    bool beginCheckpoint(uint8_t operation); // 0 abort, 1 load, 2 save
+    bool endCheckpoint(uint8_t& operation, uint64_t& bytes, uint32_t& crc);
+
     static std::optional<FpgaDeviceInfo> detectDevice(
         const std::string& sysfs_root = "/sys/bus/usb/devices"
     );

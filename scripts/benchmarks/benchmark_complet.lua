@@ -9,7 +9,7 @@ local side = B.has('--quick') and 8 or 16
 local n = side*side*3
 local seq, dim, vocab = 8, 32, 128
 local cases = {
-  {'transformer', B.transformer(dim,2,seq,vocab), B.tokens(seq,vocab), dim},
+  {'transformer', B.transformer(dim,2,seq,vocab), B.transformer_input(seq,vocab,dim), dim},
   {'vit', {num_tokens=seq,d_model=dim,num_layers=2,num_heads=4,mlp_hidden=128,output_dim=8}, B.floats(seq*dim), 8},
   {'unet', {image_w=side,image_h=side,image_c=3,base_channels=8,depth=2}, B.floats(n), n},
   {'vae', {image_w=side,image_h=side,image_c=3,latent_dim=8,hidden_dim=32}, B.floats(n), n+16},
@@ -35,3 +35,4 @@ B.snapshot('avant répétitions')
 B.bench_forward(B.floats(16),8)
 B.snapshot('après répétitions')
 log('PASS benchmark complet')
+B.report('complet')

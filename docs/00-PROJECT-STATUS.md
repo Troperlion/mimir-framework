@@ -79,7 +79,7 @@ disponibilité d'un GPU, de SFML, de FFmpeg ou d'un bridge externe.
 
 ### Architectures natives enregistrées
 
-Le registre C++ contient 25 entrées natives :
+Le registre C++ contient 26 entrées natives :
 
 | Famille | Entrées | Statut utile |
 | --- | --- | --- |
@@ -87,7 +87,7 @@ Le registre C++ contient 25 entrées natives :
 | NLP | `transformer`, `causal_lm`, `vae_text`, `vae_text_decode` | Exploitables sur leurs contrats d'entrée respectifs; `causal_lm` est le chemin decoder-only natif. |
 | Vision | `vit`, `vae`, `vae_conv`, `vae_conv_decode`, `resnet`, `unet`, `mobilenet`, `vgg16`, `vgg19`, `vgg16_feat`, `patch_discriminator` | Graphes exécutables; entraînement et géométrie varient selon l'architecture. |
 | Interopérabilité HF/SDXL | `hf_clip_text_encoder_1`, `hf_clip_text_encoder_2`, `hf_vae_decoder`, `hf_sdxl_transformer_block`, `external_safetensors_base` | Les quatre premiers construisent des composants exécutables; `external_safetensors_base` reflète des clés et n'est pas un modèle autonome. |
-| Génératif | `diffusion`, `cond_diffusion`, `gan_latent` | Baselines natives exploitables, volontairement plus simples que les grands pipelines externes. |
+| Génératif | `diffusion`, `cond_diffusion`, `gan_latent`, `lumen_diffusion` | Baselines natives exploitables; `lumen_diffusion` fournit le pipeline latent texte-vers-image avec VAE gelé. |
 | Placeholder | `sd3_5` | Registre et squelette seulement; ne pas annoncer un pipeline SD3.5 complet. |
 
 ### Architectures MPK livrées
@@ -110,11 +110,17 @@ Pour afficher l'inventaire réellement chargé :
 | Backend | Activation | Statut réel |
 | --- | --- | --- |
 | CPU | `ENABLE_OPENMP`, `ENABLE_SIMD` | Référence et fallback recommandé. Les capacités sont déclarées nativement par type de layer. |
-| CUDA | `-DENABLE_CUDA=ON` | Partiel : kernels/chemins natifs ciblés et fallback CPU pour d'autres opérations; nécessite CUDA/cuBLAS et du matériel. |
+| CUDA | `-DENABLE_CUDA=ON` | Kernels natifs pour les familles CPU exécutables et NMS forward/backward ; backward Lambda indisponible. Nécessite CUDA/cuBLAS et du matériel. |
 | ROCm | `-DENABLE_ROCM=ON` | Partiel, symétrique à plusieurs chemins CUDA; nécessite HIP/rocBLAS et du matériel compatible. |
-| Vulkan | `-DENABLE_VULKAN=ON` | Partiel : shaders forward pour familles ciblées; peut utiliser un fallback hôte explicite. |
-| OpenCL | `-DENABLE_OPENCL=ON` | Partiel : familles forward/backward ciblées; fallback hôte possible selon capacité. |
+| Vulkan | `-DENABLE_VULKAN=ON` | 72 types forward / 73 backward natifs, avec kernels de référence séquentiels pour les nouvelles opérations. Configuration et formes vérifiées. |
+| OpenCL | `-DENABLE_OPENCL=ON` | 72 types forward / 73 backward natifs, avec kernels de référence séquentiels pour les nouvelles opérations. Configuration et formes vérifiées. |
 | FPGA iCESugar Pro | sources présentes, non intégrées au routeur global | En construction : protocole, runtime C++ et HDL existent; les composants isolés ont des cibles CTest, mais les sources FPGA ne sont pas encore dans `MIMIR_SOURCES` et `FpgaRuntime::supports*LayerType` ne publie pas encore de couverture de graphe générale. |
+
+NMS possède un forward de sélection d'indices et un backward stop-gradient
+sur CPU, CUDA, Vulkan et OpenCL. Les gradients de boîtes, scores et classes
+sont nuls ; les losses d'entraînement doivent utiliser les prédictions avant
+NMS. Les tests CPU et les comparaisons sur GPU AMD OpenCL/Vulkan passent ;
+l'exécution NMS CUDA sur GPU NVIDIA reste à valider.
 
 La page [Accélération GPU](05-Advanced/05-GPU-Acceleration.md) détaille les
 familles d'opérations. Pour toute mesure, distinguez toujours : compilé,

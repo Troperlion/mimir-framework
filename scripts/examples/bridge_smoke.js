@@ -17,5 +17,5 @@ Model.create('basic_mlp', {});
 Model.allocate_params();
 Model.init_weights('he', 42);
 const p = Model.total_params();
-console.log('[bridge-js] total_params (cached):', p);
+console.log('[bridge-js] total_params (live):', p);
 console.log('[bridge-js] ok');

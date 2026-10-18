@@ -4,13 +4,18 @@ Depuis la racine du dépôt :
 
 ```sh
 cmake --build build -j2 --target mimir
-OMP_NUM_THREADS=2 ./bin/mimir --lua scripts/benchmarks/run_suite.lua -- --suite all --quick
+OMP_NUM_THREADS=2 ./bin/mimir --lua scripts/benchmarks/run_suite.lua -- --suite quick
+OMP_NUM_THREADS=2 ./bin/mimir --lua scripts/benchmarks/run_suite.lua -- --suite all
 ./bin/mimir --conf configs/benchmarks-config.json --run smoke
 ```
 
-La suite par défaut est `core`. `all` ajoute les contrôles API/spill et le stress
-long ; `--quick` réduit aussi le stress. Chaque script s'exécute dans un processus
-séparé. `--keep-going` poursuit après un échec, puis renvoie une erreur globale.
+La suite par défaut est `core`. `quick` utilise des dimensions et répétitions
+réduites pour la validation quotidienne. `core` conserve les charges normales,
+`stress` cible l'endurance et `all` les exécute sans doublon. `--quick` reste un
+alias de `--suite quick`. Chaque script s'exécute dans un processus séparé.
+`--keep-going` poursuit après un échec, puis renvoie une erreur globale.
+Un résumé Markdown et les mesures JSON sont écrits dans
+`outputs/benchmarks/latest`. `--report-dir PATH` choisit un autre dossier.
 `ROOTWORK` désigne le projet ; `MIMIR_BIN` permet de choisir le binaire enfant.
 Les variables `env` du fichier de configuration sont appliquées et héritées.
 Aucun dataset n'est utilisé.
@@ -30,6 +35,7 @@ Aucun dataset n'est utilisé.
 Les scripts utilisant `common.lua` acceptent `--ram` (GiB), `--dtype`,
 `--no-compress` et `--no-accel` via leur configuration commune, sauf les contrôles
 spécialisés dtype/spill. Les forwards acceptent `--iters` et `--warmup`.
+`--report rapport.json` ou `--report rapport.md` produit un rapport autonome.
 Les paramètres propres à chaque script figurent dans ses commentaires de tête.
 Les variables `MIMIR_BENCH_RAM_GB`, `MIMIR_BENCH_ITERS` et `MIMIR_DTYPE`
 sont utilisées lorsque l'option CLI correspondante est absente.
@@ -41,10 +47,13 @@ Pour régler précisément un benchmark, lancer son script directement :
 ./bin/mimir --lua scripts/benchmarks/benchmark_official.lua -- --safe --iters 2
 ```
 
-Les durées `cpu_ms` utilisent `os.clock` : temps CPU cumulé du processus,
-**pas une latence murale**, particulièrement avec OpenMP. Les mesures de forward
-incluent le binding, le transfert vers les tables Lua et leur validation.
-NMS exprime son débit par seconde CPU. Fixer le nombre de threads, le binaire,
+Les durées utilisent `Mimir.Benchmark.now()`, fondé sur l'horloge murale monotone
+haute résolution `std::chrono::steady_clock`. Les mesures de forward incluent le
+binding, le transfert vers les tables Lua et la synchronisation nécessaire pour
+matérialiser les sorties GPU côté hôte. La validation complète est effectuée une
+fois hors chronométrage. Les rapports fournissent minimum,
+médiane, moyenne, p95, maximum et débit ; privilégier médiane et p95.
+NMS exprime son débit par seconde murale. Fixer le nombre de threads, le binaire,
 les dimensions et les options pour comparer deux exécutions.
 
 `set_hardware(bool)` contrôle l'accélération des kernels ; il ne sélectionne

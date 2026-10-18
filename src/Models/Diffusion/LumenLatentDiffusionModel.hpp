@@ -19,6 +19,9 @@ public:
         int latent_h = 64;
         int latent_c = 4;
         int vae_base_channels = 8;
+        bool vae_latent_spatial_context = false;
+        bool vae_latent_detail_path = false;
+        int vae_latent_context_channels = 32;
         bool vae_stochastic_latent = true;
         bool vae_resnet = true;
         bool vae_attention = false;
@@ -41,14 +44,15 @@ public:
         float mlp_ratio = 4.0f;
 
         int vocab_size = 32000;
-        int text_seq_len = 77;
+        int text_seq_len = 77; // reference positional table, not an input limit in dynamic mode
+        bool dynamic_text_seq_len = true;
         int text_layers = 2;
         int num_heads = 8;
 
         int diffusion_steps = 1000;
         float beta_start = 0.00085f;
         float beta_end = 0.012f;
-        int preview_timestep = 50;
+        int preview_timestep = 50; // legacy checkpoint field
         float kl_beta = 0.0f;
         int kl_warmup_steps = 0;
     };
@@ -63,6 +67,12 @@ public:
     struct TrainStats {
         float loss = 0.0f;
         float mse = 0.0f;
+        float mse_unweighted = 0.0f;
+        size_t bbox_count = 0;
+        size_t skeleton_region_count = 0;
+        size_t relation_count = 0;
+        float relation_loss = 0.0f;
+        float bbox_loss_weight = 0.0f;
         float kl = 0.0f;
         float kl_beta_effective = 0.0f;
         float grad_norm = 0.0f;
@@ -91,6 +101,11 @@ public:
     const Config& getConfig() const { return cfg_; }
     std::optional<TrainStepResult> trainStep(const TrainStepRequest& request) override;
 
+    const std::vector<float>& forwardPassNamedView(
+        const std::unordered_map<std::string,std::vector<float>>& float_inputs,
+        const std::unordered_map<std::string,std::vector<int>>& int_inputs,
+        bool training = true) override;
+
     GeneratedImage generate(const std::string& prompt,
                             int seed,
                             int sample_steps = 30,
@@ -100,10 +115,15 @@ public:
                                   const std::string& prompt,
                                   unsigned int seed,
                                   Optimizer& optimizer,
-                                  float learning_rate);
+                                  float learning_rate,
+                                  const json* annotation = nullptr,
+                                  float bbox_loss_weight = 1.0f,
+                                  bool drop_conditioning = false);
     TrainStats validateDiffusionStep(const std::vector<unsigned char>& image,
                                      const std::string& prompt,
-                                     unsigned int seed);
+                                     unsigned int seed,
+                                     const json* annotation = nullptr,
+                                     float bbox_loss_weight = 1.0f);
     void beginVaeCalibration();
     VaeCalibrationStats addVaeCalibrationImage(
         const std::vector<unsigned char>& rgb_image);
@@ -127,9 +147,16 @@ protected:
                                    bool use_encoder_skips = false);
 
 private:
+    struct DiffusionExample {
+        std::vector<float> clean, noise, noisy;
+        int timestep = 0;
+    };
+    DiffusionExample prepareExample(const std::vector<unsigned char>& pixels, unsigned int seed);
     std::vector<int> promptIds(const std::string& prompt) const;
+    std::vector<int> conditionedPromptIds(const std::string& prompt, const json* annotation) const;
     std::vector<float> timestepEmbedding(int timestep, int dim) const;
     std::vector<float> encodeImageUncalibrated(const std::vector<float>& image);
+    void appendReconstructionGraph();
     Config cfg_;
     std::unique_ptr<Model> vae_encoder_;
     std::unique_ptr<Model> vae_decoder_;

@@ -1,7 +1,94 @@
 #include "VAEConvModel.hpp"
+#include "training/BBoxSupervision.hpp"
 
 #include <algorithm>
 #include <stdexcept>
+
+namespace {
+std::string latentConv(Model& model, const std::string& name, const std::string& input,
+                       int in_c, int out_c, int h, int w, int kernel = 1, int dilation = 1,
+                       bool activate = false) {
+    model.push(name, "Conv2d", static_cast<size_t>(in_c) * out_c * kernel * kernel);
+    auto* layer = model.getLayerByName(name);
+    layer->inputs = {input}; layer->output = name + "/out";
+    layer->in_channels = in_c; layer->out_channels = out_c;
+    layer->input_height = h; layer->input_width = w;
+    layer->kernel_size = kernel; layer->stride = 1;
+    layer->dilation = layer->dilation_h = layer->dilation_w = dilation;
+    layer->padding = dilation * (kernel / 2);
+    layer->use_bias = false;
+    if (!activate) return layer->output;
+    model.push(name + "/act", "SiLU", 0);
+    auto* act = model.getLayerByName(name + "/act");
+    act->inputs = {name + "/out"}; act->output = name + "/activated";
+    return act->output;
+}
+
+std::string latentContext(Model& model, const std::string& prefix, const std::string& input,
+                          int in_c, int channels, int h, int w) {
+    const auto local = latentConv(model, prefix + "/project", input, in_c, channels, h, w);
+    const int branch_channels = std::max(2, channels / 4);
+    std::vector<std::string> branches;
+    // A dense local branch prevents the gaps of dilated sampling; the other
+    // branches expand context without shrinking the spatial latent.
+    for (int dilation : {1, 2, 4})
+        branches.push_back(latentConv(model, prefix + "/scale" + std::to_string(dilation),
+            local, channels, branch_channels, h, w, 3, dilation, true));
+    model.push(prefix + "/concat", "Concat", 0);
+    auto* concat = model.getLayerByName(prefix + "/concat");
+    concat->inputs = branches; concat->output = prefix + "/scales"; concat->concat_axis = 0;
+    const auto mixed = latentConv(model, prefix + "/fuse", prefix + "/scales",
+        3 * branch_channels, channels, h, w);
+    model.push(prefix + "/add", "Add", 0);
+    auto* add = model.getLayerByName(prefix + "/add");
+    add->inputs = {local, mixed}; add->output = prefix + "/out";
+    return add->output;
+}
+
+std::string phaseRearrange(Model& model, const std::string& prefix, const std::string& input,
+                          int c, int h, int w, int lh, int lw, bool unpack) {
+    const int rh = h / lh, rw = w / lw;
+    model.push(prefix + "/reshape", "Reshape", 0);
+    auto* reshape = model.getLayerByName(prefix + "/reshape");
+    reshape->inputs = {input}; reshape->output = prefix + "/shaped";
+    reshape->target_shape = unpack ? std::vector<int>{c, rh, rw, lh, lw}
+                                   : std::vector<int>{c, lh, rh, lw, rw};
+    model.push(prefix + "/permute", "Permute", 0);
+    auto* permute = model.getLayerByName(prefix + "/permute");
+    permute->inputs = {prefix + "/shaped"}; permute->output = prefix + "/permuted";
+    permute->shape = unpack ? std::vector<int>{c, rh, rw, lh, lw}
+                            : std::vector<int>{c, lh, rh, lw, rw};
+    permute->permute_dims = unpack ? std::vector<int>{0, 3, 1, 4, 2}
+                                  : std::vector<int>{0, 2, 4, 1, 3};
+    model.push(prefix + "/view", "Reshape", 0);
+    auto* view = model.getLayerByName(prefix + "/view");
+    view->inputs = {prefix + "/permuted"}; view->output = prefix + "/out";
+    view->target_shape = unpack ? std::vector<int>{c, h, w}
+                               : std::vector<int>{c * rh * rw, lh, lw};
+    return view->output;
+}
+
+std::string detailReconstruction(Model& model, const std::string& input,
+                                 const std::string& coarse, int in_c,
+                                 int c, int h, int w, int lh, int lw) {
+    const auto phases = latentConv(model, "vae_conv/dec/detail/project", input, in_c,
+        c * (h / lh) * (w / lw), lh, lw);
+    const auto detail = phaseRearrange(model, "vae_conv/dec/detail/unpack", phases,
+        c, h, w, lh, lw, true);
+    model.push("vae_conv/dec/detail/add", "Add", 0);
+    auto* add = model.getLayerByName("vae_conv/dec/detail/add");
+    add->inputs = {coarse, detail}; add->output = "vae_conv/dec/detail/refined";
+    return add->output;
+}
+
+void configureLatent(Model& model, const VAEConvModel::Config& cfg) {
+    if ((cfg.latent_spatial_context || cfg.latent_detail_path) && cfg.latent_context_channels < 2)
+        throw std::runtime_error("VAEConvModel: latent_context_channels must be >= 2");
+    model.modelConfig["latent_spatial_context"] = cfg.latent_spatial_context;
+    model.modelConfig["latent_context_channels"] = cfg.latent_context_channels;
+    model.modelConfig["latent_detail_path"] = cfg.latent_detail_path;
+}
+} // namespace
 
 VAEConvModel::VAEConvModel() {
     setModelName("VAEConvModel");
@@ -18,6 +105,8 @@ bool VAEConvModel::InitVizTips() {
     registerVizTip("vae_conv/enc/conv_in", "Encoder/in");
     registerVizTip("vae_conv/enc/proj", "Encoder/proj");
     registerVizTip("vae_conv/enc/mu", "Latent/mu");
+    registerVizTip("vae_conv/enc/logvar_pre_conv", "Latent/logvar/features");
+    registerVizTip("vae_conv/enc/logvar_pre_norm", "Latent/logvar/norm");
     registerVizTip("vae_conv/enc/logvar", "Latent/logvar");
     registerVizTip("vae_conv/reparam", "Latent/sample");
     registerVizTip("vae_conv/z_prior_add", "Latent/prior_add");
@@ -49,6 +138,8 @@ bool VAEConvModel::UpdateVizTips(const Layer& layer, VizFrame& frame) {
     const std::string& name = layer.name;
     if (name.find("/enc/conv_in") != std::string::npos) return attach_tip("Encoder/in");
     if (name.find("/enc/proj") != std::string::npos) return attach_tip("Encoder/proj");
+    if (name.find("/enc/logvar_pre_conv") != std::string::npos) return attach_tip("Latent/logvar/features");
+    if (name.find("/enc/logvar_pre_norm") != std::string::npos) return attach_tip("Latent/logvar/norm");
     if (name.find("/enc/down") != std::string::npos) {
         if (name.find("/conv") != std::string::npos) return attach_tip("Encoder/down/conv");
         if (name.find("/res") != std::string::npos) return attach_tip("Encoder/down/res");
@@ -187,7 +278,7 @@ void VAEConvModel::buildInto(Model& model, const Config& cfg) {
 
     const int image_dim = W * H * C;
     const int latent_dim = LH * LW * LC;
-    const int base = std::max(8, cfg.base_channels);
+    const int base = std::max(2, cfg.base_channels);
 
     model.modelConfig["task"] = "vae_conv_autoencoder";
     model.modelConfig["image_w"] = W;
@@ -199,8 +290,10 @@ void VAEConvModel::buildInto(Model& model, const Config& cfg) {
     model.modelConfig["latent_c"] = LC;
     model.modelConfig["latent_dim"] = latent_dim;
     model.modelConfig["base_channels"] = base;
+    configureLatent(model, cfg);
     model.modelConfig["downsamples"] = downsamples;
     model.modelConfig["input_dim"] = image_dim;
+    model.modelConfig["inference_output_tensor"] = "vae_conv/recon";
     // Recon loss: avoid MSE for VAEConv (better behaved on images in [-1,1]).
     model.modelConfig["recon_loss"] = "l1";
     model.modelConfig["text_cond"] = text_cond;
@@ -408,10 +501,12 @@ void VAEConvModel::buildInto(Model& model, const Config& cfg) {
             return prefix + "/gn_out";
         }
         if (enc_norm_str == "layernorm" || enc_norm_str == "ln") {
-            model.push(prefix + "/ln", "LayerNorm", static_cast<size_t>(ch) * 2);
+            const int normalized_size = h * w;
+            model.push(prefix + "/ln", "LayerNorm", static_cast<size_t>(normalized_size) * 2);
             if (auto* L = model.getLayerByName(prefix + "/ln")) {
                 L->inputs = {in};       L->output = prefix + "/ln_out";
                 L->in_channels = ch;    L->input_height = h;  L->input_width = w;
+                L->in_features = normalized_size;
             }
             return prefix + "/ln_out";
         }
@@ -432,10 +527,12 @@ void VAEConvModel::buildInto(Model& model, const Config& cfg) {
             return prefix + "/gn_out";
         }
         if (dec_norm_str == "layernorm" || dec_norm_str == "ln") {
-            model.push(prefix + "/ln", "LayerNorm", static_cast<size_t>(ch) * 2);
+            const int normalized_size = h * w;
+            model.push(prefix + "/ln", "LayerNorm", static_cast<size_t>(normalized_size) * 2);
             if (auto* L = model.getLayerByName(prefix + "/ln")) {
                 L->inputs = {in};       L->output = prefix + "/ln_out";
                 L->in_channels = ch;    L->input_height = h;  L->input_width = w;
+                L->in_features = normalized_size;
             }
             return prefix + "/ln_out";
         }
@@ -556,6 +653,26 @@ void VAEConvModel::buildInto(Model& model, const Config& cfg) {
     if (attn_gate(cur_h, cur_w)) {
         x = self_attn("vae_conv/enc/bot_attn", x, cur_c, cur_h, cur_w);
     }
+    if (cfg.latent_detail_path) {
+        const auto packed = phaseRearrange(model, "vae_conv/enc/detail/pack", "vae_conv/in_chw",
+            C, H, W, LH, LW, false);
+        const auto detail = latentConv(model, "vae_conv/enc/detail/project", packed,
+            C * (H / LH) * (W / LW), cfg.latent_context_channels, LH, LW);
+        model.push("vae_conv/enc/detail/concat", "Concat", 0);
+        auto* concat = model.getLayerByName("vae_conv/enc/detail/concat");
+        concat->inputs = {x, detail}; concat->output = "vae_conv/enc/detail/combined";
+        concat->concat_axis = 0;
+        x = concat->output; cur_c += cfg.latent_context_channels;
+    }
+    if (cfg.latent_spatial_context) {
+        x = latentContext(model, "vae_conv/enc/latent_context", x, cur_c,
+            cfg.latent_context_channels, LH, LW);
+        cur_c = cfg.latent_context_channels;
+    } else if (cfg.latent_detail_path) {
+        x = latentConv(model, "vae_conv/enc/detail/fuse", x, cur_c,
+            cfg.latent_context_channels, LH, LW);
+        cur_c = cfg.latent_context_channels;
+    }
     model.push("vae_conv/enc/mu", "Conv2d",
                sat_mul(static_cast<size_t>(LC), sat_mul(static_cast<size_t>(cur_c), sat_mul(static_cast<size_t>(1), static_cast<size_t>(1)))));
     if (auto* L = model.getLayerByName("vae_conv/enc/mu")) {
@@ -571,10 +688,16 @@ void VAEConvModel::buildInto(Model& model, const Config& cfg) {
         L->use_bias = false;
     }
 
+    std::string logvar_features = conv2d(
+        "vae_conv/enc/logvar_pre_conv", x, "vae_conv/enc/logvar_pre",
+        cur_c, cur_c, cur_h, cur_w, 3, 1, 1, true);
+    logvar_features = add_enc_norm(
+        "vae_conv/enc/logvar_pre_norm", logvar_features, cur_c, cur_h, cur_w);
+
     model.push("vae_conv/enc/logvar", "Conv2d",
                sat_mul(static_cast<size_t>(LC), sat_mul(static_cast<size_t>(cur_c), sat_mul(static_cast<size_t>(1), static_cast<size_t>(1)))));
     if (auto* L = model.getLayerByName("vae_conv/enc/logvar")) {
-        L->inputs = {x};
+        L->inputs = {logvar_features};
         L->output = "vae_conv/logvar";
         L->in_channels = cur_c;
         L->out_channels = LC;
@@ -625,6 +748,14 @@ void VAEConvModel::buildInto(Model& model, const Config& cfg) {
     int dy_h = LH;
     int dy_w = LW;
     int dy_c = LC;
+    if (cfg.latent_spatial_context) {
+        y = latentContext(model, "vae_conv/dec/latent_context", y, dy_c,
+            cfg.latent_context_channels, LH, LW);
+        dy_c = cfg.latent_context_channels;
+    }
+    const std::string detail_features = y;
+    const int detail_channels = dy_c;
+
 
     // Bring to base channels
     y = conv2d("vae_conv/dec/conv_in", y, "vae_conv/dec/c0", dy_c, base, dy_h, dy_w, 3, 1, 1, true);
@@ -687,9 +818,12 @@ void VAEConvModel::buildInto(Model& model, const Config& cfg) {
     y = add_dec_norm("vae_conv/dec/out_n", y, dy_c, dy_h, dy_w);
     y = conv2d("vae_conv/dec/out", y, "vae_conv/dec/out_pre", dy_c, C, dy_h, dy_w, 3, 1, 1, false);
 
+    if (cfg.latent_detail_path)
+        y = detailReconstruction(model, detail_features, y, detail_channels, C, H, W, LH, LW);
+
     model.push("vae_conv/dec/tanh", "Tanh", 0);
     if (auto* T = model.getLayerByName("vae_conv/dec/tanh")) {
-        T->inputs = {"vae_conv/dec/out_pre"};
+        T->inputs = {y};
         T->output = "vae_conv/recon_chw";
     }
 
@@ -760,6 +894,7 @@ void VAEConvModel::buildInto(Model& model, const Config& cfg) {
 }
 
 std::optional<Model::TrainStepResult> VAEConvModel::trainStep(const TrainStepRequest& request) {
+    applyRuntimeConfiguration();
     if (!request.optimizer) {
         return std::nullopt;
     }
@@ -772,14 +907,31 @@ std::optional<Model::TrainStepResult> VAEConvModel::trainStep(const TrainStepReq
     }
     if (!input) return std::nullopt;
 
-    if (const auto it = request.int_inputs.find("text_ids"); it != request.int_inputs.end() && it->second) {
-        return vae_training_.trainText(*this, *input, *it->second, request.target,
-                           *request.optimizer, request.learning_rate,
-                           request.mode, request.grad_scale);
+    if (request.annotation) {
+        auto weights = BBoxSupervision::makeWeights(request.annotation, cfg_.image_w, cfg_.image_h,
+            cfg_.image_c, BBoxSupervision::Layout::HWC, modelConfig.value("bbox_loss_weight",1.0f), &modelConfig);
+        if (request.loss_weights) BBoxSupervision::combineMask(weights,*request.loss_weights);
+        auto adapted = request;
+        adapted.annotation = nullptr;
+        adapted.relations = &weights.relations;
+        adapted.loss_weights = weights.values.empty() ? nullptr : &weights.values;
+        auto result = trainStep(adapted);
+        if (result) {
+            result->metrics["bbox_count"] = static_cast<float>(weights.bbox_count);
+            result->metrics["bbox_loss_weight"] = weights.strength;
+            result->metrics["relation_count"] = static_cast<float>(weights.relations.size());
+        }
+        return result;
     }
-        return vae_training_.trainImage(*this, *input, request.target,
+
+    if (const auto it = request.int_inputs.find("text_ids"); it != request.int_inputs.end() && it->second) {
+        return vae_training_.trainText(*this, *input, *it->second, request.target, request.loss_weights,
+                           *request.optimizer, request.learning_rate,
+                           request.mode, request.grad_scale, request.relations);
+    }
+        return vae_training_.trainImage(*this, *input, request.target, request.loss_weights,
                         *request.optimizer, request.learning_rate,
-                        request.mode, request.grad_scale);
+                        request.mode, request.grad_scale, request.relations);
 }
 
 void VAEConvModel::buildDecoderInto(Model& model, const Config& cfg) {
@@ -818,7 +970,7 @@ void VAEConvModel::buildDecoderInto(Model& model, const Config& cfg) {
 
     const int image_dim = W * H * C;
     const int latent_dim = LH * LW * LC;
-    const int base = std::max(8, cfg.base_channels);
+    const int base = std::max(2, cfg.base_channels);
     // Décodeur convolutionnel avec blocs optionnels (ResNet + SelfAttention).
     const std::string dec_norm_str =
         cfg.dec_norm.empty() ? (cfg.enc_norm.empty() ? "none" : cfg.enc_norm) : cfg.dec_norm;
@@ -839,9 +991,11 @@ void VAEConvModel::buildDecoderInto(Model& model, const Config& cfg) {
     model.modelConfig["latent_c"] = LC;
     model.modelConfig["latent_dim"] = latent_dim;
     model.modelConfig["base_channels"] = base;
+    configureLatent(model, cfg);
     model.modelConfig["downsamples"] = downsamples;
     model.modelConfig["input_dim"] = latent_dim;
     model.modelConfig["output_dim"] = image_dim;
+    model.modelConfig["inference_output_tensor"] = "x";
     model.modelConfig["dec_norm"] = dec_norm_str;
     model.modelConfig["dec_gn_groups"] = dec_gn_groups_val;
     model.modelConfig["decoder_upsample"] = dec_upsample;
@@ -1055,10 +1209,12 @@ void VAEConvModel::buildDecoderInto(Model& model, const Config& cfg) {
             return prefix + "/gn_out";
         }
         if (dec_norm_str == "layernorm" || dec_norm_str == "ln") {
-            model.push(prefix + "/ln", "LayerNorm", static_cast<size_t>(ch) * 2);
+            const int normalized_size = h * w;
+            model.push(prefix + "/ln", "LayerNorm", static_cast<size_t>(normalized_size) * 2);
             if (auto* L = model.getLayerByName(prefix + "/ln")) {
                 L->inputs = {in};       L->output = prefix + "/ln_out";
                 L->in_channels = ch;    L->input_height = h;  L->input_width = w;
+                L->in_features = normalized_size;
             }
             return prefix + "/ln_out";
         }
@@ -1115,6 +1271,14 @@ void VAEConvModel::buildDecoderInto(Model& model, const Config& cfg) {
     int dy_h = LH;
     int dy_w = LW;
     int dy_c = LC;
+    if (cfg.latent_spatial_context) {
+        y = latentContext(model, "vae_conv/dec/latent_context", y, dy_c,
+            cfg.latent_context_channels, LH, LW);
+        dy_c = cfg.latent_context_channels;
+    }
+    const std::string detail_features = y;
+    const int detail_channels = dy_c;
+
 
     y = conv2d("vae_conv/dec/conv_in", y, "vae_conv/dec/c0", dy_c, base, dy_h, dy_w, 3, 1, 1, true);
     dy_c = base;
@@ -1189,9 +1353,12 @@ void VAEConvModel::buildDecoderInto(Model& model, const Config& cfg) {
     y = add_dec_norm("vae_conv/dec/out_n", y, dy_c, dy_h, dy_w);
     y = conv2d("vae_conv/dec/out", y, "vae_conv/dec/out_pre", dy_c, C, dy_h, dy_w, 3, 1, 1, false);
 
+    if (cfg.latent_detail_path)
+        y = detailReconstruction(model, detail_features, y, detail_channels, C, H, W, LH, LW);
+
     model.push("vae_conv/dec/tanh", "Tanh", 0);
     if (auto* T = model.getLayerByName("vae_conv/dec/tanh")) {
-        T->inputs = {"vae_conv/dec/out_pre"};
+        T->inputs = {y};
         T->output = "vae_conv/recon_chw";
     }
 

@@ -55,6 +55,13 @@ int main() {
         TASSERT_TRUE(gradient_matches(prediction, target, loss_type, options));
     }
 
+    const std::vector<float> weights = {0.4f, 1.6f, 0.4f, 1.6f};
+    options.weights = &weights;
+    TASSERT_TRUE(gradient_matches(prediction, target, "mse", options));
+    const auto weighted = RuntimeLossGrad::pixel_loss_and_grad(prediction, target, "mse", options);
+    TASSERT_TRUE(std::abs(weighted.grad[1]) > std::abs(weighted.grad[0]));
+    options.weights = nullptr;
+
     for (const auto& aliases : {
              std::pair<std::string, std::string>{"mse", "l2"},
              {"mae", "l1"},

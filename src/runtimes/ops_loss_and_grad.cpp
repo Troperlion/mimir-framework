@@ -1,3 +1,7 @@
+#include "runtimes/losses/LossDispatch.hpp"
+#include <cctype>
+#include <array>
+#include <stdexcept>
 #include "runtimes/ops_loss_and_grad.hpp"
 
 #include <algorithm>
@@ -27,6 +31,8 @@ std::string canonical_pixel_loss_name(std::string name) {
     return name;
 }
 
+namespace Host {
+
 LossWithGrad pixel_loss_and_grad(
     const float* pred,
     const float* target,
@@ -48,45 +54,102 @@ LossWithGrad pixel_loss_and_grad(
     constexpr double bce_eps = 1e-7;
 
     double sum = 0.0;
-    for (size_t i = 0; i < count; ++i) {
+    for (size_t i = 0; !options.relation_only && i < count; ++i) {
         const double prediction = static_cast<double>(pred[i]);
         const double expected = static_cast<double>(target[i]);
         const double diff = prediction - expected;
+        const double weight = options.weights && options.weights->size() >= count
+            ? std::max(0.0, static_cast<double>((*options.weights)[i])) : 1.0;
 
         if (type == "mae") {
-            sum += std::abs(diff);
-            out.grad[i] = static_cast<float>(inv_n * (diff > 0.0 ? 1.0 : (diff < 0.0 ? -1.0 : 0.0)));
+            sum += weight * std::abs(diff);
+            out.grad[i] = static_cast<float>(weight * inv_n * (diff > 0.0 ? 1.0 : (diff < 0.0 ? -1.0 : 0.0)));
         } else if (type == "huber" || type == "smoothl1") {
             const double abs_diff = std::abs(diff);
             if (abs_diff <= huber_delta) {
-                sum += 0.5 * diff * diff;
-                out.grad[i] = static_cast<float>(inv_n * diff);
+                sum += weight * 0.5 * diff * diff;
+                out.grad[i] = static_cast<float>(weight * inv_n * diff);
             } else {
-                sum += huber_delta * (abs_diff - 0.5 * huber_delta);
-                out.grad[i] = static_cast<float>(inv_n * huber_delta * (diff > 0.0 ? 1.0 : -1.0));
+                sum += weight * huber_delta * (abs_diff - 0.5 * huber_delta);
+                out.grad[i] = static_cast<float>(weight * inv_n * huber_delta * (diff > 0.0 ? 1.0 : -1.0));
             }
         } else if (type == "charbonnier") {
             const double denominator = std::sqrt(diff * diff + charbonnier_eps * charbonnier_eps);
-            sum += denominator;
-            out.grad[i] = static_cast<float>(inv_n * diff / denominator);
+            sum += weight * denominator;
+            out.grad[i] = static_cast<float>(weight * inv_n * diff / denominator);
         } else if (type == "gaussian_nll" || type == "nll_gaussian") {
-            sum += 0.5 * (diff * diff * inv_variance + log_variance);
-            out.grad[i] = static_cast<float>(inv_n * diff * inv_variance);
+            sum += weight * 0.5 * (diff * diff * inv_variance + log_variance);
+            out.grad[i] = static_cast<float>(weight * inv_n * diff * inv_variance);
         } else if (type == "bce") {
             const double probability = std::clamp(prediction, bce_eps, 1.0 - bce_eps);
-            sum += -(expected * std::log(probability) +
-                     (1.0 - expected) * std::log(1.0 - probability));
+            sum += weight * -(expected * std::log(probability) +
+                              (1.0 - expected) * std::log(1.0 - probability));
             if (prediction > bce_eps && prediction < 1.0 - bce_eps) {
                 out.grad[i] = static_cast<float>(
-                    inv_n * (probability - expected) / (probability * (1.0 - probability)));
+                    weight * inv_n * (probability - expected) / (probability * (1.0 - probability)));
             }
         } else {
-            sum += diff * diff;
-            out.grad[i] = static_cast<float>(2.0 * inv_n * diff);
+            sum += weight * diff * diff;
+            out.grad[i] = static_cast<float>(2.0 * weight * inv_n * diff);
         }
     }
 
-    out.loss = sum * inv_n;
+    if (options.relations && !options.relations->empty()) {
+        for (const auto& relation : *options.relations) {
+            if (relation.width<=0 || relation.height<=0 || relation.channels<=0 ||
+                size_t(relation.width)*relation.height*relation.channels>count ||
+                !std::isfinite(relation.weight) || relation.weight<0)
+                throw std::invalid_argument("Invalid relation supervision grid/weight");
+            if (relation.weight==0) continue;
+            std::string predicate=relation.predicate;
+            std::transform(predicate.begin(),predicate.end(),predicate.begin(),[](unsigned char c){return char(std::tolower(c));});
+            const bool horizontal=predicate=="left_of" || predicate=="right_of" || predicate=="left" || predicate=="right";
+            const bool vertical=predicate=="above" || predicate=="below" || predicate=="above_of" || predicate=="below_of";
+            const std::array<bool,3> enabled={true,!vertical,!horizontal};
+            const int features=horizontal || vertical ? 2 : 3;
+            const double scale=relation.weight/(double(options.relations->size())*relation.channels*features);
+            for(int channel=0;channel<relation.channels;++channel) {
+                auto visit=[&](const std::array<double,4>& box,auto fn) {
+                    const double x0=box[0]*relation.width,y0=box[1]*relation.height;
+                    const double x1=box[2]*relation.width,y1=box[3]*relation.height;
+                    if (!(x0>=0 && y0>=0 && x1<=relation.width && y1<=relation.height && x1>x0 && y1>y0))
+                        throw std::invalid_argument("Invalid relation region");
+                    for(int y=int(std::floor(y0));y<std::min(relation.height,int(std::ceil(y1)));++y)
+                        for(int x=int(std::floor(x0));x<std::min(relation.width,int(std::ceil(x1)));++x) {
+                            const size_t p=size_t(y)*relation.width+x;
+                            const size_t i=relation.chw ? size_t(channel)*relation.width*relation.height+p : p*relation.channels+channel;
+                            if(options.weights && options.weights->size()>i && (*options.weights)[i]<=0) continue;
+                            const double xa=std::max(x0,double(x)),xb=std::min(x1,x+1.0);
+                            const double ya=std::max(y0,double(y)),yb=std::min(y1,y+1.0);
+                            const double area=(xb-xa)*(yb-ya);
+                            fn(i,area,std::array<double,3>{1,((xa+xb)-(x0+x1))/(x1-x0),((ya+yb)-(y0+y1))/(y1-y0)});
+                        }
+                };
+                std::array<double,3> subject{},object{};double sa=0,oa=0;
+                auto pool=[&](const std::array<double,4>& box,std::array<double,3>& moments,double& area) {
+                    visit(box,[&](size_t i,double a,const std::array<double,3>& f){
+                        area+=a;for(int k=0;k<3;++k) moments[k]+=a*f[k]*(double(pred[i])-target[i]);
+                    });
+                    if(area>0) for(auto& m:moments) m/=area;
+                };
+                pool(relation.subject,subject,sa);pool(relation.object,object,oa);
+                if(sa<=0 || oa<=0) continue;
+                std::array<double,3> delta{};
+                for(int k=0;k<3;++k) if(enabled[k]) {
+                    delta[k]=subject[k]-object[k];
+                    out.relation_loss+=scale*delta[k]*delta[k];
+                }
+                auto backward=[&](const std::array<double,4>& box,double area,double sign) {
+                    visit(box,[&](size_t i,double a,const std::array<double,3>& f){
+                        double gradient=0;for(int k=0;k<3;++k) gradient+=delta[k]*f[k];
+                        out.grad[i]+=float(sign*2*scale*a/area*gradient);
+                    });
+                };
+                backward(relation.subject,sa,1);backward(relation.object,oa,-1);
+            }
+        }
+    }
+    out.loss = sum * inv_n + out.relation_loss;
     return out;
 }
 
@@ -97,7 +160,7 @@ LossWithGrad pixel_loss_and_grad(
     const PixelLossOptions& options
 ) {
     if (pred.size() != target.size()) return {};
-    return pixel_loss_and_grad(pred.data(), target.data(), pred.size(), loss_type, options);
+    return Host::pixel_loss_and_grad(pred.data(), target.data(), pred.size(), loss_type, options);
 }
 
 GlobalSSIM ssim_global_hwc(
@@ -513,4 +576,5 @@ LossWithGrad spectral_dct_l1_hwc(
     return out;
 }
 
+} // namespace Host
 } // namespace RuntimeLossGrad

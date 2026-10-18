@@ -194,6 +194,38 @@ void computeLayerNorm(std::vector<float>& data, const std::vector<float>& gamma,
     Normalization::layer_norm(data, gamma, beta, normalized_size, eps);
 }
 
+bool prepareLayerNorm(const std::vector<float>& input, const int normalized_size,
+                      const float eps, std::vector<float>& normalized) {
+    if (normalized_size <= 0 || input.empty() ||
+        input.size() % static_cast<size_t>(normalized_size) != 0) {
+        return false;
+    }
+
+    normalized.resize(input.size());
+    const int groups = static_cast<int>(input.size() / static_cast<size_t>(normalized_size));
+    for (int group = 0; group < groups; ++group) {
+        const size_t base = static_cast<size_t>(group) * normalized_size;
+        float mean = 0.0f;
+        for (int index = 0; index < normalized_size; ++index) {
+            mean += input[base + static_cast<size_t>(index)];
+        }
+        mean /= static_cast<float>(normalized_size);
+
+        float variance = 0.0f;
+        for (int index = 0; index < normalized_size; ++index) {
+            const float centered = input[base + static_cast<size_t>(index)] - mean;
+            variance += centered * centered;
+        }
+        const float inverse_stddev =
+            1.0f / std::sqrt(variance / static_cast<float>(normalized_size) + eps);
+        for (int index = 0; index < normalized_size; ++index) {
+            normalized[base + static_cast<size_t>(index)] =
+                (input[base + static_cast<size_t>(index)] - mean) * inverse_stddev;
+        }
+    }
+    return true;
+}
+
 void computeConvTranspose2D(const std::vector<float>& input, std::vector<float>& output,
                             const LayerParams& params, const int in_h, const int in_w,
                             const int in_c, const int out_c, bool) {

@@ -29,6 +29,7 @@ void UNetModel::buildInto(Model& model, const Config& cfg) {
     const int image_dim = W * H * C;
 
     model.modelConfig["task"] = "unet_denoiser";
+    model.modelConfig["bbox_output_layout"] = "CHW";
     model.modelConfig["image_w"] = W;
     model.modelConfig["image_h"] = H;
     model.modelConfig["image_c"] = C;

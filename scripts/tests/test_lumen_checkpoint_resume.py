@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bounded native Lumen resume regression; only generated 8x8 images and checkpoints."""
 import json
+import shutil
 import os
 from pathlib import Path
 import struct
@@ -9,7 +10,7 @@ import tempfile
 import zlib
 
 ROOT = Path(__file__).resolve().parents[2]
-BINARY = ROOT / "bin/mimir"
+BINARY = Path(os.environ.get("MIMIR_TEST_BINARY", str(ROOT / "bin/mimir")))
 ENV = dict(os.environ, OMP_NUM_THREADS="1")
 
 
@@ -19,6 +20,7 @@ def run(script, *args):
                             stderr=subprocess.STDOUT, timeout=60)
     if result.returncode:
         raise RuntimeError(result.stdout.decode(errors="replace")[-6000:])
+    return result.stdout.decode(errors="replace")
 
 
 def chunk(kind, data):
@@ -35,7 +37,11 @@ with tempfile.TemporaryDirectory(prefix="mimir-lumen-resume-") as temporary:
         png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 8, 8, 8, 2, 0, 0, 0))
                + chunk(b"IDAT", zlib.compress(pixels)) + chunk(b"IEND", b""))
         (dataset / f"{index}.png").write_bytes(png)
-        (dataset / f"{index}.txt").write_text("un paysage bleu")
+        (dataset / f"{index}.txt").write_text([
+            "un paysage bleu",
+            "un paysage bleu avec un arbre",
+            "un paysage bleu avec un arbre et un ciel bleu lumineux",
+        ][index])
     fixture = root / "fixture.lua"
     fixture.write_text('''
 local cfg = assert(Mimir.Architectures.default_config("vae_conv"))
@@ -65,7 +71,7 @@ assert(Mimir.Serialization.save(Args.get_str(Args.parse(arg),"out",""), "raw_fol
     run(script, *common, "--out", root / "full", "--epochs", "2")
     run(script, *common, "--out", root / "split", "--epochs", "1")
     run(script, *common, "--out", root / "resumed", "--epochs", "1",
-        "--resume", root / "split/final")
+        "--resume", root / "split/final", "--txt-seq-len", "auto")
     run(script, *common, "--out", root / "mid", "--epochs", "2",
         "--resume", root / "full/step_00000001")
     expected = root / "full/final"
@@ -77,4 +83,54 @@ assert(Mimir.Serialization.save(Args.get_str(Args.parse(arg),"out",""), "raw_fol
         assert json.loads((expected / "model/training.json").read_text()) == json.loads(
             (actual / "model/training.json").read_text()), name
         assert not (actual / "encoder").exists()
-    print("LUMEN_RESUME_OK: epoch and mid-epoch resumes match continuous training exactly")
+    # A base capped at seven special tokens must grow beyond conflicting defaults.
+    base_fixture = root / "base.lua"
+    base_fixture.write_text('''assert(Mimir.Tokenizer.create(7))
+local Args=dofile(ROOTWORK.."/scripts/modules/args.lua")
+assert(Mimir.Tokenizer.save(Args.get_str(Args.parse(arg),"out","")))
+''')
+    base_path=root/"small-base.json"
+    run(base_fixture,"--out",base_path)
+    initial=json.loads(base_path.read_text())
+    assert initial["maxVocab"]==7
+    words=[f"corpus{index:03d}" for index in range(45)]
+    (dataset/"0.txt").write_text(" ".join(words))
+    config["lumen_diffusion"]["vocab_size"]=8
+    # VAE metadata must still adjust the loader after deferred model creation.
+    config["lumen_diffusion"]["image_w"]=16
+    config["lumen_diffusion"]["image_h"]=16
+    config["tokenizer"]["max_vocab"]=8
+    (root/"config.json").write_text(json.dumps(config))
+    growth_common=["--config",root/"config.json","--dataset",dataset,"--tokenizer",base_path,
+                   "--validation-items","0","--vae-calibration-items","1","--seed","42"]
+    run(script,*growth_common,"--out",root/"grown","--epochs","1")
+    grown=json.loads((root/"grown/final/tokenizer/tokenizer.json").read_text())
+    assert all(word in grown["vocab"] for word in words)
+    assert grown["maxVocab"]==grown["vocabSize"]==len(grown["vocab"])>8
+    architecture=json.loads((root/"grown/final/model/architecture.json").read_text())
+    assert architecture["model_config"]["vocab_size"]==len(grown["vocab"])
+    base_before_resume=base_path.read_bytes()
+    protected_resume=root/"protected-resume.lua"
+    protected_resume.write_text('''for _,name in ipairs({"set_max_vocab","ensure_vocab_from_text","learn_bpe"}) do
+  Mimir.Tokenizer[name]=function() error("Checkpoint tokenizer must remain unchanged: "..name) end
+end
+dofile(ROOTWORK.."/scripts/training/train_lumen_diffusion.lua")
+''')
+    output=run(protected_resume,*growth_common,"--out",root/"protected","--epochs","1",
+               "--resume",root/"grown/final","--max-vocab","1")
+    assert "tokenizer hydraté" not in output
+    assert base_path.read_bytes()==base_before_resume
+    assert json.loads((root/"protected/final/tokenizer/tokenizer.json").read_text())==grown
+    # Missing checkpoint tokenizer must fail instead of falling back to the base.
+    missing=root/"missing-tokenizer"
+    shutil.copytree(root/"grown/final",missing)
+    (missing/"tokenizer/tokenizer.json").unlink()
+    try:
+        run(script,*growth_common,"--out",root/"invalid","--resume",missing)
+    except RuntimeError as error:
+        assert "Tokenizer du checkpoint Lumen introuvable" in str(error)
+    else:
+        raise AssertionError("Missing checkpoint tokenizer was accepted")
+    assert base_path.read_bytes()==base_before_resume
+    print("LUMEN_TOKENIZER_OK: base grows beyond defaults, embeddings match hydrated vocab, resume neither resizes nor hydrates, missing checkpoint tokenizer rejected")
+    print("LUMEN_RESUME_OK: dynamic short/long contexts and epoch/mid-epoch resumes match continuous training exactly")

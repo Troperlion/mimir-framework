@@ -17,9 +17,10 @@ for _, dim in ipairs(dims) do
   for _, causal in ipairs({false,true}) do
     log('Transformer causal=' .. tostring(causal))
     B.create('transformer', B.transformer(dim, 2, seq, vocab, causal))
-    B.bench_forward(B.tokens(seq,vocab), dim)
+    B.bench_forward(B.transformer_input(seq,vocab,dim), dim)
     B.snapshot('transformer')
   end
 end
 B.roundtrip({input_dim=16,hidden_dim=32,output_dim=8,hidden_layers=1}, B.floats(16))
 log('PASS benchmark général')
+B.report('general')

@@ -1,5 +1,7 @@
 -- Helpers partagés des benchmarks natifs Mímir.
 local B = {}
+B.results = {}
+B.started_at = os.date('!%Y-%m-%dT%H:%M:%SZ')
 function B.has(flag)
   for _, v in ipairs(arg or {}) do if v == flag then return true end end
   return false
@@ -38,15 +40,53 @@ function B.tokens(n, vocab)
   for i = 1, n do x[i] = 1 + (i % (vocab - 1)) end
   return x
 end
--- os.clock mesure le CPU cumulé du processus, pas la latence murale.
--- Le binding Lua n'expose pas d'horloge monotone haute résolution.
-B.now = os.clock
+function B.transformer_input(n, vocab, dim)
+  local zeros = {}
+  for i = 1, n * dim do zeros[i] = 0 end
+  return {__input__=B.tokens(n, vocab), mag=zeros, mod=zeros}
+end
+assert(Mimir.Benchmark and type(Mimir.Benchmark.now) == 'function',
+  'Mimir.Benchmark.now indisponible: reconstruire le binaire Mimir')
+B.now = Mimir.Benchmark.now
 function B.measure(label, fn)
   local start = B.now()
   local result = fn()
   local elapsed = B.now() - start
-  log(string.format('%s: cpu_ms=%.3f', label, elapsed * 1000))
+  log(string.format('%s: wall_ms=%.3f', label, elapsed * 1000))
+  B.results[#B.results + 1] = {name=label, kind='operation', samples_ms={elapsed * 1000}}
   return result, elapsed
+end
+
+local function percentile(sorted, ratio)
+  if #sorted == 0 then return 0 end
+  local index = math.max(1, math.ceil(#sorted * ratio))
+  return sorted[math.min(index, #sorted)]
+end
+
+local function stats(samples)
+  local sorted, sum = {}, 0
+  for i, value in ipairs(samples) do sorted[i], sum = value, sum + value end
+  table.sort(sorted)
+  return {
+    min_ms=sorted[1] or 0,
+    median_ms=percentile(sorted, 0.5),
+    p95_ms=percentile(sorted, 0.95),
+    max_ms=sorted[#sorted] or 0,
+    mean_ms=#sorted > 0 and sum / #sorted or 0,
+  }
+end
+
+function B.record(name, samples, fields)
+  assert(type(samples) == 'table' and #samples > 0, 'échantillons manquants: ' .. name)
+  local result = fields or {}
+  result.name = name
+  result.kind = result.kind or 'benchmark'
+  result.samples_ms = samples
+  result.stats = stats(samples)
+  result.iterations_per_second = result.stats.median_ms > 0
+    and 1000 / result.stats.median_ms or math.huge
+  B.results[#B.results + 1] = result
+  return result
 end
 function B.setup(default_ram)
   local ram = B.number('--ram', 'MIMIR_BENCH_RAM_GB', default_ram or 2, 0.001)
@@ -57,7 +97,7 @@ function B.setup(default_ram)
       and os.getenv('MIMIR_BENCH_COMPRESS') ~= 'false'}))
   assert(Mimir.Model.set_hardware(not B.has('--no-accel')))
   local caps = Mimir.Model.hardware_caps()
-  log(string.format('Chronométrage: CPU processus (os.clock), OMP_NUM_THREADS=%s, AVX2=%s, FMA=%s',
+  log(string.format('Chronométrage: murale monotone (steady_clock), OMP_NUM_THREADS=%s, AVX2=%s, FMA=%s',
     os.getenv('OMP_NUM_THREADS') or 'auto', tostring(caps.avx2), tostring(caps.fma)))
   log('set_hardware contrôle les kernels accélérés; ce booléen ne sélectionne pas un backend GPU.')
 end
@@ -74,6 +114,7 @@ function B.create(name, cfg)
   B.measure('create ' .. name .. ' (graphe inclus)', function()
     assert(Mimir.Model.create(name, cfg))
   end)
+  B.current_model = name
   B.init()
 end
 function B.forward(input, training, expected)
@@ -83,12 +124,21 @@ function B.bench_forward(input, expected)
   local warmup = B.number('--warmup', nil, 1, 0, true)
   local iters = B.number('--iters', 'MIMIR_BENCH_ITERS', B.has('--quick') and 2 or 10, 1, true)
   for _ = 1, warmup do B.forward(input, false, expected) end
-  local output, elapsed = B.measure('forward + transfert Lua + validation', function()
-    local out
-    for _ = 1, iters do out = B.forward(input, false, expected) end
-    return out
-  end)
-  log(string.format('warmup=%d iters=%d cpu_ms/iter=%.3f output=%d', warmup, iters, elapsed*1000/iters, #output))
+  local output, samples = nil, {}
+  for i = 1, iters do
+    local started = B.now()
+    output = assert(Mimir.Model.forward(input, false))
+    samples[i] = (B.now() - started) * 1000
+  end
+  B.vector(output, expected)
+  local result = B.record('forward ' .. (B.current_model or 'model'), samples, {
+    warmup=warmup, iterations=iters, output_size=#output,
+  })
+  local summary, throughput = result.stats, result.iterations_per_second
+  log(string.format(
+    'forward: warmup=%d iters=%d output=%d | median=%.3f ms p95=%.3f ms min=%.3f ms max=%.3f ms | %.2f iter/s',
+    warmup, iters, #output, summary.median_ms, summary.p95_ms,
+    summary.min_ms, summary.max_ms, throughput))
   return output
 end
 function B.snapshot(tag)
@@ -123,5 +173,64 @@ function B.roundtrip(cfg, input)
   end)
   os.remove(path)
   assert(ok, err)
+end
+
+local function json_escape(value)
+  return tostring(value):gsub('\\', '\\\\'):gsub('"', '\\"')
+    :gsub('\n', '\\n'):gsub('\r', '\\r'):gsub('\t', '\\t')
+end
+
+local function json_value(value)
+  local kind = type(value)
+  if kind == 'number' then
+    return B.finite(value) and string.format('%.9g', value) or 'null'
+  elseif kind == 'boolean' then
+    return tostring(value)
+  elseif kind == 'string' then
+    return '"' .. json_escape(value) .. '"'
+  elseif kind ~= 'table' then
+    return 'null'
+  end
+  local array = #value > 0
+  local parts = {}
+  if array then
+    for i = 1, #value do parts[i] = json_value(value[i]) end
+    return '[' .. table.concat(parts, ',') .. ']'
+  end
+  for key, item in pairs(value) do
+    parts[#parts + 1] = '"' .. json_escape(key) .. '":' .. json_value(item)
+  end
+  table.sort(parts)
+  return '{' .. table.concat(parts, ',') .. '}'
+end
+
+function B.report(name)
+  local path = B.value('--report', 'MIMIR_BENCH_REPORT', nil)
+  if not path or path == '' then return end
+  local report = {
+    benchmark=name,
+    started_at=B.started_at,
+    finished_at=os.date('!%Y-%m-%dT%H:%M:%SZ'),
+    clock='steady_clock',
+    omp_threads=os.getenv('OMP_NUM_THREADS') or 'auto',
+    results=B.results,
+  }
+  local file, err = io.open(path, 'w')
+  assert(file, 'rapport impossible: ' .. tostring(err))
+  if path:match('%.md$') then
+    file:write('# Benchmark ', name, '\n\n')
+    file:write('| Mesure | Type | Médiane murale | p95 murale | Itérations/s |\n')
+    file:write('|---|---:|---:|---:|---:|\n')
+    for _, result in ipairs(B.results) do
+      local summary = result.stats or stats(result.samples_ms or {})
+      file:write(string.format('| %s | %s | %.3f ms | %.3f ms | %.2f |\n',
+        result.name, result.kind, summary.median_ms, summary.p95_ms,
+        result.iterations_per_second or 0))
+    end
+  else
+    file:write(json_value(report), '\n')
+  end
+  file:close()
+  log('rapport=' .. path)
 end
 return B

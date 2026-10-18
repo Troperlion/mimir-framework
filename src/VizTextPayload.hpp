@@ -57,12 +57,8 @@ inline std::string formatTokens(const Tokenizer* tok, const std::vector<int>& to
     return oss.str();
 }
 
-inline std::string formatEncoding(const ConditioningEncoder* enc, const std::vector<int>& token_ids) {
-    if (!enc || token_ids.empty()) return std::string();
-
+inline std::string formatValues(const std::vector<float>& values, size_t token_count) {
     try {
-        std::vector<float> values;
-        enc->encodeInto(values, token_ids);
         if (values.empty()) return "dim=0";
 
         double sum = 0.0;
@@ -104,7 +100,7 @@ inline std::string formatEncoding(const ConditioningEncoder* enc, const std::vec
         std::ostringstream oss;
         oss << std::fixed << std::setprecision(8);
         oss << "dim=" << values.size()
-            << " tokens=" << token_ids.size()
+            << " tokens=" << token_count
             << " finite=" << finite_count
             << " zeros=" << zero_count
             << " nan=" << nan_count
@@ -126,6 +122,12 @@ inline std::string formatEncoding(const ConditioningEncoder* enc, const std::vec
     } catch (...) {
         return "encode_error";
     }
+}
+
+inline std::string formatEncoding(const ConditioningEncoder* enc, const std::vector<int>& token_ids) {
+    if (!enc || token_ids.empty()) return {};
+    try { std::vector<float> values; enc->encodeInto(values, token_ids); return formatValues(values, token_ids.size()); }
+    catch (...) { return "encode_error"; }
 }
 
 inline Payload buildDatasetTextPayload(
@@ -166,11 +168,15 @@ inline Payload buildDatasetTextPayload(
         while (!ids.empty() && ids.back() == pad_id) ids.pop_back();
     }
 
+    if (model && !ids_hint && model->hasTensor("lumen/text/context") && model->hasTensorInt("text_ids")) ids = model->getTensorInt("text_ids");
     out.tokens = formatTokens(tok, ids);
 
     const ConditioningEncoder* enc = nullptr;
-    if (model) enc = &model->getEncoder();
+    if (model && model->getHasEncoder()) enc = &model->getEncoder();
     out.encoding = formatEncoding(enc, ids);
+    if (model && model->hasTensor("lumen/text/context")) {
+        out.encoding = "Tensor: lumen/text/context\n" + formatValues(model->getTensor("lumen/text/context"), ids.size());
+    }
     return out;
 }
 

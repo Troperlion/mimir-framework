@@ -70,7 +70,7 @@ void RuntimeRouter::setRuntimes(
     AbstractRuntime* cuda,
     AbstractRuntime* vulkan,
     AbstractRuntime* opencl,
-    AbstractRuntime* fpga,
+    AbstractRuntime* tpu,
     AbstractRuntime* cpu
 ) {
     runtime_priority_.clear();
@@ -92,8 +92,8 @@ void RuntimeRouter::setRuntimes(
         case true: runtime_priority_.push_back(opencl); break;
         case false: break;
     }
-    switch (fpga != nullptr) {
-        case true: runtime_priority_.push_back(fpga); break;
+    switch (tpu != nullptr) {
+        case true: runtime_priority_.push_back(tpu); break;
         case false: break;
     }
     switch (cpu != nullptr) {

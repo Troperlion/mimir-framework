@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <termios.h>
+#include <sys/file.h>
 #include <unistd.h>
 #endif
 
@@ -180,6 +181,7 @@ bool FpgaRuntime::openAndHandshake() {
 #else
     serial_descriptor_ = open(device_->tty_path.c_str(), O_RDWR | O_NOCTTY | O_SYNC);
     if (serial_descriptor_ < 0) return false;
+    if (flock(serial_descriptor_, LOCK_EX | LOCK_NB) != 0) return false;
 
     termios tty{};
     if (tcgetattr(serial_descriptor_, &tty) != 0) return false;
@@ -438,4 +440,75 @@ bool FpgaRuntime::supportsForwardLayerType(LayerType) const {
 
 bool FpgaRuntime::supportsBackwardLayerType(LayerType) const {
     return false;
+}
+
+namespace {
+uint32_t fpgaCrc(const uint8_t* bytes,size_t size) {
+    uint32_t crc=0xffffffffU;
+    for(size_t i=0;i<size;++i) {
+        crc^=bytes[i];
+        for(int bit=0;bit<8;++bit) crc=(crc>>1)^((crc&1)?0xedb88320U:0);
+    }
+    return ~crc;
+}
+uint32_t readLe32(const uint8_t* p) {
+    return uint32_t(p[0])|(uint32_t(p[1])<<8)|(uint32_t(p[2])<<16)|(uint32_t(p[3])<<24);
+}
+}
+bool FpgaRuntime::transferBlock(uint8_t mode,const uint8_t* input,size_t size,std::vector<uint8_t>& output) {
+    output.clear();
+#if defined(__linux__) || defined(__APPLE__)
+    if(!initialized_ || !(capabilities_.operations & Mimir::FpgaProtocol::BufferedIoConversion) ||
+        !input || !size || size>256 || mode>5 || ((mode==1 || mode==3) && size%4) ||
+        ((mode==2 || mode==4) && size%2)) return false;
+    const uint32_t crc=fpgaCrc(input,size);
+    std::vector<uint8_t> request={'@','B','U','F',mode,static_cast<uint8_t>(size),static_cast<uint8_t>(size>>8)};
+    for(int shift=0;shift<32;shift+=8) request.push_back(static_cast<uint8_t>(crc>>shift));
+    request.insert(request.end(),input,input+size);
+    std::lock_guard<std::mutex> lock(transport_mutex_);
+    std::array<uint8_t,7> header{};
+    if(!writeAll(serial_descriptor_,request.data(),request.size(),1000) ||
+        !readAll(serial_descriptor_,header.data(),header.size(),1000) ||
+        !std::equal(header.begin(),header.begin()+4,"XRES")) return false;
+    const size_t length=header[5]+(size_t(header[6])<<8);
+    if(length>512) return false;
+    std::vector<uint8_t> response(length+4);
+    if(!readAll(serial_descriptor_,response.data(),response.size(),1000)) return false;
+    const size_t expected=(mode==1 || mode==3)?size/2:(mode==2 || mode==4)?size*2:size;
+    if(header[4]!=mode || length!=expected || readLe32(response.data()+length)!=fpgaCrc(response.data(),length)) return false;
+    output.assign(response.begin(),response.begin()+length);
+    return true;
+#else
+    (void)mode;(void)input;(void)size;return false;
+#endif
+}
+bool FpgaRuntime::beginCheckpoint(uint8_t operation) {
+#if defined(__linux__) || defined(__APPLE__)
+    if(!initialized_ || !(capabilities_.operations & Mimir::FpgaProtocol::BufferedIoConversion) || operation>2) return false;
+    const std::array<uint8_t,5> request={'@','B','E','G',operation};
+    std::array<uint8_t,4> response{};
+    std::lock_guard<std::mutex> lock(transport_mutex_);
+    return writeAll(serial_descriptor_,request.data(),request.size(),1000) &&
+        readAll(serial_descriptor_,response.data(),response.size(),1000) &&
+        std::equal(response.begin(),response.end(),"CACK");
+#else
+    (void)operation;return false;
+#endif
+}
+bool FpgaRuntime::endCheckpoint(uint8_t& operation,uint64_t& bytes,uint32_t& crc) {
+#if defined(__linux__) || defined(__APPLE__)
+    if(!initialized_ || !(capabilities_.operations & Mimir::FpgaProtocol::BufferedIoConversion)) return false;
+    const std::array<uint8_t,4> request={'@','E','N','D'};
+    std::array<uint8_t,17> response{};
+    std::lock_guard<std::mutex> lock(transport_mutex_);
+    if(!writeAll(serial_descriptor_,request.data(),request.size(),1000) ||
+        !readAll(serial_descriptor_,response.data(),response.size(),1000) ||
+        !std::equal(response.begin(),response.begin()+4,"CRES")) return false;
+    operation=response[4]; bytes=0;
+    for(int i=0;i<8;++i) bytes|=uint64_t(response[5+i])<<(i*8);
+    crc=readLe32(response.data()+13);
+    return true;
+#else
+    (void)operation;(void)bytes;(void)crc;return false;
+#endif
 }

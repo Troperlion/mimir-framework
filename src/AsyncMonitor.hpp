@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <memory>
+#include <utility>
 #include <optional>
 #include <string>
 #include <cstdint>
@@ -84,6 +85,7 @@ static inline int mimir_os_read(int fd, void* buf, unsigned int count) {
 }
 #include "HtopDisplay.hpp"
 #include "Visualizer.hpp"
+#include "viz/AnnotationFeatureOverlay.hpp"
 
 /**
  * AsyncMonitor - Gestion asynchrone de HtopDisplay et Visualizer
@@ -139,6 +141,7 @@ public:
         float val_kl = 0.0f;
         float val_align = 0.0f;
         std::string val_feedback;
+        Visualizer::DetectionMetrics detection;
 
         // Optimizer (for display/debug)
         int opt_type = 0;          // 0=SGD, 1=ADAM, 2=ADAMW
@@ -161,15 +164,25 @@ public:
     }
     
     // Démarrer les moniteurs
-    void start(bool enable_htop = true, bool enable_viz = false, 
-               const json& viz_config = json()) {
+    void start(bool enable_htop = true, bool enable_viz = false,
+               const json& viz_config = json(), bool defer_htop = false) {
         // NOTE: start() doit être idempotent.
         // On autorise le cas "htop déjà démarré" puis "activation de la viz" plus tard.
         std::cerr << "[monitor] start htop=" << enable_htop << " viz=" << enable_viz << std::endl;
+        if (enable_htop && defer_htop && !htop_) {
+            htop_start_pending_.store(true, std::memory_order_release);
+            enable_htop = false;
+        } else if (enable_htop) {
+            htop_start_pending_.store(false, std::memory_order_release);
+        }
         if (!running_) {
             running_ = true;
         }
         if (!viz_config.empty()) {
+            if (viz_config.contains("visualization") && viz_config["visualization"].is_object()) {
+                const auto& v = viz_config["visualization"];
+                if (v.contains("loss_log_file") && v["loss_log_file"].is_string()) configureMetricsCsv(v["loss_log_file"].get<std::string>());
+            }
             htop_viz_config_ = viz_config;
         }
 
@@ -193,7 +206,7 @@ public:
             htop_->setSkipConnectionControl(std::atomic_load(&skip_control_));
             htop_->setRuntimeConfiguration(std::atomic_load(&runtime_config_));
             htop_->setCsvLogFile(metrics_csv_file_);
-            htop_->setCsvEnabled(metrics_csv_enabled_ && !enable_viz && !getViz());
+            htop_->setCsvEnabled(false);
             htop_->enterAltScreen();
             htop_->hideCursor();
             htop_->clearScreen();
@@ -278,8 +291,12 @@ public:
                         if (!ok) {
                             err = "Visualizer::initialize() a échoué";
                         } else {
-                            current_viz->setLossLogFile(metrics_csv_file_);
-                            current_viz->setLossLogEnabled(metrics_csv_enabled_);
+                            {
+                                std::lock_guard<std::mutex> lock(mutex_);
+                                current_viz->setLossLogFile(metrics_csv_file_);
+                            }
+                            current_viz->setLossLogEnabled(false);
+                            current_viz->setTrainingPauseControl(training_paused_);
                             std::atomic_store_explicit(
                                 &viz_, current_viz, std::memory_order_release);
                         }
@@ -307,6 +324,7 @@ public:
 
                 // IMPORTANT: détruire la fenêtre SFML dans ce thread.
                 current_viz->shutdown();
+                setTrainingPaused(false);
                 viz_thread_finished_.store(true, std::memory_order_release);
             });
 
@@ -319,16 +337,23 @@ public:
                 htop_->setVizActionState(vizInitOk()
                     ? HtopDisplay::VizActionState::Active
                     : HtopDisplay::VizActionState::Unavailable);
-                htop_->setCsvEnabled(metrics_csv_enabled_ && !vizInitOk());
+                htop_->setCsvEnabled(false);
             }
         }
     }
     
     // Arrêter les moniteurs
     void stop() {
-        if (!running_) return;
-        
+        if (!running_ && !csv_thread_.joinable()) return;
+
         running_ = false;
+        setTrainingPaused(false);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            csv_running_ = false;
+        }
+        csv_cv_.notify_all();
+        if (csv_thread_.joinable()) csv_thread_.join();
         cv_.notify_all();
         
         if (htop_thread_.joinable() && std::this_thread::get_id() != htop_thread_.get_id()) {
@@ -355,6 +380,7 @@ public:
 
         // Reset pour permettre un start() ultérieur.
         htop_.reset();
+        htop_start_pending_.store(false, std::memory_order_release);
         std::atomic_store_explicit(
             &viz_, std::shared_ptr<Visualizer>{}, std::memory_order_release);
         viz_launch_requested_ = false;
@@ -373,6 +399,9 @@ public:
     
     // Mettre à jour les métriques (thread-safe)
     void updateMetrics(const Metrics& metrics) {
+        if (htop_start_pending_.exchange(false, std::memory_order_acq_rel)) {
+            start(true, false, htop_viz_config_);
+        }
         std::lock_guard<std::mutex> lock(mutex_);
         // Les updates d'entraînement sont construites depuis un Metrics neuf :
         // leurs champs val_* par défaut ne doivent pas effacer le dernier bilan
@@ -392,6 +421,7 @@ public:
             const float val_kl = metrics_.val_kl;
             const float val_align = metrics_.val_align;
             const std::string val_feedback = metrics_.val_feedback;
+            const Visualizer::DetectionMetrics previous_detection = metrics_.detection;
 
             metrics_ = metrics;
             metrics_.val_has = val_has;
@@ -405,7 +435,19 @@ public:
             metrics_.val_kl = val_kl;
             metrics_.val_align = val_align;
             metrics_.val_feedback = val_feedback;
+            if (metrics_.detection.enabled && previous_detection.validation_has &&
+                !metrics_.detection.validation_has) {
+                metrics_.detection.validation_has = true;
+                metrics_.detection.precision = previous_detection.precision;
+                metrics_.detection.recall = previous_detection.recall;
+                metrics_.detection.f1 = previous_detection.f1;
+                metrics_.detection.mean_iou = previous_detection.mean_iou;
+                metrics_.detection.true_positive = previous_detection.true_positive;
+                metrics_.detection.false_positive = previous_detection.false_positive;
+                metrics_.detection.false_negative = previous_detection.false_negative;
+            }
         }
+        recordMetricsLocked();
         has_update_ = true;
         metrics_version_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -423,6 +465,12 @@ public:
                           float align,
                           const std::string& feedback = std::string()) {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (in_progress && !metrics_.val_in_progress) {
+            std::lock_guard<std::mutex> viz_lock(viz_mutex_);
+            pending_validation_images_reset_ = true;
+            pending_images_.erase(std::remove_if(pending_images_.begin(), pending_images_.end(),
+                [](const PendingImage& image) { return image.validation; }), pending_images_.end());
+        }
         metrics_.val_in_progress = in_progress;
         metrics_.val_step = step;
         metrics_.val_done = std::max(0, done);
@@ -444,6 +492,7 @@ public:
         if (metrics_.val_total > 0) metrics_.val_items = metrics_.val_total;
         else if (metrics_.val_done > 0) metrics_.val_items = metrics_.val_done;
 
+        if (has && !in_progress && step != last_csv_validation_step_) recordMetricsLocked(true);
         has_update_ = true;
         metrics_version_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -608,7 +657,7 @@ public:
         addImage(pixels, 0, 0, 0, prompt);
     }
 
-    void addImage(const std::vector<uint8_t>& pixels, int w, int h, int channels, const std::string& prompt) {
+    void addImage(const std::vector<uint8_t>& pixels, int w, int h, int channels, const std::string& prompt, bool validation = false) {
         if (!getViz()) return;
 
         std::lock_guard<std::mutex> lock(viz_mutex_);
@@ -618,21 +667,31 @@ public:
         img.h = h;
         img.channels = channels;
         img.prompt = prompt;
-        pending_images_.push_back(std::move(img));
+        img.validation = validation;
+        if (staged_dataset_sample_ && !validation) staged_images_.push_back(std::move(img));
+        else pending_images_.push_back(std::move(img));
+    }
+
+    void clearImages() {
+        std::lock_guard<std::mutex> lock(viz_mutex_);
+        pending_images_.clear();
+        pending_clear_images_ = true;
     }
 
     // Définir l'image du dataset utilisée (RGB/grayscale)
-    void setDatasetImage(const std::vector<uint8_t>& pixels, int w, int h, int channels, const std::string& label) {
-        if (!getViz()) return;
+    void setDatasetImage(const std::vector<uint8_t>& pixels, int w, int h, int channels, const std::string& label, bool bbox_supervision = false, const DatasetBBoxOverlay::Boxes& boxes = {}) {
         if (w <= 0 || h <= 0) return;
         if (channels != 1 && channels != 3 && channels != 4) return;
 
         std::lock_guard<std::mutex> lock(viz_mutex_);
-        pending_dataset_image_ = PendingFrame{pixels, w, h, channels, label};
+        context_dirty_ = true;
+        if (pending_dataset_sample_) pending_dataset_text_ = pending_dataset_sample_->text;
+        pending_dataset_sample_.reset();
+        pending_dataset_image_ = PendingFrame{pixels, w, h, channels, label, bbox_supervision, boxes};
     }
 
-    // Définir en une seule opération le sample dataset (image + texte) afin d'éviter
-    // les désynchronisations visuelles (image d'un item et texte d'un autre).
+    // Stage image + text for the current computation. setLayerBlockImages commits
+    // this context together with the completed captures; the UI keeps the previous step.
     void setDatasetSample(
         const std::vector<uint8_t>& pixels,
         int w,
@@ -642,49 +701,140 @@ public:
         const std::string& raw_text,
         const std::string& tags,
         const std::string& tokenized,
-        const std::string& encoded
+        const std::string& encoded,
+        bool bbox_supervision = false,
+        const DatasetBBoxOverlay::Boxes& boxes = {},
+        const nlohmann::json* annotation = nullptr,
+        const nlohmann::json* annotation_config = nullptr
     ) {
-        if (!getViz()) return;
         if (w <= 0 || h <= 0) return;
         if (channels != 1 && channels != 3 && channels != 4) return;
 
-        std::lock_guard<std::mutex> lock(viz_mutex_);
+        auto annotations=std::make_shared<AnnotationSnapshot>();
+        annotations->annotation=annotation?*annotation:nlohmann::json::object();
+        annotations->config={{"bbox_loss_weight",annotation_config?annotation_config->value("bbox_loss_weight",1.f):(bbox_supervision?1.f:0.f)}};
+        if(annotation_config)for(const char* key:{"relation_primary_weight","relation_secondary_weight","relation_other_weight"})if(annotation_config->contains(key))annotations->config[key]=(*annotation_config)[key];
+        if(!annotation && !boxes.empty()) {
+            annotations->annotation["entities"]=nlohmann::json::array();size_t i=0;
+            for(const auto& box:boxes)annotations->annotation["entities"].push_back({{"id","bbox_"+std::to_string(++i)},{"phrase",""},{"role","object"},{"bbox",box}});
+        }
         PendingDatasetSample s;
-        s.frame = PendingFrame{pixels, w, h, channels, label};
+        s.frame = PendingFrame{pixels, w, h, channels, label, bbox_supervision, boxes};
         s.text = PendingText{raw_text, tags, tokenized, encoded};
-        pending_dataset_sample_ = std::move(s);
+        if(annotations->annotation.contains("entities") && !annotations->annotation["entities"].empty()) {
+            AnnotationFeatureOverlay::rgb(s.frame.pixels,w,h,channels);
+            AnnotationFeatureOverlay::geometry(s.frame.pixels,w,h,annotations->annotation);
+            s.frame.channels=3;
+        }
+        std::lock_guard<std::mutex> lock(viz_mutex_);
+        staged_annotations_=std::move(annotations);++annotation_generation_;
+
+        // Input N must not replace the displayed input until outputs N are ready.
+        staged_dataset_sample_ = std::move(s);
+        staged_projection_image_.reset(); staged_understanding_image_.reset(); staged_detections_.reset();
+        staged_images_.clear();
+    }
+
+    void stageDatasetImage(const std::vector<uint8_t>& pixels, int w, int h, int channels,
+                           const std::string& label, bool bbox_supervision = false,
+                           const DatasetBBoxOverlay::Boxes& boxes = {}, const nlohmann::json* annotation = nullptr,
+                           const nlohmann::json* annotation_config = nullptr) {
+        setDatasetSample(pixels,w,h,channels,label,"","","","",bbox_supervision,boxes,annotation,annotation_config);
     }
 
     // Définir le texte associé à l'item dataset (si modèle texte)
     void setDatasetText(const std::string& raw_text, const std::string& tags, const std::string& tokenized, const std::string& encoded) {
-        if (!getViz()) return;
         std::lock_guard<std::mutex> lock(viz_mutex_);
+        if (staged_dataset_sample_) {
+            staged_dataset_sample_->text = PendingText{raw_text, tags, tokenized, encoded};
+            return;
+        }
+        context_dirty_ = true;
+        if (pending_dataset_sample_) pending_dataset_image_ = pending_dataset_sample_->frame;
+        pending_dataset_sample_.reset();
         pending_dataset_text_ = PendingText{raw_text, tags, tokenized, encoded};
     }
 
     // Définir l'image de projection (souvent une heatmap)
     void setProjectionImage(const std::vector<uint8_t>& pixels, int w, int h, int channels, const std::string& label) {
-        if (!getViz()) return;
         if (w <= 0 || h <= 0) return;
         if (channels != 1 && channels != 3 && channels != 4) return;
 
         std::lock_guard<std::mutex> lock(viz_mutex_);
-        pending_projection_image_ = PendingFrame{pixels, w, h, channels, label};
+        if (staged_dataset_sample_) {
+            staged_projection_image_ = PendingFrame{pixels, w, h, channels, label, false, {}};
+            return;
+        }
+        context_dirty_ = true;
+        pending_projection_image_ = PendingFrame{pixels, w, h, channels, label, false, {}};
     }
 
     void setUnderstandingImage(const std::vector<uint8_t>& pixels, int w, int h, int channels, const std::string& label) {
-        if (!getViz()) return;
         if (w <= 0 || h <= 0) return;
         if (channels != 1 && channels != 3 && channels != 4) return;
 
         std::lock_guard<std::mutex> lock(viz_mutex_);
-        pending_understanding_image_ = PendingFrame{pixels, w, h, channels, label};
+        if (staged_dataset_sample_) {
+            staged_understanding_image_ = PendingFrame{pixels, w, h, channels, label, false, {}};
+            return;
+        }
+        context_dirty_ = true;
+        pending_understanding_image_ = PendingFrame{pixels, w, h, channels, label, false, {}};
     }
 
-    void setLayerBlockImages(const std::vector<Visualizer::BlockFrame>& frames) {
+    void setDetections(const std::vector<Visualizer::Detection>& detections,
+                       Visualizer::DetectionTarget target) {
         if (!getViz()) return;
         std::lock_guard<std::mutex> lock(viz_mutex_);
-        pending_layer_blocks_ = frames;
+        if (staged_dataset_sample_) staged_detections_ = PendingDetections{detections, target};
+        else pending_detections_ = PendingDetections{detections, target};
+    }
+
+    void setDetectionOverlayEnabled(bool enabled) {
+        if (!getViz()) return;
+        std::lock_guard<std::mutex> lock(viz_mutex_);
+        pending_detection_overlay_enabled_ = enabled;
+    }
+
+    void setDetectionScoreThreshold(float threshold) {
+        if (!getViz()) return;
+        std::lock_guard<std::mutex> lock(viz_mutex_);
+        pending_detection_score_threshold_ = std::clamp(threshold, 0.0f, 1.0f);
+    }
+
+    void setLayerBlockImages(std::vector<Visualizer::BlockFrame> frames) {
+        // No capture this step: keep the last completed preview on screen.
+        if (frames.empty()) return;
+        std::shared_ptr<const AnnotationSnapshot> annotations;
+        size_t generation=0;int image_w=1,image_h=1;
+        {
+            std::lock_guard<std::mutex> lock(viz_mutex_);
+            annotations=staged_annotations_;generation=annotation_generation_;
+            if(staged_dataset_sample_) {image_w=staged_dataset_sample_->frame.w;image_h=staged_dataset_sample_->frame.h;}
+        }
+        // Rasterization and feature pooling stay outside the producer/UI lock.
+        if(annotations)AnnotationFeatureOverlay::decorate(frames,annotations->annotation,annotations->config,image_w,image_h);
+        auto capture = std::make_shared<const std::vector<Visualizer::BlockFrame>>(std::move(frames));
+        std::lock_guard<std::mutex> lock(viz_mutex_);
+        if(generation!=annotation_generation_)return;
+        staged_annotations_.reset();
+        if (staged_dataset_sample_) {
+            pending_dataset_sample_ = std::move(staged_dataset_sample_);
+            staged_dataset_sample_.reset();
+            pending_dataset_image_.reset(); pending_dataset_text_.reset();
+            pending_projection_image_ = std::move(staged_projection_image_);
+            pending_understanding_image_ = std::move(staged_understanding_image_);
+            staged_projection_image_.reset(); staged_understanding_image_.reset();
+            if (staged_detections_) {
+                pending_detections_ = std::move(staged_detections_);
+                staged_detections_.reset();
+            }
+            for (auto& image : staged_images_) pending_images_.push_back(std::move(image));
+            staged_images_.clear();
+            context_dirty_ = true;
+        }
+        layer_blocks_dirty_ = true;
+        pending_layer_blocks_ = std::move(capture);
     }
     
     // Accesseurs
@@ -694,19 +844,46 @@ public:
     }
     bool isRunning() const { return running_; }
 
-    // Configure l'unique export de métriques. Viz est prioritaire lorsqu'elle
-    // est active; Htop sert de repli lorsqu'il tourne seul.
+    // AsyncMonitor owns the persistent history, independently of either UI.
     void configureMetricsCsv(const std::string& filepath, bool enabled = true) {
-        if (!filepath.empty()) metrics_csv_file_ = filepath;
-        metrics_csv_enabled_ = enabled;
-        if (htop_) {
-            htop_->setCsvLogFile(metrics_csv_file_);
-            htop_->setCsvEnabled(enabled && !getViz());
+        flushMetricsCsv();
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!filepath.empty() && filepath != metrics_csv_file_) {
+            metrics_csv_file_ = filepath;
+            history_loaded_ = false;
         }
-        if (getViz()) {
-            std::lock_guard<std::mutex> lock(viz_mutex_);
-            pending_loss_log_file_ = metrics_csv_file_;
-            pending_loss_log_enabled_ = enabled;
+        metrics_csv_enabled_ = enabled;
+        loadMetricsHistoryLocked();
+        metrics_version_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void flushMetricsCsv() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        csv_flushed_cv_.wait(lock, [&] { return csv_queue_.empty() && !csv_writing_; });
+    }
+
+    bool saveMetricsHistory(const std::string& path) {
+        flushMetricsCsv();
+        std::lock_guard<std::mutex> lock(mutex_);
+        loadMetricsHistoryLocked();
+        if (path == metrics_csv_file_) return std::filesystem::exists(path);
+        return MetricsCsv::write(path, metrics_history_);
+    }
+
+    std::vector<MetricsRecord> metricsHistorySnapshot(size_t offset = 0) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        loadMetricsHistoryLocked();
+        offset = std::min(offset, metrics_history_.size());
+        return {metrics_history_.begin() + offset, metrics_history_.end()};
+    }
+    void setTrainingPaused(bool paused) { training_paused_->store(paused); }
+    bool trainingPaused() const { return training_paused_->load(); }
+    void waitWhileTrainingPaused() {
+        while (running_ && trainingPaused()) {
+            auto viz = getViz();
+            if (interrupt_signal_pending_ || safe_stop_requested_ ||
+                (viz && viz->stopTrainingRequested())) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
     }
 
@@ -728,6 +905,7 @@ public:
 
     // UI -> training thread: arrêt propre demandé via bouton Viz.
     bool consumeStopTrainingRequested() {
+        waitWhileTrainingPaused();
         if (interrupt_signal_pending_ != 0) {
             interrupt_signal_pending_ = 0;
             safe_stop_requested_.store(true, std::memory_order_relaxed);
@@ -742,6 +920,82 @@ public:
     }
     
 private:
+    friend struct AsyncMonitorPreviewTestAccess;
+    void loadMetricsHistoryLocked() {
+        if (history_loaded_) return;
+        metrics_history_ = MetricsCsv::read(metrics_csv_file_);
+        last_csv_validation_step_ = -1;
+        for (const auto& record : metrics_history_) if (record.is_val) last_csv_validation_step_ = record.val_step_id;
+        history_loaded_ = true;
+    }
+    void recordMetricsLocked(bool validation_only = false) {
+        loadMetricsHistoryLocked();
+        MetricsRecord r{};
+        r.step = metrics_history_.empty() ? 0 : metrics_history_.back().step + 1;
+        r.epoch = metrics_.epoch;
+        r.total_epochs = metrics_.total_epochs;
+        r.batch = metrics_.batch;
+        r.total_batches = metrics_.total_batches;
+        r.loss = metrics_.loss;
+        r.avg_loss = metrics_.avg_loss;
+        r.lr = metrics_.lr;
+        r.batch_time_ms = metrics_.batch_time_ms;
+        r.bps = metrics_.bps;
+        r.memory_mb = metrics_.memory_mb;
+        r.allocator_memory_mb = metrics_.allocator_memory_mb;
+        r.params = metrics_.params;
+        r.mse = metrics_.mse;
+        r.kl_divergence = metrics_.kl;
+        r.kl_beta_effective = metrics_.kl_beta_effective;
+        r.wasserstein = metrics_.wass;
+        r.entropy_diff = metrics_.ent;
+        r.moment_mismatch = metrics_.mom;
+        r.spatial_coherence = metrics_.spat;
+        r.temporal_consistency = metrics_.temp;
+        r.timestep = metrics_.timestep;
+        r.grad_norm = metrics_.grad_norm;
+        r.grad_max = metrics_.grad_max;
+        r.opt_type = metrics_.opt_type;
+        r.opt_step = metrics_.opt_step;
+        r.opt_beta1 = metrics_.opt_beta1;
+        r.opt_beta2 = metrics_.opt_beta2;
+        r.opt_eps = metrics_.opt_eps;
+        r.opt_weight_decay = metrics_.opt_weight_decay;
+        r.is_val = metrics_.val_has && !metrics_.val_in_progress && metrics_.val_step >= 0 && metrics_.val_step != last_csv_validation_step_;
+        if (r.is_val) {
+            r.val_loss = metrics_.val_recon; r.val_mse = metrics_.val_kl;
+            r.val_step_id = metrics_.val_step; r.val_feedback = metrics_.val_feedback;
+            last_csv_validation_step_ = r.val_step_id;
+        }
+        if (validation_only && !r.is_val) return;
+        metrics_history_.push_back(r);
+        if (metrics_csv_enabled_) {
+            csv_queue_.push_back({metrics_csv_file_, r});
+            if (!csv_thread_.joinable()) {
+                csv_running_ = true;
+                csv_thread_ = std::thread([this] { csvLoop(); });
+            }
+            csv_cv_.notify_one();
+        }
+    }
+
+    void csvLoop() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        while (csv_running_ || !csv_queue_.empty()) {
+            csv_cv_.wait(lock, [&] { return !csv_running_ || !csv_queue_.empty(); });
+            if (csv_queue_.empty()) continue;
+            auto pending = std::move(csv_queue_);
+            csv_queue_.clear(); csv_writing_ = true;
+            lock.unlock();
+            for (const auto& item : pending) {
+                if (!MetricsCsv::append(item.first, item.second))
+                    std::cerr << "[monitor] Cannot append metrics CSV: " << item.first << std::endl;
+            }
+            lock.lock(); csv_writing_ = false; csv_flushed_cv_.notify_all();
+        }
+        csv_flushed_cv_.notify_all();
+    }
+
     static int reconLossIndex(std::string name) {
         std::transform(name.begin(), name.end(), name.begin(),
             [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -991,6 +1245,18 @@ private:
     }
 
     void processHtopKey(char key) {
+        if (htop_ && (htop_->debugJsonVisible() ||
+            (!htop_->configVisible() && !htop_->modelGraphVisible() && (key == 'd' || key == 'D')))) {
+            htop_->debugJsonKey(key);
+            htop_->render();
+            return;
+        }
+        if (htop_ && (htop_->modelGraphVisible() ||
+            (!htop_->configVisible() && (key=='g' || key=='G')))) {
+            htop_->modelGraphKey(key);
+            htop_->render();
+            return;
+        }
         if (htop_ && (htop_->configVisible() || key == 'c' || key == 'C')) {
             htop_->configKey(key);
             htop_->render();
@@ -1034,6 +1300,16 @@ private:
     }
 
     void processHtopArrow(char arrow) {
+        if (htop_ && htop_->debugJsonVisible()) {
+            htop_->debug_json_dialog_.move();
+            htop_->render();
+            return;
+        }
+        if (htop_ && htop_->modelGraphVisible()) {
+            htop_->modelGraphMove(arrow);
+            htop_->render();
+            return;
+        }
         if (htop_ && htop_->configVisible()) {
             htop_->configMove(arrow == 'A' ? -1 : arrow == 'B' ? 1 :
                              (arrow == 'D' || arrow == '5') ? -10 : 10);
@@ -1226,7 +1502,13 @@ private:
     }
     
     void vizLoop(const std::shared_ptr<Visualizer>& current_viz) {
-        uint64_t last_ver = 0;
+        uint64_t last_ver = std::numeric_limits<uint64_t>::max();
+        size_t history_offset = 0;
+        {
+            std::lock_guard<std::mutex> lock(viz_mutex_);
+            context_dirty_ = true;
+            layer_blocks_dirty_ = static_cast<bool>(pending_layer_blocks_);
+        }
         while (running_ && current_viz->isOpen()) {
             current_viz->processEvents();
             
@@ -1278,65 +1560,89 @@ private:
                     local_metrics.val_done,
                     local_metrics.val_total,
                     local_metrics.kl_beta_effective,
-                    local_metrics.val_feedback
+                    local_metrics.val_feedback,
+                    &local_metrics.detection
                 );
-                current_viz->addLossPoint(local_metrics.loss);
+                auto records = metricsHistorySnapshot(history_offset);
+                current_viz->setMetricsHistory(records, history_offset);
+                history_offset += records.size();
             }
             
             // Ajouter images en attente
             {
-                std::lock_guard<std::mutex> lock(viz_mutex_);
+                auto snapshot = takeVizUpdate();
 
-                if (pending_loss_log_file_.has_value()) {
-                    current_viz->setLossLogFile(pending_loss_log_file_.value());
-                    pending_loss_log_file_.reset();
+                if (snapshot.pending_loss_log_file_.has_value()) {
+                    current_viz->setLossLogFile(snapshot.pending_loss_log_file_.value());
+                    snapshot.pending_loss_log_file_.reset();
                 }
-                if (pending_loss_log_enabled_.has_value()) {
-                    current_viz->setLossLogEnabled(pending_loss_log_enabled_.value());
-                    pending_loss_log_enabled_.reset();
-                }
-
-                for (const auto& img : pending_images_) {
-                    current_viz->addGeneratedImage(img.pixels, img.w, img.h, img.channels, img.prompt);
-                }
-                pending_images_.clear();
-
-                // Appliquer d'abord l'update atomique (image+texte) si présent.
-                if (pending_dataset_sample_.has_value()) {
-                    const auto& s = pending_dataset_sample_.value();
-                    current_viz->setDatasetImage(s.frame.pixels, s.frame.w, s.frame.h, s.frame.channels, s.frame.label);
-                    current_viz->setDatasetText(s.text.raw, s.text.tags, s.text.tokens, s.text.encoded);
-                    pending_dataset_sample_.reset();
-                    pending_dataset_image_.reset();
-                    pending_dataset_text_.reset();
+                if (snapshot.pending_loss_log_enabled_.has_value()) {
+                    current_viz->setLossLogEnabled(false);
+                    snapshot.pending_loss_log_enabled_.reset();
                 }
 
-                if (pending_dataset_image_.has_value()) {
-                    const auto& f = pending_dataset_image_.value();
-                    current_viz->setDatasetImage(f.pixels, f.w, f.h, f.channels, f.label);
-                    pending_dataset_image_.reset();
+                if (snapshot.pending_clear_images_) {
+                    current_viz->clearImages();
+                    snapshot.pending_clear_images_ = false;
+                }
+                if (snapshot.pending_validation_images_reset_) {
+                    current_viz->beginValidationImages();
+                    snapshot.pending_validation_images_reset_ = false;
+                }
+                for (const auto& img : snapshot.pending_images_) {
+                    current_viz->addGeneratedImage(img.pixels, img.w, img.h, img.channels, img.prompt, img.validation);
+                }
+                snapshot.pending_images_.clear();
+
+                if (snapshot.context_dirty_) {
+                    // Appliquer d'abord l'update atomique (image+texte) si présent.
+                    if (snapshot.pending_dataset_sample_.has_value()) {
+                        const auto& s = snapshot.pending_dataset_sample_.value();
+                        current_viz->setDatasetImage(s.frame.pixels, s.frame.w, s.frame.h, s.frame.channels, s.frame.label, s.frame.bbox_supervision, s.frame.boxes);
+                        current_viz->setDatasetText(s.text.raw, s.text.tags, s.text.tokens, s.text.encoded);
+                    }
+
+                    if (snapshot.pending_dataset_image_.has_value()) {
+                        const auto& f = snapshot.pending_dataset_image_.value();
+                        current_viz->setDatasetImage(f.pixels, f.w, f.h, f.channels, f.label, f.bbox_supervision, f.boxes);
+                    }
+
+                    if (snapshot.pending_dataset_text_.has_value()) {
+                        const auto& t = snapshot.pending_dataset_text_.value();
+                        current_viz->setDatasetText(t.raw, t.tags, t.tokens, t.encoded);
+                    }
+                    if (snapshot.pending_projection_image_.has_value()) {
+                        const auto& f = snapshot.pending_projection_image_.value();
+                        current_viz->setProjectionImage(f.pixels, f.w, f.h, f.channels, f.label);
+                    }
+                    if (snapshot.pending_understanding_image_.has_value()) {
+                        const auto& f = snapshot.pending_understanding_image_.value();
+                        current_viz->setUnderstandingImage(f.pixels, f.w, f.h, f.channels, f.label);
+                    }
+
+                    snapshot.context_dirty_ = false;
                 }
 
-                if (pending_dataset_text_.has_value()) {
-                    const auto& t = pending_dataset_text_.value();
-                    current_viz->setDatasetText(t.raw, t.tags, t.tokens, t.encoded);
-                    pending_dataset_text_.reset();
-                }
-                if (pending_projection_image_.has_value()) {
-                    const auto& f = pending_projection_image_.value();
-                    current_viz->setProjectionImage(f.pixels, f.w, f.h, f.channels, f.label);
-                    pending_projection_image_.reset();
-                }
-                if (pending_understanding_image_.has_value()) {
-                    const auto& f = pending_understanding_image_.value();
-                    current_viz->setUnderstandingImage(f.pixels, f.w, f.h, f.channels, f.label);
-                    pending_understanding_image_.reset();
+                if (snapshot.layer_blocks_dirty_ && snapshot.pending_layer_blocks_) {
+                    current_viz->setLayerBlockImages(*snapshot.pending_layer_blocks_);
+                    snapshot.layer_blocks_dirty_ = false;
                 }
 
-                if (pending_layer_blocks_.has_value()) {
-                    current_viz->setLayerBlockImages(pending_layer_blocks_.value());
-                    pending_layer_blocks_.reset();
+                if (snapshot.pending_detections_.has_value()) {
+                    current_viz->setDetections(
+                        snapshot.pending_detections_->detections, snapshot.pending_detections_->target);
+                    snapshot.pending_detections_.reset();
                 }
+                if (snapshot.pending_detection_overlay_enabled_.has_value()) {
+                    current_viz->setDetectionOverlayEnabled(*snapshot.pending_detection_overlay_enabled_);
+                    snapshot.pending_detection_overlay_enabled_.reset();
+                }
+                if (snapshot.pending_detection_score_threshold_.has_value()) {
+                    current_viz->setDetectionScoreThreshold(*snapshot.pending_detection_score_threshold_);
+                    snapshot.pending_detection_score_threshold_.reset();
+                }
+
+
             }
             
             current_viz->update();
@@ -1349,6 +1655,10 @@ private:
     std::shared_ptr<HtopDisplay> htop_;
     std::shared_ptr<Visualizer> viz_;
     
+    std::thread csv_thread_;
+    std::condition_variable csv_cv_, csv_flushed_cv_;
+    bool csv_running_ = false, csv_writing_ = false;
+    std::vector<std::pair<std::string, MetricsRecord>> csv_queue_;
     std::thread htop_thread_;
     std::thread viz_thread_;
 
@@ -1363,6 +1673,7 @@ private:
     int saved_stderr_fd_ = -1;
     int pipe_fds_[2] = {-1, -1};
     std::atomic<bool> capture_running_{false};
+    std::atomic<bool> htop_start_pending_{false};
     std::atomic<bool> viz_launch_requested_{false};
     std::atomic<bool> viz_thread_finished_{false};
     std::shared_ptr<LiveModelConfig> runtime_config_ = std::make_shared<LiveModelConfig>();
@@ -1415,6 +1726,10 @@ private:
     std::atomic<int> htop_update_interval_ms_;
     std::atomic<int> viz_update_interval_ms_;
     std::atomic<uint64_t> metrics_version_{0};
+    std::shared_ptr<std::atomic<bool>> training_paused_ = std::make_shared<std::atomic<bool>>(false);
+    std::vector<MetricsRecord> metrics_history_;
+    bool history_loaded_ = false;
+    int last_csv_validation_step_ = -1;
     bool metrics_csv_enabled_ = true;
     std::string metrics_csv_file_ = "checkpoints/loss_history.csv";
     int last_htop_validation_step_ = -1;
@@ -1427,8 +1742,16 @@ private:
         int h = 0;
         int channels = 0;
         std::string prompt;
+        bool validation = false;
     };
+    bool pending_validation_images_reset_ = false;
+    bool pending_clear_images_ = false;
     std::vector<PendingImage> pending_images_;
+    std::vector<PendingImage> staged_images_;
+
+    struct AnnotationSnapshot {nlohmann::json annotation; nlohmann::json config;};
+    std::shared_ptr<const AnnotationSnapshot> staged_annotations_;
+    size_t annotation_generation_=0;
 
     struct PendingFrame {
         std::vector<uint8_t> pixels;
@@ -1436,6 +1759,8 @@ private:
         int h = 0;
         int channels = 1;
         std::string label;
+        bool bbox_supervision = false;
+        DatasetBBoxOverlay::Boxes boxes;
     };
     std::optional<PendingFrame> pending_dataset_image_;
     struct PendingText {
@@ -1451,11 +1776,70 @@ private:
         PendingText text;
     };
     std::optional<PendingDatasetSample> pending_dataset_sample_;
+    std::optional<PendingDatasetSample> staged_dataset_sample_;
     std::optional<PendingFrame> pending_projection_image_;
     std::optional<PendingFrame> pending_understanding_image_;
+    std::optional<PendingFrame> staged_projection_image_, staged_understanding_image_;
 
-    std::optional<std::vector<Visualizer::BlockFrame>> pending_layer_blocks_;
+    struct PendingDetections {
+        std::vector<Visualizer::Detection> detections;
+        Visualizer::DetectionTarget target = Visualizer::DetectionTarget::Dataset;
+    };
+    std::optional<PendingDetections> pending_detections_;
+    std::optional<PendingDetections> staged_detections_;
+    std::optional<bool> pending_detection_overlay_enabled_;
+    std::optional<float> pending_detection_score_threshold_;
 
+    bool context_dirty_ = false;
+    bool layer_blocks_dirty_ = false;
+    std::shared_ptr<const std::vector<Visualizer::BlockFrame>> pending_layer_blocks_;
+
+
+    // Only immutable data crosses the mailbox. Texture creation and layout never
+    // hold the producer's mutex; completed captures are replaced, not queued.
+    struct VizUpdate {
+        std::optional<std::string> pending_loss_log_file_;
+        std::optional<bool> pending_loss_log_enabled_;
+        bool pending_clear_images_ = false, pending_validation_images_reset_ = false;
+        std::vector<PendingImage> pending_images_;
+        bool context_dirty_ = false, layer_blocks_dirty_ = false;
+        std::optional<PendingDatasetSample> pending_dataset_sample_;
+        std::optional<PendingFrame> pending_dataset_image_, pending_projection_image_, pending_understanding_image_;
+        std::optional<PendingText> pending_dataset_text_;
+        std::shared_ptr<const std::vector<Visualizer::BlockFrame>> pending_layer_blocks_;
+        std::optional<PendingDetections> pending_detections_;
+        std::optional<bool> pending_detection_overlay_enabled_;
+        std::optional<float> pending_detection_score_threshold_;
+    };
+
+    VizUpdate takeVizUpdate() {
+        VizUpdate snapshot;
+        std::lock_guard<std::mutex> lock(viz_mutex_);
+        snapshot.pending_loss_log_file_ = std::move(pending_loss_log_file_);
+        pending_loss_log_file_.reset();
+        snapshot.pending_loss_log_enabled_ = pending_loss_log_enabled_;
+        pending_loss_log_enabled_.reset();
+        snapshot.pending_clear_images_ = std::exchange(pending_clear_images_, false);
+        snapshot.pending_validation_images_reset_ = std::exchange(pending_validation_images_reset_, false);
+        snapshot.pending_images_.swap(pending_images_);
+        snapshot.context_dirty_ = std::exchange(context_dirty_, false);
+        if (snapshot.context_dirty_) {
+            snapshot.pending_dataset_sample_ = pending_dataset_sample_;
+            snapshot.pending_dataset_image_ = pending_dataset_image_;
+            snapshot.pending_dataset_text_ = pending_dataset_text_;
+            snapshot.pending_projection_image_ = pending_projection_image_;
+            snapshot.pending_understanding_image_ = pending_understanding_image_;
+        }
+        snapshot.layer_blocks_dirty_ = std::exchange(layer_blocks_dirty_, false);
+        if (snapshot.layer_blocks_dirty_) snapshot.pending_layer_blocks_ = pending_layer_blocks_;
+        snapshot.pending_detections_ = std::move(pending_detections_);
+        pending_detections_.reset();
+        snapshot.pending_detection_overlay_enabled_ = pending_detection_overlay_enabled_;
+        pending_detection_overlay_enabled_.reset();
+        snapshot.pending_detection_score_threshold_ = pending_detection_score_threshold_;
+        pending_detection_score_threshold_.reset();
+        return snapshot;
+    }
     // Pending Viz-side settings
     std::optional<std::string> pending_loss_log_file_;
     std::optional<bool> pending_loss_log_enabled_;

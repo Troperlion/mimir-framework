@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 
 static int compare_model_weights(const Model& a, const Model& b, float eps) {
@@ -166,7 +167,20 @@ int main() {
         lopts.load_encoder = true;
         lopts.load_optimizer = std::string(c.expected_tag) == "F32";
 
-        TASSERT_TRUE(load_checkpoint(*modelB, dir.string(), lopts, &err));
+        std::string logged_tensor_name;
+        for (const auto& layer : modelA->getLayers()) {
+            if (layer.weight_block && layer.weight_block->getSize() > 0) {
+                logged_tensor_name = layer.name + "_weights";
+                break;
+            }
+        }
+        std::ostringstream load_log;
+        std::streambuf* previous_cerr = std::cerr.rdbuf(load_log.rdbuf());
+        const bool loaded = load_checkpoint(*modelB, dir.string(), lopts, &err);
+        std::cerr.rdbuf(previous_cerr);
+        TASSERT_TRUE(loaded);
+        TASSERT_TRUE(load_log.str().find(logged_tensor_name) != std::string::npos);
+        TASSERT_TRUE(load_log.str().find(" | sha256:") != std::string::npos);
 
         // DType should be restored semantically (aliases allowed: f16/fp16/float16...).
         TASSERT_TRUE(Mimir::parse_dtype(modelB->getDefaultDType()) == Mimir::parse_dtype(c.dtype));

@@ -1,3 +1,4 @@
+#include "training/SpatialRelation.hpp"
 #pragma once
 
 #include <string>
@@ -20,6 +21,7 @@
 #include "MemoryGuard.hpp" // Pour le strict mode
 #include "DType.hpp"
 #include "Planning/Planner.hpp"
+#include <chrono>
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -235,7 +237,7 @@ public:
                                         bool training = true);
 
     // Variante "view": évite la copie/allocation du std::vector de sortie.
-    const std::vector<float>& forwardPassNamedView(const std::unordered_map<std::string, std::vector<float>>& float_inputs,
+    virtual const std::vector<float>& forwardPassNamedView(const std::unordered_map<std::string, std::vector<float>>& float_inputs,
                                                    const std::unordered_map<std::string, std::vector<int>>& int_inputs,
                                                    bool training = true);
 
@@ -257,6 +259,9 @@ public:
         std::string label;
         int heatmap_kind = 0; // 0: image/scalar, 1: signed mean + energy
         std::string tensor_info;
+        std::vector<float> tensor_values; // interleaved raw samples, before colour mapping
+        std::vector<size_t> tensor_indices;
+        int tensor_sample_channels = 0;
     };
 
     void setVizTapsEnabled(bool enabled) {
@@ -299,10 +304,14 @@ public:
         std::unordered_map<std::string, const std::vector<float>*> float_inputs;
         std::unordered_map<std::string, const std::vector<int>*> int_inputs;
         const std::vector<float>* target = nullptr;
+        const std::vector<float>* loss_weights = nullptr;
+        const std::vector<SpatialRelation>* relations = nullptr;
+        const json* annotation = nullptr; // Optional structured dataset annotation.
         Optimizer* optimizer = nullptr;
         float learning_rate = 0.0f;
         TrainStepMode mode = TrainStepMode::Optimize;
         float grad_scale = 1.0f;
+        bool capture_prediction = false;
     };
 
     struct TrainStepResult {
@@ -310,6 +319,7 @@ public:
         float grad_norm = 0.0f;
         float grad_max_abs = 0.0f;
         std::unordered_map<std::string, float> metrics;
+        std::vector<float> prediction;
     };
 
     // Optional high-level training hook. Models without a training contract return nullopt.
@@ -602,6 +612,7 @@ protected:
         Mimir::Planning::ExecutionPlan execution;
     };
     StaticPlanCache static_plan_;
+    std::chrono::steady_clock::time_point graph_snapshot_time_{};
 
     // Cache du résultat de graph_uses_mag_mod() — recalculé à chaque push().
     // Évite le scan O(layers*inputs) à chaque forward pass.

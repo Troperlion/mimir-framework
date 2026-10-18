@@ -126,7 +126,7 @@ struct ExecutionPlan {
                    (std::hash<size_t>{}(id.generation) << 1u);
         }
     };
-    enum class MemoryLocation : uint8_t { Host, Vulkan, OpenCL, CUDA, ROCm, FPGA };
+    enum class MemoryLocation : uint8_t { Host, Vulkan, OpenCL, CUDA, ROCm, FPGA, TPU };
     struct PlannedTensor {
         TensorId id;
         std::string name;
@@ -398,6 +398,7 @@ inline RuntimeKind runtime_kind_from_name(const char* name) {
     if (value == "OPENCL") return RuntimeKind::OpenCL;
     if (value == "CUDA") return RuntimeKind::CUDA;
     if (value == "ROCM") return RuntimeKind::ROCm;
+    if (value == "TPU") return RuntimeKind::TPU;
     if (value == "FPGA") return RuntimeKind::FPGA;
     return RuntimeKind::Unknown;
 }
@@ -408,6 +409,7 @@ inline MemoryLocation memory_location_for_runtime(const RuntimeKind runtime) {
         case RuntimeKind::OpenCL: return MemoryLocation::OpenCL;
         case RuntimeKind::CUDA: return MemoryLocation::CUDA;
         case RuntimeKind::ROCm: return MemoryLocation::ROCm;
+        case RuntimeKind::TPU: return MemoryLocation::TPU;
         case RuntimeKind::FPGA: return MemoryLocation::FPGA;
         default: return MemoryLocation::Host;
     }
@@ -589,6 +591,7 @@ inline void apply_runtime_placement(ExecutionPlan& plan,
                     case RuntimeKind::ROCm: throughput = 8.0e9; break;
                     case RuntimeKind::Vulkan: throughput = 4.0e9; break;
                     case RuntimeKind::OpenCL: throughput = 3.0e9; break;
+                    case RuntimeKind::TPU: throughput = 8.0e9; break; // conservative, no measured TPU cost model
                     case RuntimeKind::FPGA: throughput = 2.0e9; break;
                     default: break;
                 }
@@ -646,6 +649,7 @@ inline const char* runtime_kind_name(const RuntimeKind runtime) {
         case RuntimeKind::OpenCL: return "OpenCL";
         case RuntimeKind::CUDA: return "CUDA";
         case RuntimeKind::ROCm: return "ROCm";
+        case RuntimeKind::TPU: return "TPU";
         case RuntimeKind::FPGA: return "FPGA";
         default: return "Unknown";
     }
@@ -668,6 +672,7 @@ inline const char* memory_location_name(const MemoryLocation location) {
         case MemoryLocation::OpenCL: return "OpenCL";
         case MemoryLocation::CUDA: return "CUDA";
         case MemoryLocation::ROCm: return "ROCm";
+        case MemoryLocation::TPU: return "TPU";
         case MemoryLocation::FPGA: return "FPGA";
         default: return "Unknown";
     }

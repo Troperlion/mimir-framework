@@ -1,3 +1,4 @@
+#include "runtimes/losses/LossDispatch.hpp"
 #include "VAETraining.hpp"
 
 #include "../runtimes/ops_loss_and_grad.hpp"
@@ -216,10 +217,12 @@ void set_metrics(Model::TrainStepResult& result,
 Model::TrainStepResult VAETraining::trainImage(Model& model,
                                                const std::vector<float>& input,
                                                const std::vector<float>* target,
+                                               const std::vector<float>* loss_weights,
                                                Optimizer& optimizer,
                                                float learning_rate,
                                                Model::TrainStepMode mode,
-                                               float grad_scale) {
+                                               float grad_scale,
+                                               const std::vector<SpatialRelation>* relations) {
     model.applyRuntimeConfiguration();
     validate_model(model, "VAETraining::trainImage");
 
@@ -317,8 +320,11 @@ Model::TrainStepResult VAETraining::trainImage(Model& model,
     if (model.modelConfig.contains("charbonnier_eps")) pixel_options.charbonnier_eps = std::max(1e-12f, model.modelConfig["charbonnier_eps"].get<float>());
     if (model.modelConfig.contains("nll_sigma")) pixel_options.gaussian_nll_sigma = std::max(1e-6f, model.modelConfig["nll_sigma"].get<float>());
     if (model.modelConfig.contains("gaussian_nll_sigma")) pixel_options.gaussian_nll_sigma = std::max(1e-6f, model.modelConfig["gaussian_nll_sigma"].get<float>());
+    pixel_options.weights = loss_weights;
+    pixel_options.relations = relations;
 
     auto pixel = RuntimeLossGrad::pixel_loss_and_grad(prediction.data(), expected.data(), static_cast<size_t>(recon_count), recon_loss, pixel_options);
+    double relation_loss = pixel.relation_loss;
     double reconstruction = pixel.loss;
     std::vector<float> reconstruction_gradient = std::move(pixel.grad);
 
@@ -537,16 +543,9 @@ Model::TrainStepResult VAETraining::trainImage(Model& model,
         const std::vector<float>& fake_features = perceptual_model_->forwardPassView(reconstructed, true);
         const size_t feature_count = std::min(fake_features.size(), real_features.size());
         if (feature_count > 0) {
-            double perceptual_loss = 0.0;
-            std::vector<float> feature_gradient(feature_count, 0.0f);
-            const float scale = 2.0f / static_cast<float>(feature_count);
-            for (size_t i = 0; i < feature_count; ++i) {
-                const double delta = static_cast<double>(fake_features[i]) - static_cast<double>(real_features[i]);
-                perceptual_loss += delta * delta;
-                feature_gradient[i] = scale * static_cast<float>(delta);
-            }
-            reconstruction += static_cast<double>(perceptual_weight) * perceptual_loss / static_cast<double>(feature_count);
-            perceptual_model_->backwardPass(feature_gradient);
+            auto feature_loss=RuntimeLossGrad::pixel_loss_and_grad(fake_features.data(),real_features.data(),feature_count,"mse");
+            reconstruction += static_cast<double>(perceptual_weight)*feature_loss.loss;
+            perceptual_model_->backwardPass(feature_loss.grad);
             if (perceptual_model_->hasLastInputGradient()) {
                 const auto& input_gradient = perceptual_model_->getLastInputGradient();
                 if (input_gradient.size() >= static_cast<size_t>(recon_count)) {
@@ -605,6 +604,8 @@ Model::TrainStepResult VAETraining::trainImage(Model& model,
     model.backwardPass(packed_gradient);
 
     Model::TrainStepResult result;
+    result.metrics["relation_loss"] = static_cast<float>(relation_loss);
+    result.metrics["relation_count"] = relations ? static_cast<float>(relations->size()) : 0.0f;
     result.loss = static_cast<float>(static_cast<double>(marker_scale) * reconstruction + static_cast<double>(beta_effective) * kl);
     gradient_diagnostics(model, result.grad_norm, result.grad_max_abs);
     if (mode == Model::TrainStepMode::Optimize) model.optimizerStep(optimizer, learning_rate);
@@ -618,10 +619,12 @@ Model::TrainStepResult VAETraining::trainText(Model& model,
                                               const std::vector<float>& input,
                                               const std::vector<int>& text_ids,
                                               const std::vector<float>* explicit_target,
+                                              const std::vector<float>* loss_weights,
                                               Optimizer& optimizer,
                                               float learning_rate,
                                               Model::TrainStepMode mode,
-                                              float grad_scale) {
+                                              float grad_scale,
+                                               const std::vector<SpatialRelation>* relations) {
     model.applyRuntimeConfiguration();
     validate_model(model, "VAETraining::trainText");
 
@@ -726,32 +729,22 @@ Model::TrainStepResult VAETraining::trainText(Model& model,
     float moment_mismatch = 0.0f;
     float marker_scale = 1.0f;
     const int recon_count = reconstruction_is_ce ? 0 : std::min(image_dim, static_cast<int>(target->size()));
+    std::vector<float> reconstruction_gradient;
 
+    double relation_loss = 0;
     if (reconstruction_is_ce) {
-        const int valid_tokens = std::min(static_cast<int>(text_ids.size()), std::max(1, seq_len));
-        int count = 0;
-        for (int token_index = 0; token_index < valid_tokens; ++token_index) {
-            const int expected = text_ids[static_cast<size_t>(token_index)];
-            if ((padding_id >= 0 && expected == padding_id) || expected < 0 || expected >= std::max(2, vocab_size)) continue;
-            const size_t base = static_cast<size_t>(token_index) * static_cast<size_t>(std::max(2, vocab_size));
-            float maximum = -std::numeric_limits<float>::infinity();
-            for (int candidate = 0; candidate < std::max(2, vocab_size); ++candidate) maximum = std::max(maximum, prediction[base + static_cast<size_t>(candidate)]);
-            double sum = 0.0;
-            for (int candidate = 0; candidate < std::max(2, vocab_size); ++candidate) sum += std::exp(static_cast<double>(prediction[base + static_cast<size_t>(candidate)] - maximum));
-            reconstruction += static_cast<double>(maximum) + std::log(std::max(1e-30, sum)) - prediction[base + static_cast<size_t>(expected)];
-            ++count;
-        }
-        if (count > 0) reconstruction /= static_cast<double>(count);
+        auto ce=RuntimeLossGrad::text_cross_entropy(prediction.data(),prediction.size(),text_ids,seq_len,vocab_size,padding_id);
+        reconstruction=ce.loss;
+        reconstruction_gradient=std::move(ce.grad);
     } else {
-        if (recon_loss == "l1" || recon_loss == "mae") {
-            for (int i = 0; i < recon_count; ++i) reconstruction += std::abs(static_cast<double>(prediction[static_cast<size_t>(i)]) - (*target)[static_cast<size_t>(i)]);
-        } else {
-            for (int i = 0; i < recon_count; ++i) {
-                const double delta = static_cast<double>(prediction[static_cast<size_t>(i)]) - (*target)[static_cast<size_t>(i)];
-                reconstruction += delta * delta;
-            }
-        }
-        reconstruction /= static_cast<double>(std::max(1, recon_count));
+        RuntimeLossGrad::PixelLossOptions pixel_options;
+        pixel_options.weights = loss_weights;
+        pixel_options.relations = relations;
+        auto pixel = RuntimeLossGrad::pixel_loss_and_grad(
+            prediction.data(), target->data(), static_cast<size_t>(recon_count), recon_loss, pixel_options);
+        relation_loss = pixel.relation_loss;
+        reconstruction = pixel.loss;
+        reconstruction_gradient = std::move(pixel.grad);
         const auto prediction_moments = compute_moments_prefix(prediction, 0, recon_count);
         const auto target_moments = compute_moments_prefix(*target, 0, recon_count);
         const double prediction_variance = std::max(prediction_moments.var, 1e-12);
@@ -811,37 +804,11 @@ Model::TrainStepResult VAETraining::trainText(Model& model,
     static thread_local std::vector<float> packed_gradient;
     packed_gradient.assign(static_cast<size_t>(output_dim), 0.0f);
     if (reconstruction_is_ce) {
-        const int valid_tokens = std::min(static_cast<int>(text_ids.size()), std::max(1, seq_len));
-        int count = 0;
-        for (int token_index = 0; token_index < valid_tokens; ++token_index) {
-            const int expected = text_ids[static_cast<size_t>(token_index)];
-            if ((padding_id >= 0 && expected == padding_id) || expected < 0 || expected >= std::max(2, vocab_size)) continue;
-            ++count;
-        }
-        const float scale = count > 0 ? marker_scale / static_cast<float>(count) : 0.0f;
-        for (int token_index = 0; token_index < valid_tokens; ++token_index) {
-            const int expected = text_ids[static_cast<size_t>(token_index)];
-            if ((padding_id >= 0 && expected == padding_id) || expected < 0 || expected >= std::max(2, vocab_size)) continue;
-            const size_t base = static_cast<size_t>(token_index) * static_cast<size_t>(std::max(2, vocab_size));
-            float maximum = -std::numeric_limits<float>::infinity();
-            for (int candidate = 0; candidate < std::max(2, vocab_size); ++candidate) maximum = std::max(maximum, prediction[base + static_cast<size_t>(candidate)]);
-            double sum = 0.0;
-            for (int candidate = 0; candidate < std::max(2, vocab_size); ++candidate) sum += std::exp(static_cast<double>(prediction[base + static_cast<size_t>(candidate)] - maximum));
-            for (int candidate = 0; candidate < std::max(2, vocab_size); ++candidate) {
-                const double probability = std::exp(static_cast<double>(prediction[base + static_cast<size_t>(candidate)] - maximum)) / std::max(1e-30, sum);
-                packed_gradient[base + static_cast<size_t>(candidate)] = scale * static_cast<float>(probability);
-            }
-            packed_gradient[base + static_cast<size_t>(expected)] -= scale;
-        }
-    } else if (recon_loss == "l1" || recon_loss == "mae") {
-        const float scale = marker_scale / static_cast<float>(std::max(1, recon_count));
-        for (int i = 0; i < recon_count; ++i) {
-            const float delta = prediction[static_cast<size_t>(i)] - (*target)[static_cast<size_t>(i)];
-            packed_gradient[static_cast<size_t>(i)] = scale * (delta > 0.0f ? 1.0f : (delta < 0.0f ? -1.0f : 0.0f));
-        }
+        for(size_t i=0;i<reconstruction_gradient.size();++i)packed_gradient[i]=marker_scale*reconstruction_gradient[i];
     } else {
-        const float scale = 2.0f * marker_scale / static_cast<float>(std::max(1, recon_count));
-        for (int i = 0; i < recon_count; ++i) packed_gradient[static_cast<size_t>(i)] = scale * (prediction[static_cast<size_t>(i)] - (*target)[static_cast<size_t>(i)]);
+        for (int i = 0; i < recon_count; ++i) {
+            packed_gradient[static_cast<size_t>(i)] = marker_scale * reconstruction_gradient[static_cast<size_t>(i)];
+        }
     }
 
     const float kl_scale = latent_dim > 0 ? beta_effective / static_cast<float>(latent_dim) : 0.0f;
@@ -881,6 +848,8 @@ Model::TrainStepResult VAETraining::trainText(Model& model,
     model.backwardPass(packed_gradient);
 
     Model::TrainStepResult result;
+    result.metrics["relation_loss"] = static_cast<float>(relation_loss);
+    result.metrics["relation_count"] = relations ? static_cast<float>(relations->size()) : 0.0f;
     result.loss = static_cast<float>(static_cast<double>(marker_scale) * reconstruction +
                                      static_cast<double>(beta_effective) * kl + alignment +
                                      static_cast<double>(semantic_weight) * semantic_loss +

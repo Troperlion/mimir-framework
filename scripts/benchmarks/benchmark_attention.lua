@@ -60,6 +60,7 @@ bench("transformer", {
   output_dim = 128,
   dropout = 0.0,
   causal = true,
-}, rand_ids(64, 2048), 128)
+}, {__input__=rand_ids(64, 2048), mag=B.floats(64*128), mod=B.floats(64*128)}, 128)
 
 log("\n✓ done")
+B.report('attention')

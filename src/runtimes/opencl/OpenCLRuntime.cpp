@@ -1,3 +1,4 @@
+#include "runtimes/optimizers/PortableOptimizer.hpp"
 #include "runtimes/opencl/OpenCLRuntime.hpp"
 
 #ifdef ENABLE_OPENCL
@@ -6,7 +7,7 @@
 
 #include "Layers.hpp"
 #include "runtimes/LayerOps.hpp"
-#include "runtimes/NativeBackward.hpp"
+#include "runtimes/portable/PortableRuntime.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -15,6 +16,7 @@
 #include <vector>
 
 struct OpenCLRuntime::Impl {
+    PortableRuntime reference{"OPENCL"};
 #ifdef ENABLE_OPENCL
     OpenCLCompute::ComputeEngine engine;
 #endif
@@ -67,89 +69,51 @@ bool OpenCLRuntime::isInitialized() const {
 }
 
 bool OpenCLRuntime::supportsForwardLayerType(const LayerType type) const {
-    switch (config_.disabled) {
-        case true:
-            return false;
-        case false:
-            break;
-    }
-
-    switch (type) {
-        case LayerType::Linear:
-        case LayerType::MatMul:
-        case LayerType::BatchMatMul:
-        case LayerType::Add:
-        case LayerType::Subtract:
-        case LayerType::Multiply:
-        case LayerType::Divide:
-        case LayerType::ReLU:
-        case LayerType::LeakyReLU:
-        case LayerType::Sigmoid:
-        case LayerType::Tanh:
-        case LayerType::SiLU:
-        case LayerType::GELU:
-        case LayerType::Softplus:
-        case LayerType::Mish:
-        case LayerType::HardSigmoid:
-        case LayerType::HardSwish:
-            return true;
-        default:
-            return false;
-    }
+#ifdef ENABLE_OPENCL
+    return !config_.disabled && PortableRuntime("OPENCL").supportsForwardLayerType(type);
+#else
+    (void)type; return false;
+#endif
 }
 
 RuntimeCapabilityLevel OpenCLRuntime::queryForwardCapability(const LayerType type) const {
-#ifndef ENABLE_OPENCL
-    return supportsForwardLayerType(type) ? RuntimeCapabilityLevel::HostFallback
-                                          : RuntimeCapabilityLevel::Unsupported;
+#ifdef ENABLE_OPENCL
+    if(config_.disabled)return RuntimeCapabilityLevel::Unsupported;
+    PortableRuntime reference("OPENCL"); reference.configure(config_);
+    return reference.queryForwardCapability(type);
 #else
-    switch (type) {
-        case LayerType::Linear:
-        case LayerType::MatMul:
-        case LayerType::BatchMatMul:
-        case LayerType::Add:
-        case LayerType::Subtract:
-        case LayerType::Multiply:
-        case LayerType::Divide:
-        case LayerType::ReLU:
-        case LayerType::LeakyReLU:
-        case LayerType::Sigmoid:
-        case LayerType::Tanh:
-        case LayerType::SiLU:
-        case LayerType::GELU:
-        case LayerType::Softplus:
-        case LayerType::Mish:
-        case LayerType::HardSigmoid:
-        case LayerType::HardSwish:
-            return RuntimeCapabilityLevel::Native;
-        default:
-            return RuntimeCapabilityLevel::Unsupported;
-    }
+    return RuntimeCapabilityLevel::Unsupported;
 #endif
 }
 
 bool OpenCLRuntime::supportsBackwardLayerType(const LayerType type) const {
 #ifdef ENABLE_OPENCL
-    return !config_.disabled && NativeBackward::supports(type);
+    return !config_.disabled && PortableRuntime("OPENCL").supportsBackwardLayerType(type);
 #else
-    (void)type;
-    return false;
+    (void)type; return false;
 #endif
 }
 
 RuntimeCapabilityLevel OpenCLRuntime::queryBackwardCapability(const LayerType type) const {
-    return supportsBackwardLayerType(type) ? RuntimeCapabilityLevel::Native : RuntimeCapabilityLevel::Unsupported;
+#ifdef ENABLE_OPENCL
+    if(config_.disabled)return RuntimeCapabilityLevel::Unsupported;
+    PortableRuntime reference("OPENCL"); reference.configure(config_);
+    return reference.queryBackwardCapability(type);
+#else
+    return RuntimeCapabilityLevel::Unsupported;
+#endif
 }
 
 RuntimeCapabilityLevel OpenCLRuntime::queryBackwardOperationCapability(
     const Layer& layer, const std::vector<const std::vector<float>*>& inputs,
     const std::vector<const std::vector<float>*>& grad_outputs, bool training) const {
-    if (config_.disabled || !config_.linear_enabled || inputs.empty() || !inputs[0] ||
-        grad_outputs.size()!=1 || !grad_outputs[0]) return RuntimeCapabilityLevel::Unsupported;
-    if (!runtimeCapabilityIsNative(queryConfiguredForwardOperationCapability(layer,inputs,true)))
-        return RuntimeCapabilityLevel::Unsupported;
-    (void)training;
-    return queryBackwardCapability(layer.type_enum);
+#ifdef ENABLE_OPENCL
+    if(config_.disabled)return RuntimeCapabilityLevel::Unsupported;
+    PortableRuntime reference("OPENCL"); reference.configure(config_);
+    return reference.queryBackwardOperationCapability(layer,inputs,grad_outputs,training);
+#else
+    return RuntimeCapabilityLevel::Unsupported;
+#endif
 }
 
 RuntimeCapabilityLevel OpenCLRuntime::queryForwardOperationCapability(
@@ -157,8 +121,36 @@ RuntimeCapabilityLevel OpenCLRuntime::queryForwardOperationCapability(
     const std::vector<const std::vector<float>*>& inputs,
     bool training
 ) const {
-    (void)training;
-    return queryConfiguredForwardOperationCapability(layer, inputs, true);
+#ifdef ENABLE_OPENCL
+    if(config_.disabled)return RuntimeCapabilityLevel::Unsupported;
+    PortableRuntime reference("OPENCL"); reference.configure(config_);
+    // Parallel fast paths share geometry validation, not the serial work limit.
+    switch (layer.type_enum) {
+        case LayerType::Linear:
+        case LayerType::MatMul:
+        case LayerType::BatchMatMul:
+        case LayerType::Add:
+        case LayerType::Subtract:
+        case LayerType::Multiply:
+        case LayerType::Divide:
+        case LayerType::ReLU:
+        case LayerType::LeakyReLU:
+        case LayerType::Sigmoid:
+        case LayerType::Tanh:
+        case LayerType::SiLU:
+        case LayerType::GELU:
+        case LayerType::Softplus:
+        case LayerType::Mish:
+        case LayerType::HardSigmoid:
+        case LayerType::HardSwish:
+            return runtimeCapabilityIsNative(reference.queryForwardGeometryCapability(layer,inputs,training))
+                ? queryForwardCapability(layer.type_enum) : RuntimeCapabilityLevel::Unsupported;
+        default: break;
+    }
+    return reference.queryForwardOperationCapability(layer,inputs,training);
+#else
+    return RuntimeCapabilityLevel::Unsupported;
+#endif
 }
 
 bool OpenCLRuntime::linearForward(
@@ -193,6 +185,11 @@ bool OpenCLRuntime::forwardLayer(
     if (!isInitialized() || !impl_) return false;
     if (config_.disabled) return false;
     if (!supportsForwardLayerType(layer.type_enum)) return false;
+
+    if(layer.type_enum==LayerType::LayerNorm) {
+        if(!impl_->reference.initialize(config_))return false;
+        return impl_->reference.forwardLayer(inputs,outputs,layer,training);
+    }
 
     switch (layer.type_enum) {
         case LayerType::Linear: {
@@ -307,8 +304,10 @@ bool OpenCLRuntime::forwardLayer(
             return impl_->engine.unaryForward(
                 A.data(), outputs[0].data(), static_cast<int>(A.size()), op, alpha);
         }
+
         default:
-            return false;
+            if(!impl_->reference.initialize(config_))return false;
+            return impl_->reference.forwardLayer(inputs,outputs,layer,training);
     }
 #endif
 }
@@ -319,10 +318,31 @@ bool OpenCLRuntime::backwardLayer(
     const std::vector<const std::vector<float>*>& grad_outputs,
     std::vector<std::vector<float>>& grad_inputs, Layer& layer, bool training) {
 #ifdef ENABLE_OPENCL
-    if (!isInitialized() || !runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training))) return false;
-    return NativeBackward::execute(impl_->engine,inputs,grad_outputs,grad_inputs,layer);
+    if(!isInitialized() || !runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training)))return false;
+    if(!impl_->reference.initialize(config_))return false;
+    return impl_->reference.backwardLayer(inputs,grad_outputs,grad_inputs,layer,training);
 #else
-    (void)inputs; (void)grad_outputs; (void)grad_inputs; (void)layer; (void)training;
-    return false;
+    (void)inputs;(void)grad_outputs;(void)grad_inputs;(void)layer;(void)training;return false;
 #endif
+}
+
+bool OpenCLRuntime::forwardLayerWithContext(
+    const std::vector<const std::vector<float>*>& inputs,std::vector<std::vector<float>>& outputs,
+    const Layer& layer,bool training,const RuntimeForwardContext& context) {
+#ifdef ENABLE_OPENCL
+    if(layer.type_enum==LayerType::Dropout || layer.type_enum==LayerType::Dropout2d || layer.type_enum==LayerType::AlphaDropout) {
+        if(!isInitialized() || config_.disabled || !impl_->reference.initialize(config_))return false;
+        return impl_->reference.forwardLayerWithContext(inputs,outputs,layer,training,context);
+    }
+#endif
+    return AbstractRuntime::forwardLayerWithContext(inputs,outputs,layer,training,context);
+}
+
+bool OpenCLRuntime::optimizerStep(const RuntimeOptimizerRequest& request) {
+    return supportsOptimizer() && portableOptimizer(request,name(),config_.device_index);
+}
+
+#include "runtimes/losses/LossDispatch.hpp"
+bool OpenCLRuntime::reconstructionLoss(const RuntimeLossGrad::Request& r,RuntimeLossGrad::LossWithGrad& out) {
+    return supportsReconstructionLoss() && RuntimeLossGrad::portable(r,out,name(),config_.device_index);
 }

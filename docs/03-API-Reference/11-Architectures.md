@@ -138,14 +138,14 @@ Canonicalisation observée dans le registre C++ :
 
 ## Architectures disponibles
 
-Le registre C++ contient actuellement 25 entrées natives canoniques :
+Le registre C++ contient actuellement 26 entrées natives canoniques :
 
 | Famille | Architectures |
 | --- | --- |
 | Général | `basic_mlp` |
 | Texte | `causal_lm`, `transformer`, `vae_text`, `vae_text_decode`, `hf_clip_text_encoder_1`, `hf_clip_text_encoder_2` |
 | Vision | `vit`, `vae`, `vae_conv`, `vae_conv_decode`, `resnet`, `unet`, `mobilenet`, `vgg16`, `vgg19`, `vgg16_feat`, `hf_vae_decoder` |
-| Diffusion/latent | `diffusion`, `cond_diffusion`, `sd3_5`, `hf_sdxl_transformer_block`, `gan_latent` |
+| Diffusion/latent | `diffusion`, `cond_diffusion`, `lumen_diffusion`, `sd3_5`, `hf_sdxl_transformer_block`, `gan_latent` |
 | Discrimination/import | `patch_discriminator`, `external_safetensors_base` |
 
 Cette liste décrit les clés effectivement enregistrées. Les alias acceptés peuvent
@@ -158,8 +158,7 @@ documentaire potentiellement ancienne :
 
 Le nombre affiché au démarrage peut être supérieur : les sources `.mpk` et
 binaires `.mpk.bin` présentes dans `_archi/` sont ajoutées dynamiquement.
-Le dépôt fournit actuellement `r_cnn`, `yolo`, `ssd`, `deeplab` et
-`vae_conv_pseudocode`. Voir
+Le dépôt fournit actuellement `r_cnn`, `yolo`, `ssd` et `deeplab`. Voir
 [MPK : packages d’architecture](../02-User-Guide/15-MPK.md).
 
 Les quatre architectures de vision MPK sont des prototypes à délégation :
@@ -173,8 +172,8 @@ Les quatre architectures de vision MPK sont des prototypes à délégation :
 
 Leur présence dans `available()` ne signifie pas encore que ROI, décodage de
 boîtes ou convolution atrous spécialisée sont implémentés. NMS est disponible
-comme layer runtime CPU et figure dans les graphes documentaires R-CNN, YOLO et
-SSD.
+comme layer runtime CPU/CUDA/Vulkan/OpenCL en forward et backward stop-gradient,
+et figure dans les graphes documentaires R-CNN, YOLO et SSD.
 
 La présence dans le registre signifie que le builder existe. Elle ne signifie pas
 que l’architecture est complète pour tous les usages : `sd3_5` est explicitement

@@ -65,11 +65,15 @@ private:
     static int lua_createModelFromConfig(lua_State* L);
     static int lua_buildModel(lua_State* L);
     static int lua_trainModel(lua_State* L);
+    static int lua_visionTrainStep(lua_State* L);
     static int lua_inferModel(lua_State* L);
     static int lua_saveModel(lua_State* L);
     static int lua_loadModel(lua_State* L);
     static int lua_modelDType(lua_State* L);
     static int lua_modelGetConfig(lua_State* L);
+
+    // === Benchmark API ===
+    static int lua_benchmarkNow(lua_State* L);
     
     // === New Serialization API ===
     static int lua_saveCheckpoint(lua_State* L);    // Serialization API v2.3
@@ -106,6 +110,8 @@ private:
     static int lua_getGradients(lua_State* L);
     static int lua_setHardwareAccel(lua_State* L);
     static int lua_getHardwareCaps(lua_State* L);
+    static int lua_runtimeOps(lua_State* L);
+    static int lua_conditioningPrompt(lua_State* L);
     
     // === ModelArchitectures API ===
     static int lua_archAvailable(lua_State* L);
@@ -142,6 +148,9 @@ private:
     static int lua_vizProcessEvents(lua_State* L);
     static int lua_vizUpdate(lua_State* L);
     static int lua_vizAddImage(lua_State* L);
+    static int lua_vizSetDetections(lua_State* L);
+    static int lua_vizShowDetections(lua_State* L);
+    static int lua_vizSetDetectionThreshold(lua_State* L);
     static int lua_vizUpdateMetrics(lua_State* L);
     static int lua_vizSetValidation(lua_State* L);
     static int lua_vizValidationEnabled(lua_State* L);

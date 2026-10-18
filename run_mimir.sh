@@ -1,5 +1,22 @@
 #!/bin/bash
 
+# GPU runtime switches (1=enabled, 0=disabled), applied when compiled and available.
+# Notebook/runtime MIMIR_DISABLE_* overrides remain authoritative for CPU/TPU runs.
+MIMIR_GPU_CUDA="${MIMIR_GPU_CUDA:-1}"
+MIMIR_GPU_VULKAN="${MIMIR_GPU_VULKAN:-1}"
+MIMIR_GPU_OPENCL="${MIMIR_GPU_OPENCL:-1}"
+for runtime in CUDA VULKAN OPENCL; do
+    enable_key="MIMIR_GPU_${runtime}"
+    disable_key="MIMIR_DISABLE_${runtime}"
+    case "${!enable_key}" in
+        0|1) ;;
+        *) echo "$enable_key must be 0 or 1" >&2; exit 2 ;;
+    esac
+    if [ -z "${!disable_key}" ]; then
+        export "$disable_key=$((1-${!enable_key}))"
+    fi
+done
+
 export MIMIR_ALLOCATOR_LOG=0
 export MIMIR_ALLOCATOR_LOG_VERBOSE=0
 
@@ -78,4 +95,7 @@ else
 fi
 
 # Lancer mimir
-exec ./bin/mimir "$@"
+# Benchmarks may select another native Mímir entry point while retaining this
+# exact runtime setup. Normal invocations keep the production executable.
+MIMIR_SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+exec "${MIMIR_EXECUTABLE:-$MIMIR_SCRIPT_DIR/bin/mimir}" "$@"

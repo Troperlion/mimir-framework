@@ -25,7 +25,7 @@ std::optional<Model::TrainStepResult> VAETextModel::trainStep(const TrainStepReq
         input = it->second;
     }
 
-    return vae_training_.trainText(*this, *input, *text_it->second, request.target,
+    return vae_training_.trainText(*this, *input, *text_it->second, request.target, request.loss_weights,
                                    *request.optimizer, request.learning_rate,
                                    request.mode, request.grad_scale);
 }

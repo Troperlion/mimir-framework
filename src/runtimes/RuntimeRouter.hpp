@@ -12,8 +12,14 @@ struct Layer;
 class RuntimeRouter {
 public:
     static RuntimeRouter& instance();
+    const std::unordered_map<std::string,size_t>& optimizerDispatchCounts() const;
+    bool dispatchOptimizer(const RuntimeOptimizerRequest&, AbstractRuntime** selected_runtime=nullptr) const;
 
-    // Priority is fixed internally as [ROCM, CUDA, VULKAN, OPENCL, CPU].
+    bool dispatchReconstructionLoss(const RuntimeLossGrad::Request&, RuntimeLossGrad::LossWithGrad&,
+                                    AbstractRuntime** selected_runtime=nullptr) const;
+    const std::unordered_map<std::string,size_t>& reconstructionLossDispatchCounts() const;
+
+    // Priority is [ROCM, CUDA, VULKAN, OPENCL, optional TPU, CPU].
     void setRuntimes(
         AbstractRuntime* rocm,
         AbstractRuntime* cuda,
@@ -26,7 +32,7 @@ public:
         AbstractRuntime* cuda,
         AbstractRuntime* vulkan,
         AbstractRuntime* opencl,
-        AbstractRuntime* fpga,
+        AbstractRuntime* tpu,
         AbstractRuntime* cpu
     );
 

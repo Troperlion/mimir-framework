@@ -1,3 +1,4 @@
+#include "runtimes/fpga/FpgaIo.hpp"
 #include "Serialization.hpp"
 #include "SafeTensorsWriter.hpp"
 #include "SafeTensorsReader.hpp"
@@ -30,6 +31,8 @@ bool save_checkpoint(
     std::string* error
 ) {
     try {
+        FpgaCheckpointTransaction fpga_transaction(true);
+        const bool completed = [&]() {
         switch (options.format) {
             case CheckpointFormat::SafeTensors: {
                 SafeTensorsWriter writer;
@@ -65,6 +68,12 @@ bool save_checkpoint(
                 }
                 return false;
         }
+        }();
+        if(completed) {
+            fpga_transaction.verifyFiles(path);
+            fpga_transaction.finish();
+        }
+        return completed;
     } catch (const std::exception& e) {
         if (error) {
             *error = std::string("Exception during save: ") + e.what();
@@ -80,6 +89,9 @@ bool load_checkpoint(
     std::string* error
 ) {
     try {
+        FpgaCheckpointTransaction fpga_transaction(false);
+        fpga_transaction.verifyFiles(path);
+        const bool completed = [&]() {
         switch (options.format) {
             case CheckpointFormat::SafeTensors: {
                 SafeTensorsReader reader;
@@ -104,6 +116,11 @@ bool load_checkpoint(
                 }
                 return false;
         }
+        }();
+        if(completed) {
+            fpga_transaction.finish();
+        }
+        return completed;
     } catch (const std::exception& e) {
         if (error) {
             *error = std::string("Exception during load: ") + e.what();

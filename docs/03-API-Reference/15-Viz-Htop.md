@@ -11,6 +11,19 @@ Le monitoring Mímir repose sur 2 interfaces complémentaires :
 
 En pratique, les deux passent par `AsyncMonitor`, qui met à jour l'UI sans bloquer l'entraînement.
 
+Les options CLI communes sont indépendantes :
+
+```bash
+./bin/mimir --lua script.lua -- --viz          # Viz uniquement
+./bin/mimir --lua script.lua -- --htop         # Htop uniquement
+./bin/mimir --lua script.lua -- --viz --htop   # Viz et Htop
+```
+
+Avec le flag `--htop`, l'interface terminal est préparée immédiatement mais
+n'entre en écran alternatif qu'à la première métrique du run. Les messages de
+configuration, le chargement du modèle et les instructions de lancement restent
+ainsi visibles jusqu'à la fin de l'initialisation. Viz démarre immédiatement.
+
 **Public concerné :** Développeur et utilisateur intermédiaire/avancé.
 
 > **Prérequis**
@@ -30,8 +43,11 @@ En pratique, les deux passent par `AsyncMonitor`, qui met à jour l'UI sans bloq
 `enable(false)` arrête le monitor. `enable(true)` ne redémarre pas un monitor
 arrêté : il faut rappeler `create()`.
 
-L'export CSV est unique. Viz le porte lorsqu'elle est active ; htop sert de
-repli lorsqu'il tourne seul. Les options `csv`, `csv_enabled`, `csv_path` et
+L'export CSV est unique et appartient au thread d’écriture d’`AsyncMonitor`,
+indépendamment de htop et de la Viz. Fermer la fenêtre Viz laisse l’entraînement
+et l’écriture CSV actifs ; htop peut la rouvrir. Le CSV existant est relu au
+démarrage pour restaurer le graphe, puis les nouvelles métriques sont ajoutées
+sans effacer l’historique. Les options `csv`, `csv_enabled`, `csv_path` et
 `csv_file` de `Htop.create()` configurent cet export commun.
 
 ### Usage recommandé
@@ -69,6 +85,8 @@ Le choix de l’hôte graphique conserve cette API. Voir [Configurer le backend 
 - `process_events()`
 - `update()`
 - `add_image(...)`
+- `set_detections(detections, target)`
+- `show_detections(bool)`
 - `update_metrics(...)`
 - `add_loss_point(...)`
 - `clear()`
@@ -98,9 +116,39 @@ mais `set_enabled(true)` ne le redémarre pas : utiliser `create()`.
 - `M` : bascule mode de rendu Blocks/Layers (`HEATMAP` / `REEL`).
 - `K` : change la palette heatmap (`CLASSIC` -> `TURBO` -> `INFERNO` -> `VIRIDIS`).
 - `A` : active/désactive le lissage des previews de blocks.
+- `B` : affiche/masque les encadrés de détection (`BOX ON/OFF`).
 - `R` : resynchronise/rebuild textures + reload hints architecture.
 - `Tab`, `F1..F5`, `←/→` : navigation focus/éléments.
 - `Z`/`Entrée` : zoom, `Esc` : quitter zoom.
+- Survol d’un tip zoomé : bulle des valeurs brutes et des indices du tenseur,
+  jusqu’à 16 canaux échantillonnés. Les coordonnées suivent le redimensionnement
+  de la vignette ; la valeur affichée précède la colorisation. Si le tip ne
+  fournit pas de valeurs brutes, la bulle indique explicitement les pixels uint8.
+- Bouton `PAUSE training` / `PLAY / Reprendre` dans Metrics : suspend/reprend
+  le calcul entre étapes, tout en laissant les interfaces actives. Fermer la
+  Viz pendant la pause libère l’entraînement ; `STOP` reste disponible.
+
+Pour Lumen, les tokens et l’encodage affichés viennent de `text_ids` et de
+`lumen/text/context` du dernier forward. Les vignettes de projection et de
+compréhension suivent les couches texte capturées avec ce contexte.
+
+### Encadrés de détection
+
+`Mimir.Viz.set_detections()` reçoit des boîtes normalisées dans `[0,1]`, avec
+un label, un score et un identifiant de classe optionnels. La cible vaut
+`dataset` par défaut, ou `output`/`both`. Un tableau vide efface l'overlay.
+
+```lua
+Mimir.Viz.set_detections({
+  {x1=0.12, y1=0.18, x2=0.64, y2=0.81, label="person", score=0.94, class_id=0}
+}, "dataset")
+```
+
+Le badge `BOX ON/OFF` du panneau Context, le raccourci `B` et
+`Mimir.Viz.show_detections(bool)` permettent de masquer ou réafficher les
+encadrés sans perdre les prédictions publiées. Les architectures YOLO, SSD et
+R-CNN décrivent encore un décodage externe : leur décodeur doit transmettre les
+boîtes finales après NMS avec cette API.
 
 Dans la section de configuration, les flèches ou la molette sélectionnent une
 ligne. `Entrée` ou un clic commence l'édition, puis `Entrée` valide la valeur ;
@@ -137,6 +185,17 @@ Comportement de rendu important :
 
 - Les sorties de packing (`out_concat`, `out_pack`, etc.) sont exclues des previews image.
 - Dans la section `Outputs`, `recon` est priorisé juste avant `diff/resdiff` pour comparaison directe.
+
+### Annotations sur les sorties et correspondances de features
+
+Quand l’image consommée possède les annotations JSON de l’éditeur, l’input et les taps spatiaux de sortie montrent les bbox, les relations entre leurs centres, les points et segments du squelette et ses attaches aux entités. Une même couleur identifie une entité d’un tap à l’autre ; les relations sont jaunes et les attaches aux entités roses. Les identifiants, noms et prédicats figurent dans les informations du tap. Les zones renforcées par la pondération spatiale reçoivent une teinte orange. Les vecteurs de packing et les matrices textuelles restent exclus.
+
+Après `resdiff_abs`, dans la même section, deux taps sont ajoutés :
+
+- `annotation_features` : chaque région bbox fournit un prototype moyen des features spatiales capturées. La couleur indique le prototype le plus similaire au vecteur local, et sa luminosité la similarité cosinus. Les informations indiquent la couche source, le nombre de canaux échantillonnés, les similarités entre régions liées et entre points de squelette et entités. Les valeurs inspectables sont ces similarités ; les valeurs brutes des taps source restent intactes.
+- `annotation_impact` : poids régionaux de la loss rasterisés sur la grille du tap. `1` est neutre, orange signifie un renforcement, bleu une réduction. La géométrie utilise les mêmes coordonnées normalisées que l’input et les sorties. Le poids courant et les poids de rôles sont capturés avec l’annotation.
+
+Ces vues montrent des correspondances de features et la pondération spatiale ; elles ne mesurent pas l’effet causal d’une annotation sur la prédiction. Sans features brutes alignées, `annotation_features` affiche uniquement la géométrie et indique explicitement que les features sont indisponibles. Les annotations de l’image et les taps sont publiés ensemble comme un snapshot ; aucun calcul de pooling ou de rasterisation ne conserve le verrou de publication. Les limites manuelles du nombre de taps continuent à s’appliquer.
 
 ### Progression Training
 
@@ -265,6 +324,12 @@ redimensionnement bicubique ; le PPM utilise le voisin le plus proche si nécess
 `vae_conv_decode`, puis permet de décaler un canal latent, mélanger le résultat
 avec la source, réinitialiser et enregistrer en PPM. La source et le dernier
 résultat sont présentés côte à côte ; `Z` agrandit l'image sélectionnée.
+`L` bascule vers une galerie scrollable de tous les canaux du latent courant,
+normalisés indépendamment pour rendre leur structure spatiale inspectable.
+`Ctrl+U` permet de choisir une autre image puis recalcule son latent sans fermer
+l'éditeur. Le script utilise un sélecteur système (`zenity`, `kdialog` ou `yad`)
+s'il est disponible ; sinon, le chemin peut être saisi directement dans la Viz
+et validé avec `Entrée`.
 
 Ces modifications latentes ne sont pas des commandes sémantiques et leur effet
 dépend de l'entraînement. Le décodeur autonome utilise des skips encodeur nuls

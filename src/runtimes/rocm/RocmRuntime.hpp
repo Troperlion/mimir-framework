@@ -4,6 +4,10 @@
 
 class RocmRuntime final : public AbstractRuntime {
 public:
+    bool supportsReconstructionLoss() const override { return isInitialized() && !config_.disabled; }
+    bool reconstructionLoss(const RuntimeLossGrad::Request&, RuntimeLossGrad::LossWithGrad&) override;
+    bool supportsOptimizer() const override;
+    bool optimizerStep(const RuntimeOptimizerRequest&) override;
     ~RocmRuntime() override { shutdown(); }
     const char* name() const override { return "ROCM"; }
 

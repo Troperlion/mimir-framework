@@ -13,6 +13,7 @@
 
 #include "../../Layers.hpp"
 #include "LayerOps.hpp"
+#include "../ops_sequence_constant.hpp"
 #include "LayerOpsExt.hpp"
 #include "ConvolutionKernels.hpp"
 
@@ -23,7 +24,7 @@ inline bool cpu_supports_forward_layer_type(LayerType type) {
 }
 
 inline bool cpu_supports_backward_layer_type(LayerType type) {
-    return type != LayerType::UNKNOWN && type != LayerType::NMS;
+    return type != LayerType::UNKNOWN;
 }
 
 inline bool cpu_forward_layer(
@@ -878,12 +879,8 @@ inline bool cpu_forward_layer(
             // ATTENTION
             // ====================================================================
             case LayerType::Constant: {
-                const float* weights = layer.getWeights();
-                if (!weights) return false;
-                const size_t n = layer.getWeightsSize();
                 outputs.resize(1);
-                outputs[0].assign(weights, weights + n);
-                return true;
+                return SequenceConstant::forward(layer,outputs[0]);
             }
 
             case LayerType::SelfAttention:
@@ -1316,6 +1313,20 @@ inline bool cpu_backward_layer(
         };
 
         switch (layer.type_enum) {
+            case LayerType::NMS: {
+                // Hard NMS returns discrete indices. Backward explicitly stops
+                // gradients; no differentiable selection surrogate is used.
+                if (inputs.size() < 2 || inputs.size() > 3 || grad_outputs.size() != 1) return false;
+                std::vector<std::vector<float>> selected;
+                if (!cpu_forward_layer(inputs, selected, layer, false) ||
+                    grad_outputs[0]->size() != selected[0].size()) return false;
+                grad_inputs.resize(inputs.size());
+                for (size_t i = 0; i < inputs.size(); ++i) {
+                    if (inputs[i]) grad_inputs[i].assign(inputs[i]->size(), 0.0f);
+                }
+                return true;
+            }
+
             case LayerType::Identity: {
                 return passthrough_grad(*inputs[0], *grad_outputs[0], grad_inputs);
             }
@@ -3491,16 +3502,7 @@ inline bool cpu_backward_layer(
             }
 
             case LayerType::Constant: {
-                if (layer.trainable_parameter) {
-                    const std::vector<float>& go = *grad_outputs[0];
-                    if (go.size() != layer.getWeightsSize()) return false;
-                    if (layer.grad_weights.size() != layer.getWeightsSize()) {
-                        layer.grad_weights.assign(layer.getWeightsSize(), 0.0f);
-                    }
-                    for (size_t i = 0; i < go.size(); ++i) {
-                        layer.grad_weights[i] += go[i];
-                    }
-                }
+                if(!SequenceConstant::backward(layer,*grad_outputs[0]))return false;
                 grad_inputs.clear();
                 return true;
             }

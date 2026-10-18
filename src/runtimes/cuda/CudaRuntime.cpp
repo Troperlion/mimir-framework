@@ -1,11 +1,21 @@
+#include "runtimes/optimizers/OptimizerDispatch.hpp"
+#include "../ops_sequence_constant.hpp"
 #include "runtimes/cuda/CudaRuntime.hpp"
 
 #include "runtimes/LayerOps.hpp"
+#include "runtimes/cuda/CudaOperationGeometry.hpp"
 #include "runtimes/cpu/RuntimeLayerDispatch.hpp"
 
 #ifdef ENABLE_CUDA
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
+#include "runtimes/cuda/CudaNativeOps.cuh"
+#include "runtimes/optimizers/OptimizerCudaKernel.cuh"
+#include "runtimes/losses/LossCudaKernel.cuh"
+#include "runtimes/cuda/CudaTrainingOps.cuh"
+#include "runtimes/cuda/CudaAttentionOps.cuh"
+#include "runtimes/cuda/CudaRecurrentOps.cuh"
+#include "runtimes/cuda/CudaDetectionOps.cuh"
 #endif
 
 #include <algorithm>
@@ -14,53 +24,6 @@
 #include <cstring>
 #include <new>
 #include <vector>
-
-#ifdef ENABLE_CUDA
-// ─────────────────────────────────────────────────────────────────────────────
-// Im2col: transforms input [C, H, W] → col [C*k*k, H_out*W_out] (row-major)
-// ─────────────────────────────────────────────────────────────────────────────
-static void im2col_cpu(
-    const float* __restrict__ src, float* __restrict__ col,
-    int C, int H, int W,
-    int k, int stride, int pad, int dil,
-    int H_out, int W_out)
-{
-    const int HW = H_out * W_out;
-    for (int c = 0; c < C; ++c) {
-        const float* src_c = src + c * H * W;
-        for (int kh = 0; kh < k; ++kh) {
-            for (int kw = 0; kw < k; ++kw) {
-                float* col_row = col + (c * k * k + kh * k + kw) * HW;
-                for (int oh = 0; oh < H_out; ++oh) {
-                    const int ih = oh * stride + kh * dil - pad;
-                    const bool ih_ok = (ih >= 0 && ih < H);
-                    for (int ow = 0; ow < W_out; ++ow) {
-                        const int iw = ow * stride + kw * dil - pad;
-                        col_row[oh * W_out + ow] =
-                            (ih_ok && iw >= 0 && iw < W) ? src_c[ih * W + iw] : 0.0f;
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Row-wise in-place softmax over A[rows, cols]
-// ─────────────────────────────────────────────────────────────────────────────
-static void softmax_rows(float* A, int rows, int cols)
-{
-    for (int i = 0; i < rows; ++i) {
-        float* row = A + i * cols;
-        float mx = row[0];
-        for (int j = 1; j < cols; ++j) if (row[j] > mx) mx = row[j];
-        float s = 0.0f;
-        for (int j = 0; j < cols; ++j) { row[j] = std::exp(row[j] - mx); s += row[j]; }
-        const float inv = 1.0f / (s > 0.0f ? s : 1.0f);
-        for (int j = 0; j < cols; ++j) row[j] *= inv;
-    }
-}
-#endif // ENABLE_CUDA
 
 struct CudaRuntime::Impl {
 #ifdef ENABLE_CUDA
@@ -593,6 +556,7 @@ bool CudaRuntime::supportsForwardLayerType(const LayerType type) const {
 
     switch (type) {
         case LayerType::UNKNOWN:
+        case LayerType::Lambda:
             return false;
         default:
             return RuntimeLayerDispatch::cpu_supports_forward_layer_type(type);
@@ -607,8 +571,10 @@ bool CudaRuntime::supportsBackwardLayerType(const LayerType type) const {
             break;
     }
 
+    if(type==LayerType::NMS)return true;
     switch (type) {
         case LayerType::UNKNOWN:
+        case LayerType::Lambda:
             return false;
         default:
             return RuntimeLayerDispatch::cpu_supports_backward_layer_type(type);
@@ -620,6 +586,8 @@ RuntimeCapabilityLevel CudaRuntime::queryForwardCapability(const LayerType type)
 #ifndef ENABLE_CUDA
     return RuntimeCapabilityLevel::HostFallback;
 #else
+    if(type==LayerType::NMS)return RuntimeCapabilityLevel::Native;
+    if(CudaOperationGeometry::poolType(type) || CudaOperationGeometry::movementType(type) || CudaOperationGeometry::projectionType(type) || CudaOperationGeometry::extendedConvType(type) || CudaOperationGeometry::stochasticType(type) || CudaOperationGeometry::batchNormType(type) || CudaOperationGeometry::attentionType(type) || CudaOperationGeometry::recurrentType(type))return RuntimeCapabilityLevel::Native;
     switch (type) {
         case LayerType::Linear:
         case LayerType::MatMul:
@@ -630,6 +598,29 @@ RuntimeCapabilityLevel CudaRuntime::queryForwardCapability(const LayerType type)
         case LayerType::SelfAttention:
         case LayerType::MultiHeadAttention:
             return RuntimeCapabilityLevel::NativeOptimized;
+        case LayerType::InstanceNorm2d:
+        case LayerType::GEGLU:
+        case LayerType::GroupNorm:
+        case LayerType::UpsampleNearest:
+        case LayerType::UpsampleBicubic:
+        case LayerType::UpsampleBilinear:
+        case LayerType::Softmax:
+        case LayerType::LogSoftmax:
+        case LayerType::Add:
+        case LayerType::Subtract:
+        case LayerType::Multiply:
+        case LayerType::Divide:
+        case LayerType::ReLU:
+        case LayerType::LeakyReLU:
+        case LayerType::Sigmoid:
+        case LayerType::Tanh:
+        case LayerType::SiLU:
+        case LayerType::GELU:
+        case LayerType::Softplus:
+        case LayerType::Mish:
+        case LayerType::HardSigmoid:
+        case LayerType::HardSwish:
+            return RuntimeCapabilityLevel::Native;
         default:
             return RuntimeCapabilityLevel::HostFallback;
     }
@@ -638,10 +629,23 @@ RuntimeCapabilityLevel CudaRuntime::queryForwardCapability(const LayerType type)
 
 RuntimeCapabilityLevel CudaRuntime::queryBackwardCapability(const LayerType type) const {
     if (!supportsBackwardLayerType(type)) return RuntimeCapabilityLevel::Unsupported;
+    if(type==LayerType::NMS)return RuntimeCapabilityLevel::Native;
 #ifndef ENABLE_CUDA
     return RuntimeCapabilityLevel::HostFallback;
 #else
+    if(CudaOperationGeometry::poolType(type) || CudaOperationGeometry::movementType(type) || CudaOperationGeometry::projectionType(type) || CudaOperationGeometry::extendedConvType(type) || CudaOperationGeometry::stochasticType(type) || CudaOperationGeometry::batchNormType(type) || CudaOperationGeometry::attentionType(type) || CudaOperationGeometry::recurrentType(type))return RuntimeCapabilityLevel::Native;
     switch (type) {
+        case LayerType::LayerNorm:
+        case LayerType::RMSNorm:
+        case LayerType::Conv2d:
+        case LayerType::InstanceNorm2d:
+        case LayerType::GEGLU:
+        case LayerType::GroupNorm:
+        case LayerType::UpsampleNearest:
+        case LayerType::UpsampleBicubic:
+        case LayerType::UpsampleBilinear:
+        case LayerType::Softmax:
+        case LayerType::LogSoftmax:
         case LayerType::Linear:
         case LayerType::MatMul:
         case LayerType::BatchMatMul:
@@ -671,10 +675,177 @@ RuntimeCapabilityLevel CudaRuntime::queryForwardOperationCapability(
     const std::vector<const std::vector<float>*>& inputs,
     bool training
 ) const {
+    if(layer.type_enum==LayerType::Constant && SequenceConstant::enabled(layer))return RuntimeCapabilityLevel::HostFallback;
+    if(layer.type_enum==LayerType::NMS){
+        if(config_.disabled || inputs.size()<2 || !inputs[0] || !inputs[1] || inputs[0]->size()%4 || inputs[0]->size()>INT_MAX || inputs[1]->size()>(1U<<24) || inputs[1]->size()!=inputs[0]->size()/4 ||
+            (inputs.size()>2 && inputs[2] && inputs[2]->size()!=inputs[1]->size()) || !std::isfinite(layer.nms_iou_threshold) || layer.nms_iou_threshold<0 || layer.nms_iou_threshold>1 ||
+            !std::isfinite(layer.nms_score_threshold) || layer.nms_max_detections<0)return RuntimeCapabilityLevel::Unsupported;
+        return queryForwardCapability(layer.type_enum);
+    }
     (void)training;
-    return queryConfiguredForwardOperationCapability(layer, inputs, true);
+    if (config_.disabled || inputs.empty() || !inputs[0] || inputs[0]->empty() || inputs[0]->size()>INT_MAX)
+        return RuntimeCapabilityLevel::Unsupported;
+    if(CudaOperationGeometry::recurrentType(layer.type_enum)){
+        CudaOperationGeometry::Recurrent g;return g.valid(layer,inputs[0]->size())?queryForwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
+    }
+    if(CudaOperationGeometry::attentionType(layer.type_enum)){
+        CudaOperationGeometry::Attention g;return config_.attention_enabled && g.valid(layer,inputs) && 2LL*g.q*g.k*g.ed>=std::max(0,config_.attention_min_ops)?queryForwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
+    }
+    if(CudaOperationGeometry::extendedConvType(layer.type_enum)){
+        CudaOperationGeometry::ExtendedConv g;
+        return config_.conv_enabled && g.valid(layer,inputs[0]->size()) && static_cast<long long>(g.outputSize())*g.kh*g.kw*(g.mode==2?1:g.ic)>=std::max(0,config_.conv_min_ops)?queryForwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
+    }
+    if(CudaOperationGeometry::batchNormType(layer.type_enum)){
+        CudaOperationGeometry::BatchNorm g;return config_.norm_enabled && inputs[0]->size()>=static_cast<size_t>(std::max(0,config_.norm_min_elements)) && g.valid(layer,inputs[0]->size())?queryForwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
+    }
+    if(CudaOperationGeometry::stochasticType(layer.type_enum)){
+        if(layer.type_enum==LayerType::Reparameterize && (inputs.size()<2 || !inputs[1] || inputs[1]->size()!=inputs[0]->size()))return RuntimeCapabilityLevel::Unsupported;
+        if(layer.type_enum!=LayerType::Reparameterize && !std::isfinite(layer.dropout_p))return RuntimeCapabilityLevel::Unsupported;
+        return queryForwardCapability(layer.type_enum);
+    }
+    if(layer.type_enum==LayerType::GEGLU){return layer.seq_len>0 && layer.out_features>0 && inputs[0]->size()==2ULL*layer.seq_len*layer.out_features?queryForwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;}
+    if(CudaOperationGeometry::projectionType(layer.type_enum)){
+        CudaOperationGeometry::Projection g;return g.valid(layer,inputs)?queryForwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
+    }
+    if(layer.type_enum==LayerType::LayerNorm || layer.type_enum==LayerType::RMSNorm){
+        const size_t n=inputs[0]->size(),width=layer.in_features>0?static_cast<size_t>(layer.in_features):n;
+        if(!config_.norm_enabled || n<static_cast<size_t>(std::max(0,config_.norm_min_elements)) || !width || n%width ||
+            (layer.affine && (!layer.getWeights() || layer.getWeightsSize()<width*(layer.type_enum==LayerType::LayerNorm && layer.use_bias?2ULL:1ULL))) || !(layer.eps>0.f) || (layer.type_enum==LayerType::RMSNorm && layer.in_features<=0 && (layer.embed_dim>0 || !layer.shape.empty() || !layer.target_shape.empty())))return RuntimeCapabilityLevel::Unsupported;
+        return queryForwardCapability(layer.type_enum);
+    }
+    if(CudaOperationGeometry::poolType(layer.type_enum)) {
+        CudaOperationGeometry::Pool g;return g.valid(layer,inputs[0]->size())?queryForwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
+    }
+    if(CudaOperationGeometry::movementType(layer.type_enum)) {
+        CudaOperationGeometry::Movement g;return g.valid(layer,inputs)?queryForwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
+    }
+    const size_t count=inputs[0]->size();
+    bool valid=true;
+    switch (layer.type_enum) {
+        case LayerType::InstanceNorm2d:
+        case LayerType::GroupNorm: {
+            CudaOperationGeometry::Norm shape;
+            valid=config_.norm_enabled && count>=static_cast<size_t>(std::max(0,config_.norm_min_elements)) && shape.valid(layer,count);
+            break;
+        }
+        case LayerType::UpsampleNearest:
+        case LayerType::UpsampleBicubic:
+        case LayerType::UpsampleBilinear: {
+            CudaOperationGeometry::Resize shape; valid=shape.valid(layer,count); break;
+        }
+        case LayerType::Softmax:
+        case LayerType::LogSoftmax:
+            valid=config_.linear_enabled && count>=static_cast<size_t>(std::max(0,config_.linear_min_ops)); break;
+        case LayerType::Conv2d: {
+            CudaOperationGeometry::Conv shape; valid=shape.valid(layer,count); break;
+        }
+        default: break;
+    }
+    return valid ? queryConfiguredForwardOperationCapability(layer, inputs, true) : RuntimeCapabilityLevel::Unsupported;
 }
 
+
+namespace {
+#ifdef ENABLE_CUDA
+bool cuda_axis_geometry(const std::vector<float>& x, const Layer& layer, int& size, int& inner) {
+    if (x.empty() || x.size()>INT_MAX) return false;
+    const auto shape=LayerOps::infer_shape_for_axis_op(x,layer);
+    if (shape.empty()) return false;
+    int axis=layer.axis;
+    if (axis<0) axis+=static_cast<int>(shape.size());
+    if (axis<0 || axis>=static_cast<int>(shape.size())) axis=static_cast<int>(shape.size())-1;
+    size=shape[axis]; long long stride=1;
+    for (size_t i=axis+1;i<shape.size();++i) { if (shape[i]<=0 || stride>INT_MAX/shape[i]) return false; stride*=shape[i]; }
+    inner=stride;
+    return size>0 && static_cast<long long>(size)*inner<=INT_MAX && x.size()%(static_cast<size_t>(size)*inner)==0;
+}
+void cuda_accumulate_parameters(Layer& layer, const std::vector<float>& weights, const std::vector<float>& bias) {
+    if (layer.grad_weights.size()!=layer.getWeightsSize()) layer.grad_weights.assign(layer.getWeightsSize(),0.f);
+    for (size_t i=0;i<weights.size();++i) layer.grad_weights[i]+=weights[i];
+    if (!bias.empty()) {
+        if (layer.grad_bias.size()!=bias.size()) layer.grad_bias.assign(bias.size(),0.f);
+        const size_t offset=layer.getWeightsSize()-bias.size();
+        for (size_t i=0;i<bias.size();++i) { layer.grad_bias[i]+=bias[i]; layer.grad_weights[offset+i]+=bias[i]; }
+    }
+}
+#endif
+}
+
+RuntimeCapabilityLevel CudaRuntime::queryBackwardOperationCapability(
+    const Layer& layer, const std::vector<const std::vector<float>*>& inputs,
+    const std::vector<const std::vector<float>*>& grad_outputs, bool training) const {
+    if(layer.type_enum==LayerType::Constant && SequenceConstant::enabled(layer))return RuntimeCapabilityLevel::HostFallback;
+    if(layer.type_enum==LayerType::NMS){
+        return inputs.size()>=2 && inputs.size()<=3 && grad_outputs.size()==1 && grad_outputs[0] &&
+            runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training)) && grad_outputs[0]->size()<=inputs[1]->size()
+            ?RuntimeCapabilityLevel::Native:RuntimeCapabilityLevel::Unsupported;
+    }
+
+    if (inputs.empty() || !inputs[0] || grad_outputs.empty() || !grad_outputs[0]) return RuntimeCapabilityLevel::Unsupported;
+    if(CudaOperationGeometry::recurrentType(layer.type_enum)){
+        CudaOperationGeometry::Recurrent g;return !config_.disabled && grad_outputs.size()==1 && g.valid(layer,inputs[0]->size()) && grad_outputs[0]->size()==g.outputSize()?queryBackwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
+    }
+    if(CudaOperationGeometry::attentionType(layer.type_enum)){
+        CudaOperationGeometry::Attention g;return grad_outputs.size()==1 && g.valid(layer,inputs,true) && grad_outputs[0]->size()==g.output && runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training))?queryBackwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
+    }
+    if(CudaOperationGeometry::extendedConvType(layer.type_enum)){
+        CudaOperationGeometry::ExtendedConv g;return grad_outputs.size()==1 && g.valid(layer,inputs[0]->size()) && grad_outputs[0]->size()==g.outputSize() && runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training))?queryBackwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
+    }
+    if(CudaOperationGeometry::batchNormType(layer.type_enum) || CudaOperationGeometry::stochasticType(layer.type_enum)){
+        if(grad_outputs.size()!=1 || grad_outputs[0]->size()!=inputs[0]->size() || !runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training)))return RuntimeCapabilityLevel::Unsupported;
+        return queryBackwardCapability(layer.type_enum);
+    }
+    if(layer.type_enum==LayerType::GEGLU){return grad_outputs.size()==1 && grad_outputs[0]->size()*2==inputs[0]->size() && runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training))?queryBackwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;}
+    if(CudaOperationGeometry::projectionType(layer.type_enum)){
+        CudaOperationGeometry::Projection g;return !config_.disabled && g.valid(layer,inputs) && grad_outputs.size()==1 && grad_outputs[0]->size()==g.output?queryBackwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
+    }
+    if(CudaOperationGeometry::poolType(layer.type_enum)) {
+        if(layer.type_enum==LayerType::MaxPool2d && (layer.get_kernel_w()!=layer.get_kernel_h() || layer.get_stride_w()!=layer.get_stride_h() || layer.get_pad_w()!=layer.get_pad_h()))return RuntimeCapabilityLevel::Unsupported;
+        CudaOperationGeometry::Pool g;return !config_.disabled && g.valid(layer,inputs[0]->size()) && grad_outputs.size()==1 && grad_outputs[0]->size()==g.outputSize()?queryBackwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
+    }
+    if(CudaOperationGeometry::movementType(layer.type_enum)) {
+        CudaOperationGeometry::Movement g;if(config_.disabled || !g.valid(layer,inputs) || grad_outputs.size()!=g.sizes.size())return RuntimeCapabilityLevel::Unsupported;
+        for(size_t i=0;i<g.sizes.size();++i)if(!grad_outputs[i] || grad_outputs[i]->size()!=g.sizes[i])return RuntimeCapabilityLevel::Unsupported;
+        return queryBackwardCapability(layer.type_enum);
+    }
+    if(layer.type_enum==LayerType::LayerNorm || layer.type_enum==LayerType::RMSNorm){
+        return grad_outputs.size()==1 && grad_outputs[0]->size()==inputs[0]->size() && runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training))?queryBackwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
+    }
+    switch (layer.type_enum) {
+        case LayerType::Linear: {
+            if (config_.disabled || !config_.linear_enabled || inputs.size()!=1 || grad_outputs.size()!=1 ||
+                layer.in_features<=0 || layer.out_features<=0 || inputs[0]->size()>INT_MAX)
+                return RuntimeCapabilityLevel::Unsupported;
+            const size_t in=static_cast<size_t>(layer.in_features),out=static_cast<size_t>(layer.out_features);
+            const size_t batch=layer.seq_len>0?static_cast<size_t>(layer.seq_len):inputs[0]->size()/in;
+            if (!batch || inputs[0]->size()!=batch*in || grad_outputs[0]->size()!=batch*out ||
+                !layer.getWeights() || layer.getWeightsSize()<in*out+(layer.use_bias?out:0))
+                return RuntimeCapabilityLevel::Unsupported;
+            return AbstractRuntime::queryBackwardOperationCapability(layer,inputs,grad_outputs,training);
+        }
+        case LayerType::InstanceNorm2d:
+        case LayerType::GroupNorm:
+        case LayerType::Softmax:
+        case LayerType::LogSoftmax:
+            if (grad_outputs[0]->size()!=inputs[0]->size()) return RuntimeCapabilityLevel::Unsupported;
+            break;
+        case LayerType::UpsampleNearest:
+        case LayerType::UpsampleBicubic:
+        case LayerType::UpsampleBilinear: {
+            CudaOperationGeometry::Resize shape;
+            if (!shape.valid(layer,inputs[0]->size()) || grad_outputs[0]->size()!=shape.outputSize()) return RuntimeCapabilityLevel::Unsupported;
+            break;
+        }
+        case LayerType::Conv2d: {
+            CudaOperationGeometry::Conv shape;
+            if (!shape.valid(layer,inputs[0]->size()) || grad_outputs[0]->size()!=shape.outputSize()) return RuntimeCapabilityLevel::Unsupported;
+            break;
+        }
+        default: return AbstractRuntime::queryBackwardOperationCapability(layer,inputs,grad_outputs,training);
+    }
+    return runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training))
+        ? queryBackwardCapability(layer.type_enum) : RuntimeCapabilityLevel::Unsupported;
+}
 bool CudaRuntime::linearForward(
     const float* input,
     const float* weights,
@@ -783,6 +954,55 @@ bool CudaRuntime::forwardLayer(
     if (config_.disabled) return false;
     if (!supportsForwardLayerType(layer.type_enum)) return false;
 
+#ifdef ENABLE_CUDA
+    if(layer.type_enum==LayerType::NMS){
+        if(!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training)))return false;
+        return CudaNativeOps::nms(inputs,outputs,layer);
+    }
+    if(CudaOperationGeometry::recurrentType(layer.type_enum)){
+        if(!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training)))return false;
+        CudaOperationGeometry::Recurrent g;g.valid(layer,inputs[0]->size());outputs.resize(1);return CudaNativeOps::recurrent(*inputs[0],outputs[0],layer,g);
+    }
+    if(CudaOperationGeometry::attentionType(layer.type_enum)){
+        if(!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training)))return false;
+        CudaOperationGeometry::Attention g;g.valid(layer,inputs);return CudaNativeOps::attention(inputs,outputs,layer,g,nullptr,nullptr,impl_->handle);
+    }
+    if(CudaOperationGeometry::extendedConvType(layer.type_enum)){
+        if(!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training)))return false;
+        CudaOperationGeometry::ExtendedConv g;g.valid(layer,inputs[0]->size());outputs.resize(1);return CudaNativeOps::extended_conv(*inputs[0],layer,g,outputs[0]);
+    }
+    if(CudaOperationGeometry::batchNormType(layer.type_enum)){
+        if(!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training)))return false;
+        CudaOperationGeometry::BatchNorm g;g.valid(layer,inputs[0]->size());outputs.resize(1);return CudaNativeOps::batch_norm(*inputs[0],outputs[0],layer,g,training);
+    }
+    if(CudaOperationGeometry::stochasticType(layer.type_enum)){
+        if(!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training)))return false;
+        if(layer.type_enum==LayerType::Reparameterize)return CudaNativeOps::reparameterize(inputs,outputs,training);
+        outputs.resize(1);return CudaNativeOps::dropout(*inputs[0],outputs[0],layer,training);
+    }
+    if(layer.type_enum==LayerType::GEGLU || layer.type_enum==LayerType::UpsampleBicubic){
+        if(!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training)))return false;
+        CudaOperationGeometry::Resize g;if(layer.type_enum==LayerType::UpsampleBicubic)g.valid(layer,inputs[0]->size());
+        outputs.resize(1);return layer.type_enum==LayerType::GEGLU?CudaNativeOps::geglu(*inputs[0],outputs[0],layer.out_features):CudaNativeOps::bicubic(*inputs[0],outputs[0],g);
+    }
+    if(CudaOperationGeometry::projectionType(layer.type_enum)){
+        CudaOperationGeometry::Projection g;if(!g.valid(layer,inputs))return false;return CudaNativeOps::projection(inputs,outputs,layer,g);
+    }
+    if(layer.type_enum==LayerType::LayerNorm || layer.type_enum==LayerType::RMSNorm){
+        if(!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training)))return false;
+        outputs.resize(1);return CudaNativeOps::row_norm(*inputs[0],layer,outputs[0]);
+    }
+    if(CudaOperationGeometry::poolType(layer.type_enum)) {
+        if(inputs.empty() || !inputs[0])return false;
+        CudaOperationGeometry::Pool g;if(!g.valid(layer,inputs[0]->size()))return false;
+        outputs.resize(1);return CudaNativeOps::pool(*inputs[0],outputs[0],g);
+    }
+    if(CudaOperationGeometry::movementType(layer.type_enum)) {
+        CudaOperationGeometry::Movement g;if(!g.valid(layer,inputs))return false;
+        if(layer.type_enum==LayerType::Constant){std::vector<float> weights(layer.getWeights(),layer.getWeights()+layer.getWeightsSize());return CudaNativeOps::movement({&weights},outputs,layer,g);}
+        return CudaNativeOps::movement(inputs,outputs,layer,g);
+    }
+#endif
     switch (layer.type_enum) {
         case LayerType::Linear:
             if (config_.linear_enabled) {
@@ -960,44 +1180,78 @@ bool CudaRuntime::forwardLayer(
 
 
 #ifdef ENABLE_CUDA
+        case LayerType::InstanceNorm2d:
+        case LayerType::GroupNorm: {
+            if (!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training))) return false;
+            const auto& x=*inputs[0]; CudaOperationGeometry::Norm shape; if (!shape.valid(layer,x.size())) return false;
+            std::vector<float> result;
+            const float* weights=layer.affine?layer.getWeights():nullptr;
+            if (!CudaNativeOps::groupnorm(x,weights,layer.getWeightsSize(),shape.channels,shape.spatial,shape.groups,layer.eps,
+                                         layer.affine && layer.use_bias,result)) return false;
+            outputs={std::move(result)}; return true;
+        }
+        case LayerType::UpsampleNearest:
+        case LayerType::UpsampleBicubic:
+        case LayerType::UpsampleBilinear: {
+            if (!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training))) return false;
+            const auto& x=*inputs[0]; CudaOperationGeometry::Resize shape; if (!shape.valid(layer,x.size())) return false;
+            std::vector<float> result;
+            if (!CudaNativeOps::resize(x,result,shape.c,shape.ih,shape.iw,shape.oh,shape.ow,shape.sh,shape.sw,
+                                      layer.type_enum==LayerType::UpsampleBilinear,false)) return false;
+            outputs={std::move(result)}; return true;
+        }
+        case LayerType::Softmax:
+        case LayerType::LogSoftmax: {
+            if (!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training))) return false;
+            const auto& x=*inputs[0]; int size=0,inner=0; if (!cuda_axis_geometry(x,layer,size,inner)) return false;
+            std::vector<float> result;
+            if (!CudaNativeOps::softmax(x,result,size,inner,layer.type_enum==LayerType::LogSoftmax)) return false;
+            outputs={std::move(result)}; return true;
+        }
+
         case LayerType::Conv2d:
-            if (!config_.conv_enabled) break;
+            if (!config_.conv_enabled) return false;
             do {
-            if (inputs.empty() || !inputs[0]) break;
+            if (inputs.empty() || !inputs[0]) return false;
             const std::vector<float>& xc = *inputs[0];
+            CudaOperationGeometry::Conv geometry;
+            if (!geometry.valid(layer, xc.size())) return false;
             const int C_in  = std::max(1, layer.in_channels);
             const int C_out = std::max(1, layer.out_channels);
             const int k     = std::max(1, layer.kernel_h > 0 ? layer.kernel_h : layer.get_kernel_h());
-            const int str   = std::max(1, layer.stride_h > 0 ? layer.stride_h : layer.get_stride_h());
-            const int pad   = std::max(0, layer.pad_h >= 0 ? layer.pad_h : layer.get_pad_h());
-            const int dil   = std::max(1, layer.dilation_h > 0 ? layer.dilation_h : 1);
+            const int str   = std::max(1, layer.get_stride_h());
+            const int pad   = std::max(0, layer.get_pad_h());
+            const int dil   = std::max(1, layer.dilation_h != 1 ? layer.dilation_h : layer.dilation);
             const int H     = std::max(1, layer.input_height);
             const int W     = std::max(1, layer.input_width);
             const int H_out = (H + 2*pad - dil*(k-1) - 1) / str + 1;
             const int W_out = (W + 2*pad - dil*(k-1) - 1) / str + 1;
-            if (H_out <= 0 || W_out <= 0) break;
+            if (H_out <= 0 || W_out <= 0) return false;
 
             const int K  = C_in * k * k;
             const int HW = H_out * W_out;
             const long long ops = static_cast<long long>(C_out) * K * HW;
-            if (ops < static_cast<long long>(config_.conv_min_ops)) break;
-            if (static_cast<int>(xc.size()) != C_in * H * W) break;
+            if (ops < static_cast<long long>(config_.conv_min_ops)) return false;
+            if (static_cast<int>(xc.size()) != C_in * H * W) return false;
 
             const size_t w_k = static_cast<size_t>(C_out) * K;
             const float* wc = layer.getWeights();
-            if (!wc || layer.getWeightsSize() < w_k + (layer.use_bias ? C_out : 0u)) break;
+            if (!wc || layer.getWeightsSize() < w_k + (layer.use_bias ? C_out : 0u)) return false;
 
-            // Im2col on host: col[K, HW]
+            // Im2col runs on the device too: col[K, HW].
             const size_t col_sz = static_cast<size_t>(K) * HW;
-            std::vector<float> col_buf(col_sz);
-            im2col_cpu(xc.data(), col_buf.data(), C_in, H, W, k, str, pad, dil, H_out, W_out);
-
-            Impl::DeviceBuf d_col, d_w, d_out;
-            if (!d_col.alloc(col_sz * sizeof(float))) break;
-            if (!d_w.alloc(w_k * sizeof(float))) break;
-            if (!d_out.alloc(static_cast<size_t>(C_out) * HW * sizeof(float))) break;
-            if (!d_col.copyFromHost(col_buf.data(), col_sz * sizeof(float))) break;
-            if (!d_w.copyFromHost(wc, w_k * sizeof(float))) break;
+            Impl::DeviceBuf d_input, d_col, d_w, d_out;
+            if (!d_input.alloc(xc.size() * sizeof(float))) return false;
+            if (!d_input.copyFromHost(xc.data(), xc.size() * sizeof(float))) return false;
+            if (!d_col.alloc(col_sz * sizeof(float))) return false;
+            if (!d_w.alloc(w_k * sizeof(float))) return false;
+            if (!d_out.alloc(static_cast<size_t>(C_out) * HW * sizeof(float))) return false;
+            CudaNativeOps::im2col<<<(col_sz + CudaNativeOps::threads - 1) / CudaNativeOps::threads,
+                                    CudaNativeOps::threads>>>(
+                reinterpret_cast<const float*>(d_input.ptr), reinterpret_cast<float*>(d_col.ptr),
+                static_cast<int>(col_sz), H, W, k, str, pad, dil, H_out, W_out);
+            if (cudaGetLastError() != cudaSuccess) return false;
+            if (!d_w.copyFromHost(wc, w_k * sizeof(float))) return false;
 
             // SGEMM: output_rm[C_out,HW] = weights_rm[C_out,K] × col_rm[K,HW]
             // cuBLAS (col-major): C[HW,C_out] = B[HW,K] × A[K,C_out]
@@ -1009,177 +1263,29 @@ bool CudaRuntime::forwardLayer(
                     reinterpret_cast<const float*>(d_col.ptr), HW,
                     reinterpret_cast<const float*>(d_w.ptr), K,
                     &cv_b0,
-                    reinterpret_cast<float*>(d_out.ptr), HW) != CUBLAS_STATUS_SUCCESS) break;
+                    reinterpret_cast<float*>(d_out.ptr), HW) != CUBLAS_STATUS_SUCCESS) return false;
 
             // Bias: d_out_cm[HW,C_out] += ones_HW[HW] × bias[C_out]^T  (cublasSger)
             if (layer.use_bias) {
                 std::vector<float> ones_hw(static_cast<size_t>(HW), 1.0f);
                 Impl::DeviceBuf d_bias, d_ones_hw;
-                if (!d_bias.alloc(static_cast<size_t>(C_out) * sizeof(float))) break;
-                if (!d_ones_hw.alloc(static_cast<size_t>(HW) * sizeof(float))) break;
-                if (!d_bias.copyFromHost(wc + w_k, static_cast<size_t>(C_out) * sizeof(float))) break;
-                if (!d_ones_hw.copyFromHost(ones_hw.data(), static_cast<size_t>(HW) * sizeof(float))) break;
+                if (!d_bias.alloc(static_cast<size_t>(C_out) * sizeof(float))) return false;
+                if (!d_ones_hw.alloc(static_cast<size_t>(HW) * sizeof(float))) return false;
+                if (!d_bias.copyFromHost(wc + w_k, static_cast<size_t>(C_out) * sizeof(float))) return false;
+                if (!d_ones_hw.copyFromHost(ones_hw.data(), static_cast<size_t>(HW) * sizeof(float))) return false;
                 if (cublasSger(impl_->handle, HW, C_out, &cv_a,
                         reinterpret_cast<const float*>(d_ones_hw.ptr), 1,
                         reinterpret_cast<const float*>(d_bias.ptr), 1,
-                        reinterpret_cast<float*>(d_out.ptr), HW) != CUBLAS_STATUS_SUCCESS) break;
+                        reinterpret_cast<float*>(d_out.ptr), HW) != CUBLAS_STATUS_SUCCESS) return false;
             }
 
-            if (cudaDeviceSynchronize() != cudaSuccess) break;
+            if (cudaDeviceSynchronize() != cudaSuccess) return false;
             outputs.resize(1);
             outputs[0].resize(static_cast<size_t>(C_out) * HW);
-            if (!d_out.copyToHost(outputs[0].data(), static_cast<size_t>(C_out) * HW * sizeof(float))) break;
+            if (!d_out.copyToHost(outputs[0].data(), static_cast<size_t>(C_out) * HW * sizeof(float))) return false;
             return true;
             } while (false);
-            break;
-
-        case LayerType::LayerNorm:
-            if (!config_.norm_enabled) break;
-            do {
-            if (inputs.empty() || !inputs[0]) break;
-            const std::vector<float>& xn = *inputs[0];
-            const int N = static_cast<int>(xn.size());
-            if (N < config_.norm_min_elements) break;
-            if (!layer.affine) break;
-
-            const int norm_sz = (layer.in_features > 0) ? layer.in_features : N;
-            if (norm_sz <= 0 || N % norm_sz != 0) break;
-            const int groups = N / norm_sz;
-
-            const float* gw = layer.getWeights();
-            if (!gw || static_cast<int>(layer.getWeightsSize()) < norm_sz) break;
-
-            const float eps = (layer.eps > 0.0f) ? layer.eps : 1e-5f;
-            std::vector<float> x_hat(static_cast<size_t>(N));
-
-            for (int g = 0; g < groups; ++g) {
-                const int base = g * norm_sz;
-                float mean = 0.0f;
-                for (int i = 0; i < norm_sz; ++i) mean += xn[base+i];
-                mean /= norm_sz;
-                float var = 0.0f;
-                for (int i = 0; i < norm_sz; ++i) {
-                    float d = xn[base+i] - mean;
-                    var += d * d;
-                }
-                const float inv = 1.0f / std::sqrt(var / norm_sz + eps);
-                for (int i = 0; i < norm_sz; ++i) x_hat[base+i] = (xn[base+i] - mean) * inv;
-            }
-
-            Impl::DeviceBuf d_xh, d_gamma, d_out;
-            if (!d_xh.alloc(static_cast<size_t>(N) * sizeof(float))) break;
-            if (!d_gamma.alloc(static_cast<size_t>(norm_sz) * sizeof(float))) break;
-            if (!d_out.alloc(static_cast<size_t>(N) * sizeof(float))) break;
-            if (!d_xh.copyFromHost(x_hat.data(), static_cast<size_t>(N) * sizeof(float))) break;
-            if (!d_gamma.copyFromHost(gw, static_cast<size_t>(norm_sz) * sizeof(float))) break;
-
-            bool ok = true;
-            for (int g = 0; g < groups && ok; ++g) {
-                const int base = g * norm_sz;
-                if (cublasSdgmm(impl_->handle, CUBLAS_SIDE_LEFT,
-                        norm_sz, 1,
-                        reinterpret_cast<const float*>(d_xh.ptr) + base, norm_sz,
-                        reinterpret_cast<const float*>(d_gamma.ptr), 1,
-                        reinterpret_cast<float*>(d_out.ptr) + base, norm_sz
-                    ) != CUBLAS_STATUS_SUCCESS) ok = false;
-            }
-            if (!ok) break;
-
-            if (layer.use_bias && static_cast<int>(layer.getWeightsSize()) >= 2 * norm_sz) {
-                Impl::DeviceBuf d_beta;
-                if (!d_beta.alloc(static_cast<size_t>(norm_sz) * sizeof(float))) break;
-                if (!d_beta.copyFromHost(gw + norm_sz, static_cast<size_t>(norm_sz) * sizeof(float))) break;
-                const float na = 1.0f;
-                for (int g = 0; g < groups && ok; ++g) {
-                    const int base = g * norm_sz;
-                    if (cublasSaxpy(impl_->handle, norm_sz, &na,
-                            reinterpret_cast<const float*>(d_beta.ptr), 1,
-                            reinterpret_cast<float*>(d_out.ptr) + base, 1
-                        ) != CUBLAS_STATUS_SUCCESS) ok = false;
-                }
-                if (!ok) break;
-            }
-
-            if (cudaDeviceSynchronize() != cudaSuccess) break;
-            outputs.resize(1);
-            outputs[0].resize(static_cast<size_t>(N));
-            if (!d_out.copyToHost(outputs[0].data(), static_cast<size_t>(N) * sizeof(float))) break;
-            return true;
-            } while (false);
-            break;
-
-        case LayerType::RMSNorm:
-            if (!config_.norm_enabled) break;
-            do {
-            if (inputs.empty() || !inputs[0]) break;
-            const std::vector<float>& xn = *inputs[0];
-            const int N = static_cast<int>(xn.size());
-            if (N < config_.norm_min_elements) break;
-            if (!layer.affine) break;
-
-            const int norm_sz = (layer.in_features > 0) ? layer.in_features : N;
-            if (norm_sz <= 0 || N % norm_sz != 0) break;
-            const int groups = N / norm_sz;
-
-            const float* gw = layer.getWeights();
-            if (!gw || static_cast<int>(layer.getWeightsSize()) < norm_sz) break;
-
-            const float eps = (layer.eps > 0.0f) ? layer.eps : 1e-5f;
-            std::vector<float> x_hat(static_cast<size_t>(N));
-
-            for (int g = 0; g < groups; ++g) {
-                const int base = g * norm_sz;
-                float ss = 0.0f;
-                for (int i = 0; i < norm_sz; ++i) {
-                    float v = xn[base + i];
-                    ss += v * v;
-                }
-                const float inv = 1.0f / std::sqrt(ss / norm_sz + eps);
-                for (int i = 0; i < norm_sz; ++i) x_hat[base + i] = xn[base + i] * inv;
-            }
-
-            Impl::DeviceBuf d_xh, d_gamma, d_out;
-            if (!d_xh.alloc(static_cast<size_t>(N) * sizeof(float))) break;
-            if (!d_gamma.alloc(static_cast<size_t>(norm_sz) * sizeof(float))) break;
-            if (!d_out.alloc(static_cast<size_t>(N) * sizeof(float))) break;
-            if (!d_xh.copyFromHost(x_hat.data(), static_cast<size_t>(N) * sizeof(float))) break;
-            if (!d_gamma.copyFromHost(gw, static_cast<size_t>(norm_sz) * sizeof(float))) break;
-
-            bool ok = true;
-            for (int g = 0; g < groups && ok; ++g) {
-                const int base = g * norm_sz;
-                if (cublasSdgmm(impl_->handle, CUBLAS_SIDE_LEFT,
-                        norm_sz, 1,
-                        reinterpret_cast<const float*>(d_xh.ptr) + base, norm_sz,
-                        reinterpret_cast<const float*>(d_gamma.ptr), 1,
-                        reinterpret_cast<float*>(d_out.ptr) + base, norm_sz
-                    ) != CUBLAS_STATUS_SUCCESS) ok = false;
-            }
-            if (!ok) break;
-
-            if (layer.use_bias && static_cast<int>(layer.getWeightsSize()) >= 2 * norm_sz) {
-                Impl::DeviceBuf d_beta;
-                if (!d_beta.alloc(static_cast<size_t>(norm_sz) * sizeof(float))) break;
-                if (!d_beta.copyFromHost(gw + norm_sz, static_cast<size_t>(norm_sz) * sizeof(float))) break;
-                const float na = 1.0f;
-                for (int g = 0; g < groups && ok; ++g) {
-                    const int base = g * norm_sz;
-                    if (cublasSaxpy(impl_->handle, norm_sz, &na,
-                            reinterpret_cast<const float*>(d_beta.ptr), 1,
-                            reinterpret_cast<float*>(d_out.ptr) + base, 1
-                        ) != CUBLAS_STATUS_SUCCESS) ok = false;
-                }
-                if (!ok) break;
-            }
-
-            if (cudaDeviceSynchronize() != cudaSuccess) break;
-            outputs.resize(1);
-            outputs[0].resize(static_cast<size_t>(N));
-            if (!d_out.copyToHost(outputs[0].data(), static_cast<size_t>(N) * sizeof(float))) break;
-            return true;
-            } while (false);
-            break;
-#endif // ENABLE_CUDA
+            return false;
 
         case LayerType::Add:
         case LayerType::Subtract:
@@ -1198,9 +1304,7 @@ bool CudaRuntime::forwardLayer(
             const CudaBinaryOp op = static_cast<CudaBinaryOp>(op_code);
 
             outputs.resize(1);
-            if (!cuda_run_binary(a, b, outputs[0], op)) {
-                RuntimeLayerOps::binaryForwardHost(a, b, outputs[0], op_code);
-            }
+            if (!cuda_run_binary(a, b, outputs[0], op)) return false;
             return true;
             } while (false);
             break;
@@ -1228,308 +1332,34 @@ bool CudaRuntime::forwardLayer(
             const CudaUnaryOp op = static_cast<CudaUnaryOp>(op_code);
 
             outputs.resize(1);
-            if (!cuda_run_unary(in, outputs[0], op, alpha)) {
-                RuntimeLayerOps::unaryForwardHost(in, outputs[0], op_code, alpha);
-            }
+            if (!cuda_run_unary(in, outputs[0], op, alpha)) return false;
             return true;
             } while (false);
             break;
 
-            case LayerType::SelfAttention:
-            case LayerType::MultiHeadAttention:
-                if (!config_.attention_enabled) break;
-                do {
-                if (inputs.empty() || !inputs[0]) break;
-
-    // ─────────────────────────────────────────────────────────────────────────
-            const std::vector<float>& xa = *inputs[0];
-
-            const int seq = layer.seq_len > 0 ? layer.seq_len : 1;
-            const int ed  = layer.embed_dim > 0 ? layer.embed_dim : static_cast<int>(xa.size());
-            const int nh  = layer.num_heads > 0 ? layer.num_heads : 1;
-            if (ed <= 0 || nh <= 0 || ed % nh != 0) break;
-            const int hd = ed / nh;
-            const long long attn_ops = 4LL * seq * ed * ed;
-            if (attn_ops < static_cast<long long>(config_.attention_min_ops)) break;
-            if (static_cast<int>(xa.size()) != seq * ed) break;
-
-            const float* wa = layer.getWeights();
-            if (!wa || static_cast<int>(layer.getWeightsSize()) < ed * ed * 4) break;
-            const int qkv_d = ed * 3;
-            const float* wqkv = wa;
-            const float* wout = wa + ed * ed * 3;
-
-            const float aa = 1.0f, ab0 = 0.0f;
-
-            // Step 1: QKV[seq, 3*ed] = X[seq,ed] × W_QKV[ed,3*ed]
-            // cublasSgemm(OP_N,OP_N, qkv_d, seq, ed, 1, wqkv, qkv_d, x, ed, 0, qkv, qkv_d)
-            Impl::DeviceBuf d_xa, d_wqkv, d_qkv;
-            if (!d_xa.alloc(static_cast<size_t>(seq) * ed * sizeof(float))) break;
-            if (!d_wqkv.alloc(static_cast<size_t>(ed) * qkv_d * sizeof(float))) break;
-            if (!d_qkv.alloc(static_cast<size_t>(seq) * qkv_d * sizeof(float))) break;
-            if (!d_xa.copyFromHost(xa.data(), static_cast<size_t>(seq) * ed * sizeof(float))) break;
-            if (!d_wqkv.copyFromHost(wqkv, static_cast<size_t>(ed) * qkv_d * sizeof(float))) break;
-
-            if (cublasSgemm(impl_->handle, CUBLAS_OP_N, CUBLAS_OP_N,
-                    qkv_d, seq, ed, &aa,
-                    reinterpret_cast<const float*>(d_wqkv.ptr), qkv_d,
-                    reinterpret_cast<const float*>(d_xa.ptr), ed,
-                    &ab0,
-                    reinterpret_cast<float*>(d_qkv.ptr), qkv_d) != CUBLAS_STATUS_SUCCESS) break;
-
-            if (cudaDeviceSynchronize() != cudaSuccess) break;
-            std::vector<float> qkv_h(static_cast<size_t>(seq) * qkv_d);
-            if (!d_qkv.copyToHost(qkv_h.data(), static_cast<size_t>(seq) * qkv_d * sizeof(float))) break;
-
-            // Split Q, K, V sur host
-            std::vector<float> Q(seq * ed), Km(seq * ed), Vm(seq * ed);
-            for (int t = 0; t < seq; ++t) {
-                const float* src = &qkv_h[static_cast<size_t>(t) * qkv_d];
-                std::copy(src,        src + ed,    &Q[t*ed]);
-                std::copy(src + ed,   src + 2*ed,  &Km[t*ed]);
-                std::copy(src + 2*ed, src + qkv_d, &Vm[t*ed]);
-            }
-
-            // Step 2: attention par tête
-            std::vector<float> attended(static_cast<size_t>(seq) * ed, 0.0f);
-            const float scale = 1.0f / std::sqrt(static_cast<float>(hd));
-            bool aok = true;
-
-            for (int h = 0; h < nh && aok; ++h) {
-                const int hoff = h * hd;
-                std::vector<float> Qh(seq*hd), Kh(seq*hd), Vh(seq*hd);
-                for (int t = 0; t < seq; ++t) {
-                    std::copy(&Q[t*ed+hoff],  &Q[t*ed+hoff+hd],  &Qh[t*hd]);
-                    std::copy(&Km[t*ed+hoff], &Km[t*ed+hoff+hd], &Kh[t*hd]);
-                    std::copy(&Vm[t*ed+hoff], &Vm[t*ed+hoff+hd], &Vh[t*hd]);
-                }
-
-                Impl::DeviceBuf d_qh, d_kh, d_vh, d_sc, d_ctx;
-                if (!d_qh.alloc(seq*hd*sizeof(float)) ||
-                    !d_kh.alloc(seq*hd*sizeof(float)) ||
-                    !d_vh.alloc(seq*hd*sizeof(float)) ||
-                    !d_sc.alloc(seq*seq*sizeof(float)) ||
-                    !d_ctx.alloc(seq*hd*sizeof(float))) { aok = false; break; }
-                if (!d_qh.copyFromHost(Qh.data(), seq*hd*sizeof(float)) ||
-                    !d_kh.copyFromHost(Kh.data(), seq*hd*sizeof(float)) ||
-                    !d_vh.copyFromHost(Vh.data(), seq*hd*sizeof(float))) { aok = false; break; }
-
-                // scores[seq,seq] = Qh[seq,hd] × Kh[seq,hd]^T
-                // → cublasSgemm(OP_T,OP_N, seq, seq, hd, scale, Kh, hd, Qh, hd, 0, sc, seq)
-                if (cublasSgemm(impl_->handle, CUBLAS_OP_T, CUBLAS_OP_N,
-                        seq, seq, hd, &scale,
-                        reinterpret_cast<const float*>(d_kh.ptr), hd,
-                        reinterpret_cast<const float*>(d_qh.ptr), hd,
-                        &ab0,
-                        reinterpret_cast<float*>(d_sc.ptr), seq) != CUBLAS_STATUS_SUCCESS) { aok=false; break; }
-
-                if (cudaDeviceSynchronize() != cudaSuccess) { aok = false; break; }
-                std::vector<float> sc_h(seq * seq);
-                if (!d_sc.copyToHost(sc_h.data(), seq*seq*sizeof(float))) { aok = false; break; }
-
-                if (layer.causal) {
-                    for (int i = 0; i < seq; ++i) {
-                        float* row = &sc_h[i * seq];
-                        for (int j = i+1; j < seq; ++j) row[j] = -1e9f;
-                    }
-                }
-                softmax_rows(sc_h.data(), seq, seq);
-                if (!d_sc.copyFromHost(sc_h.data(), seq*seq*sizeof(float))) { aok = false; break; }
-
-                // ctx[seq,hd] = scores[seq,seq] × Vh[seq,hd]
-                // → cublasSgemm(OP_N,OP_N, hd, seq, seq, 1, Vh, hd, sc, seq, 0, ctx, hd)
-                if (cublasSgemm(impl_->handle, CUBLAS_OP_N, CUBLAS_OP_N,
-                        hd, seq, seq, &aa,
-                        reinterpret_cast<const float*>(d_vh.ptr), hd,
-                        reinterpret_cast<const float*>(d_sc.ptr), seq,
-                        &ab0,
-                        reinterpret_cast<float*>(d_ctx.ptr), hd) != CUBLAS_STATUS_SUCCESS) { aok=false; break; }
-
-                if (cudaDeviceSynchronize() != cudaSuccess) { aok = false; break; }
-                std::vector<float> ctx_h(seq * hd);
-                if (!d_ctx.copyToHost(ctx_h.data(), seq*hd*sizeof(float))) { aok = false; break; }
-
-                for (int t = 0; t < seq; ++t)
-                    std::copy(&ctx_h[t*hd], &ctx_h[(t+1)*hd], &attended[t*ed+hoff]);
-            }
-            if (!aok) break;
-
-            // Step 3: output[seq,ed] = attended[seq,ed] × W_out[ed,ed]
-            // → cublasSgemm(OP_N,OP_N, ed, seq, ed, 1, wout, ed, attended, ed, 0, out, ed)
-            Impl::DeviceBuf d_att, d_wo, d_final;
-            if (!d_att.alloc(static_cast<size_t>(seq)*ed*sizeof(float))) break;
-            if (!d_wo.alloc(static_cast<size_t>(ed)*ed*sizeof(float))) break;
-            if (!d_final.alloc(static_cast<size_t>(seq)*ed*sizeof(float))) break;
-            if (!d_att.copyFromHost(attended.data(), static_cast<size_t>(seq)*ed*sizeof(float))) break;
-            if (!d_wo.copyFromHost(wout, static_cast<size_t>(ed)*ed*sizeof(float))) break;
-
-            if (cublasSgemm(impl_->handle, CUBLAS_OP_N, CUBLAS_OP_N,
-                    ed, seq, ed, &aa,
-                    reinterpret_cast<const float*>(d_wo.ptr), ed,
-                    reinterpret_cast<const float*>(d_att.ptr), ed,
-                    &ab0,
-                    reinterpret_cast<float*>(d_final.ptr), ed) != CUBLAS_STATUS_SUCCESS) break;
-
-            if (cudaDeviceSynchronize() != cudaSuccess) break;
-            outputs.resize(1);
-            outputs[0].resize(static_cast<size_t>(seq) * ed);
-            if (!d_final.copyToHost(outputs[0].data(), static_cast<size_t>(seq)*ed*sizeof(float))) break;
-            return true;
-            } while (false);
-            break;
-
-        case LayerType::CrossAttention:
-            if (!config_.attention_enabled) break;
-            if (inputs.size() < 2 || inputs[1] == nullptr) break;
-            do {
-            const std::vector<float>& q_in  = *inputs[0];
-            const std::vector<float>& kv_in = *inputs[1];
-
-            const int nh = layer.num_heads > 0 ? layer.num_heads : 1;
-            int ed = layer.embed_dim;
-            if (ed <= 0 && layer.head_dim > 0) ed = layer.head_dim * nh;
-            if (ed <= 0 || nh <= 0 || ed % nh != 0) break;
-            const int hd = ed / nh;
-
-            if (q_in.size() % static_cast<size_t>(ed) != 0) break;
-            if (kv_in.size() % static_cast<size_t>(ed) != 0) break;
-            const int qlen  = static_cast<int>(q_in.size())  / ed;
-            const int kvlen = static_cast<int>(kv_in.size()) / ed;
-
-            const long long cattn_ops = 2LL * qlen * kvlen * ed;
-            if (cattn_ops < static_cast<long long>(config_.attention_min_ops)) break;
-
-            const float* wca = layer.getWeights();
-            const int q_sz  = ed * ed;
-            const int kv_sz = ed * 2 * ed;
-            const int o_sz  = ed * ed;
-            if (!wca || static_cast<int>(layer.getWeightsSize()) < q_sz + kv_sz + o_sz) break;
-            const float* wq  = wca;
-            const float* wkv = wca + q_sz;
-            const float* wo  = wca + q_sz + kv_sz;
-
-            const float ca = 1.0f, cb0 = 0.0f;
-
-            // Step 1: Q[qlen,ed] = q_in[qlen,ed] × wq[ed,ed]
-            Impl::DeviceBuf d_qin, d_wq, d_Q;
-            if (!d_qin.alloc(qlen*ed*sizeof(float))) break;
-            if (!d_wq.alloc(q_sz*sizeof(float))) break;
-            if (!d_Q.alloc(qlen*ed*sizeof(float))) break;
-            if (!d_qin.copyFromHost(q_in.data(), qlen*ed*sizeof(float))) break;
-            if (!d_wq.copyFromHost(wq, q_sz*sizeof(float))) break;
-            if (cublasSgemm(impl_->handle, CUBLAS_OP_N, CUBLAS_OP_N,
-                    ed, qlen, ed, &ca,
-                    reinterpret_cast<const float*>(d_wq.ptr), ed,
-                    reinterpret_cast<const float*>(d_qin.ptr), ed,
-                    &cb0,
-                    reinterpret_cast<float*>(d_Q.ptr), ed) != CUBLAS_STATUS_SUCCESS) break;
-
-            // Step 2: KV[kvlen,2*ed] = kv_in[kvlen,ed] × wkv[ed,2*ed]
-            Impl::DeviceBuf d_kvin, d_wkv, d_KV;
-            if (!d_kvin.alloc(kvlen*ed*sizeof(float))) break;
-            if (!d_wkv.alloc(kv_sz*sizeof(float))) break;
-            if (!d_KV.alloc(kvlen*2*ed*sizeof(float))) break;
-            if (!d_kvin.copyFromHost(kv_in.data(), kvlen*ed*sizeof(float))) break;
-            if (!d_wkv.copyFromHost(wkv, kv_sz*sizeof(float))) break;
-            if (cublasSgemm(impl_->handle, CUBLAS_OP_N, CUBLAS_OP_N,
-                    2*ed, kvlen, ed, &ca,
-                    reinterpret_cast<const float*>(d_wkv.ptr), 2*ed,
-                    reinterpret_cast<const float*>(d_kvin.ptr), ed,
-                    &cb0,
-                    reinterpret_cast<float*>(d_KV.ptr), 2*ed) != CUBLAS_STATUS_SUCCESS) break;
-
-            if (cudaDeviceSynchronize() != cudaSuccess) break;
-            std::vector<float> Q_h(qlen*ed), KV_h(kvlen*2*ed);
-            if (!d_Q.copyToHost(Q_h.data(), qlen*ed*sizeof(float))) break;
-            if (!d_KV.copyToHost(KV_h.data(), kvlen*2*ed*sizeof(float))) break;
-
-            std::vector<float> K_h(kvlen*ed), V_h(kvlen*ed);
-            for (int t = 0; t < kvlen; ++t) {
-                std::copy(&KV_h[t*2*ed],      &KV_h[t*2*ed+ed],   &K_h[t*ed]);
-                std::copy(&KV_h[t*2*ed+ed],   &KV_h[(t+1)*2*ed],  &V_h[t*ed]);
-            }
-
-            // Step 3: attention par tête
-            std::vector<float> attended_c(qlen*ed, 0.0f);
-            const float cscale = 1.0f / std::sqrt(static_cast<float>(hd));
-            bool cok = true;
-
-            for (int h = 0; h < nh && cok; ++h) {
-                const int hoff = h * hd;
-                std::vector<float> Qh(qlen*hd), Kh(kvlen*hd), Vh(kvlen*hd);
-                for (int t = 0; t < qlen;  ++t) std::copy(&Q_h[t*ed+hoff], &Q_h[t*ed+hoff+hd], &Qh[t*hd]);
-                for (int t = 0; t < kvlen; ++t) std::copy(&K_h[t*ed+hoff], &K_h[t*ed+hoff+hd], &Kh[t*hd]);
-                for (int t = 0; t < kvlen; ++t) std::copy(&V_h[t*ed+hoff], &V_h[t*ed+hoff+hd], &Vh[t*hd]);
-
-                Impl::DeviceBuf d_qh, d_kh, d_vh, d_sc, d_ctx;
-                if (!d_qh.alloc(qlen*hd*sizeof(float))  || !d_kh.alloc(kvlen*hd*sizeof(float)) ||
-                    !d_vh.alloc(kvlen*hd*sizeof(float))  || !d_sc.alloc(qlen*kvlen*sizeof(float)) ||
-                    !d_ctx.alloc(qlen*hd*sizeof(float))) { cok=false; break; }
-                if (!d_qh.copyFromHost(Qh.data(), qlen*hd*sizeof(float))   ||
-                    !d_kh.copyFromHost(Kh.data(), kvlen*hd*sizeof(float))  ||
-                    !d_vh.copyFromHost(Vh.data(), kvlen*hd*sizeof(float)))  { cok=false; break; }
-
-                // scores[qlen,kvlen] = Qh[qlen,hd] × Kh[kvlen,hd]^T
-                // → cublasSgemm(OP_T,OP_N, kvlen, qlen, hd, scale, Kh, hd, Qh, hd, 0, sc, kvlen)
-                if (cublasSgemm(impl_->handle, CUBLAS_OP_T, CUBLAS_OP_N,
-                        kvlen, qlen, hd, &cscale,
-                        reinterpret_cast<const float*>(d_kh.ptr), hd,
-                        reinterpret_cast<const float*>(d_qh.ptr), hd,
-                        &cb0,
-                        reinterpret_cast<float*>(d_sc.ptr), kvlen) != CUBLAS_STATUS_SUCCESS) { cok=false; break; }
-
-                if (cudaDeviceSynchronize() != cudaSuccess) { cok=false; break; }
-                std::vector<float> sc_h(qlen * kvlen);
-                if (!d_sc.copyToHost(sc_h.data(), qlen*kvlen*sizeof(float))) { cok=false; break; }
-                softmax_rows(sc_h.data(), qlen, kvlen);
-                if (!d_sc.copyFromHost(sc_h.data(), qlen*kvlen*sizeof(float))) { cok=false; break; }
-
-                // ctx[qlen,hd] = scores[qlen,kvlen] × Vh[kvlen,hd]
-                // → cublasSgemm(OP_N,OP_N, hd, qlen, kvlen, 1, Vh, hd, sc, kvlen, 0, ctx, hd)
-                if (cublasSgemm(impl_->handle, CUBLAS_OP_N, CUBLAS_OP_N,
-                        hd, qlen, kvlen, &ca,
-                        reinterpret_cast<const float*>(d_vh.ptr), hd,
-                        reinterpret_cast<const float*>(d_sc.ptr), kvlen,
-                        &cb0,
-                        reinterpret_cast<float*>(d_ctx.ptr), hd) != CUBLAS_STATUS_SUCCESS) { cok=false; break; }
-
-                if (cudaDeviceSynchronize() != cudaSuccess) { cok=false; break; }
-                std::vector<float> ctx_h(qlen * hd);
-                if (!d_ctx.copyToHost(ctx_h.data(), qlen*hd*sizeof(float))) { cok=false; break; }
-                for (int t = 0; t < qlen; ++t)
-                    std::copy(&ctx_h[t*hd], &ctx_h[(t+1)*hd], &attended_c[t*ed+hoff]);
-            }
-            if (!cok) break;
-
-            // Step 4: output[qlen,ed] = attended_c[qlen,ed] × wo[ed,ed]
-            Impl::DeviceBuf d_att_c, d_wo_c, d_final_c;
-            if (!d_att_c.alloc(qlen*ed*sizeof(float))) break;
-            if (!d_wo_c.alloc(o_sz*sizeof(float))) break;
-            if (!d_final_c.alloc(qlen*ed*sizeof(float))) break;
-            if (!d_att_c.copyFromHost(attended_c.data(), qlen*ed*sizeof(float))) break;
-            if (!d_wo_c.copyFromHost(wo, o_sz*sizeof(float))) break;
-            if (cublasSgemm(impl_->handle, CUBLAS_OP_N, CUBLAS_OP_N,
-                    ed, qlen, ed, &ca,
-                    reinterpret_cast<const float*>(d_wo_c.ptr), ed,
-                    reinterpret_cast<const float*>(d_att_c.ptr), ed,
-                    &cb0,
-                    reinterpret_cast<float*>(d_final_c.ptr), ed) != CUBLAS_STATUS_SUCCESS) break;
-
-            if (cudaDeviceSynchronize() != cudaSuccess) break;
-            outputs.resize(1);
-            outputs[0].resize(static_cast<size_t>(qlen) * ed);
-            if (!d_final_c.copyToHost(outputs[0].data(), static_cast<size_t>(qlen)*ed*sizeof(float))) break;
-            return true;
-            } while (false);
-            break;
-
+#endif // ENABLE_CUDA
         default:
             break;
     }
-#endif // ENABLE_CUDA
 
-    // Fallback: CPU (implémentation complète des LayerType).
+#ifdef ENABLE_CUDA
+    // Never hide a device failure behind a CPU result labelled CUDA.
+    return false;
+#else
     return RuntimeLayerDispatch::cpu_forward_layer(inputs, outputs, layer, training);
+#endif
+}
+
+bool CudaRuntime::forwardLayerWithContext(const std::vector<const std::vector<float>*>& inputs,
+    std::vector<std::vector<float>>& outputs,const Layer& layer,bool training,const RuntimeForwardContext& context){
+#ifdef ENABLE_CUDA
+    if(layer.type_enum==LayerType::Dropout || layer.type_enum==LayerType::Dropout2d || layer.type_enum==LayerType::AlphaDropout){
+        if(context.output_mask)context.output_mask->clear();
+        if(!isInitialized() || !runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training)))return false;
+        outputs.resize(1);return CudaNativeOps::dropout(*inputs[0],outputs[0],layer,training,context.output_mask);
+    }
+#endif
+    return AbstractRuntime::forwardLayerWithContext(inputs,outputs,layer,training,context);
 }
 
 bool CudaRuntime::backwardLayer(
@@ -1543,9 +1373,81 @@ bool CudaRuntime::backwardLayer(
     if (!isInitialized()) return false;
     if (config_.disabled) return false;
     if (!supportsBackwardLayerType(layer.type_enum)) return false;
+#ifdef ENABLE_CUDA
     if (!impl_ || !impl_->handle) return false;
     if (inputs.empty() || !inputs[0] || grad_outputs.empty() || !grad_outputs[0]) return false;
 
+    if(layer.type_enum==LayerType::NMS){
+        if(!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training)))return false;
+        return CudaNativeOps::nmsBackward(inputs,grad_outputs,grad_inputs,layer);
+    }
+    if(CudaOperationGeometry::recurrentType(layer.type_enum)){
+        if(!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training)))return false;
+        CudaOperationGeometry::Recurrent g;g.valid(layer,inputs[0]->size());std::vector<float> gi,dw;
+        if(!CudaNativeOps::recurrent(*inputs[0],gi,layer,g,grad_outputs[0],&dw))return false;
+        cuda_accumulate_parameters(layer,dw,{});grad_inputs={std::move(gi)};return true;
+    }
+    if(CudaOperationGeometry::attentionType(layer.type_enum)){
+        if(!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training)))return false;
+        CudaOperationGeometry::Attention g;g.valid(layer,inputs,true);std::vector<float> dw;
+        if(!CudaNativeOps::attention(inputs,grad_inputs,layer,g,grad_outputs[0],&dw,impl_->handle))return false;
+        cuda_accumulate_parameters(layer,dw,{});return true;
+    }
+    if(CudaOperationGeometry::extendedConvType(layer.type_enum)){
+        if(!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training)))return false;
+        CudaOperationGeometry::ExtendedConv g;g.valid(layer,inputs[0]->size());std::vector<float> gi,dw;
+        if(!CudaNativeOps::extended_conv(*inputs[0],layer,g,gi,grad_outputs[0],&dw))return false;
+        std::vector<float> db;if(g.bias){db.assign(dw.begin()+g.parameters,dw.end());dw.resize(g.parameters);}
+        cuda_accumulate_parameters(layer,dw,db);grad_inputs={std::move(gi)};return true;
+    }
+    if(CudaOperationGeometry::batchNormType(layer.type_enum)){
+        if(!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training)))return false;
+        CudaOperationGeometry::BatchNorm g;g.valid(layer,inputs[0]->size());std::vector<float> gi,dw;
+        if(!CudaNativeOps::batch_norm(*inputs[0],gi,layer,g,training,grad_outputs[0],&dw))return false;
+        if(g.affine)cuda_accumulate_parameters(layer,dw,{}); // CPU BatchNorm stores beta only in grad_weights.
+        grad_inputs={std::move(gi)};return true;
+    }
+    if(CudaOperationGeometry::stochasticType(layer.type_enum)){
+        if(!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training)))return false;
+        if(layer.type_enum==LayerType::Reparameterize)return CudaNativeOps::reparameterize(inputs,grad_inputs,training,grad_outputs[0]);
+        const auto* saved=inputs.size()>1?inputs[1]:nullptr;std::vector<float> gi;
+        if(!CudaNativeOps::dropout(*grad_outputs[0],gi,layer,training,nullptr,saved,true))return false;
+        grad_inputs={std::move(gi)};return true;
+    }
+    if(layer.type_enum==LayerType::GEGLU || layer.type_enum==LayerType::UpsampleBicubic){
+        if(!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training)))return false;
+        CudaOperationGeometry::Resize g;if(layer.type_enum==LayerType::UpsampleBicubic)g.valid(layer,inputs[0]->size());
+        grad_inputs.resize(1);return layer.type_enum==LayerType::GEGLU?CudaNativeOps::geglu(*inputs[0],grad_inputs[0],layer.out_features,grad_outputs[0]):CudaNativeOps::bicubic(*inputs[0],grad_inputs[0],g,grad_outputs[0]);
+    }
+    if(CudaOperationGeometry::projectionType(layer.type_enum)){
+        if(!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training)))return false;
+        CudaOperationGeometry::Projection g;g.valid(layer,inputs);std::vector<float> dw;
+        if(!CudaNativeOps::projection(inputs,grad_inputs,layer,g,grad_outputs[0],&dw))return false;
+        if(g.mode==4 && g.bias){std::vector<float> db(dw.end()-g.dim,dw.end());dw.resize(dw.size()-g.dim);cuda_accumulate_parameters(layer,dw,db);}
+        else cuda_accumulate_parameters(layer,dw,{});
+        return true;
+    }
+    if(layer.type_enum==LayerType::LayerNorm || layer.type_enum==LayerType::RMSNorm){
+        if(!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training)))return false;
+        std::vector<float> gi,dw,db;if(!CudaNativeOps::row_norm(*inputs[0],layer,gi,grad_outputs[0],&dw,&db))return false;
+        if(!dw.empty())cuda_accumulate_parameters(layer,dw,db);
+        grad_inputs={std::move(gi)};return true;
+    }
+    if(CudaOperationGeometry::poolType(layer.type_enum) || CudaOperationGeometry::movementType(layer.type_enum)) {
+        if(!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training)))return false;
+        if(CudaOperationGeometry::poolType(layer.type_enum)){
+            CudaOperationGeometry::Pool g;g.valid(layer,inputs[0]->size());grad_inputs.resize(1);return CudaNativeOps::pool(*inputs[0],grad_inputs[0],g,grad_outputs[0]);
+        }
+        if(layer.type_enum==LayerType::Constant){
+            if(layer.trainable_parameter){
+                if(layer.grad_weights.size()!=layer.getWeightsSize())layer.grad_weights.assign(layer.getWeightsSize(),0.f);
+                for(size_t i=0;i<layer.grad_weights.size();++i)layer.grad_weights[i]+=(*grad_outputs[0])[i];
+            }
+            grad_inputs.clear();return true;
+        }
+        CudaOperationGeometry::Movement g;g.valid(layer,inputs);g.sizes.clear();for(auto* x:inputs)g.sizes.push_back(x->size());
+        return CudaNativeOps::movement(grad_outputs,grad_inputs,layer,g,true);
+    }
     switch (layer.type_enum) {
         case LayerType::Linear: {
             if (!config_.linear_enabled) return false;
@@ -1617,7 +1519,12 @@ bool CudaRuntime::backwardLayer(
                 }
                 for (int b = 0; b < batch; ++b) {
                     const float* row = go.data() + static_cast<size_t>(b) * static_cast<size_t>(out_f);
-                    for (int o = 0; o < out_f; ++o) layer.grad_bias[static_cast<size_t>(o)] += row[o];
+                    for (int o = 0; o < out_f; ++o) {
+                        const size_t index = static_cast<size_t>(o);
+                        layer.grad_bias[index] += row[o];
+                        // Optimizers consume the packed weight+bias block, as on CPU.
+                        layer.grad_weights[w_elems + index] += row[o];
+                    }
                 }
             }
             return true;
@@ -1738,9 +1645,43 @@ bool CudaRuntime::backwardLayer(
             return cuda_run_unary_backward(in, go, grad_inputs[0], op, alpha);
         }
 
-        case LayerType::Conv2d:
-            if (!config_.conv_enabled) return false;
-            break;
+        case LayerType::Conv2d: {
+            if (!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training))) return false;
+            const auto& x=*inputs[0]; const auto& go=*grad_outputs[0]; CudaOperationGeometry::Conv shape;
+            if (!shape.valid(layer,x.size())) return false;
+            std::vector<float> gi,gw,gb;
+            if (!CudaNativeOps::conv_backward(impl_->handle,x,go,layer.getWeights(),shape.ic,shape.oc,shape.h,shape.w,
+                shape.k,shape.stride,shape.pad,shape.dilation,shape.oh,shape.ow,layer.use_bias,gi,gw,gb)) return false;
+            cuda_accumulate_parameters(layer,gw,gb); grad_inputs={std::move(gi)}; return true;
+        }
+        case LayerType::InstanceNorm2d:
+        case LayerType::GroupNorm: {
+            if (!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training))) return false;
+            const auto& x=*inputs[0]; CudaOperationGeometry::Norm shape; if (!shape.valid(layer,x.size())) return false;
+            std::vector<float> gi,gw,gb;
+            if (!CudaNativeOps::groupnorm(x,layer.affine?layer.getWeights():nullptr,layer.getWeightsSize(),shape.channels,
+                shape.spatial,shape.groups,layer.eps,layer.affine && layer.use_bias,gi,grad_outputs[0],&gw,&gb)) return false;
+            if (layer.affine) cuda_accumulate_parameters(layer,gw,gb);
+            grad_inputs={std::move(gi)}; return true;
+        }
+        case LayerType::UpsampleNearest:
+        case LayerType::UpsampleBicubic:
+        case LayerType::UpsampleBilinear: {
+            if (!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training))) return false;
+            CudaOperationGeometry::Resize shape; if (!shape.valid(layer,inputs[0]->size())) return false;
+            std::vector<float> gi;
+            if (!CudaNativeOps::resize(*grad_outputs[0],gi,shape.c,shape.ih,shape.iw,shape.oh,shape.ow,shape.sh,shape.sw,
+                                      layer.type_enum==LayerType::UpsampleBilinear,true)) return false;
+            grad_inputs={std::move(gi)}; return true;
+        }
+        case LayerType::Softmax:
+        case LayerType::LogSoftmax: {
+            if (!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training))) return false;
+            int size=0,inner=0; if (!cuda_axis_geometry(*inputs[0],layer,size,inner)) return false;
+            std::vector<float> gi;
+            if (!CudaNativeOps::softmax(*inputs[0],gi,size,inner,layer.type_enum==LayerType::LogSoftmax,grad_outputs[0])) return false;
+            grad_inputs={std::move(gi)}; return true;
+        }
         case LayerType::LayerNorm:
         case LayerType::RMSNorm:
             if (!config_.norm_enabled) return false;
@@ -1761,6 +1702,59 @@ bool CudaRuntime::backwardLayer(
             return false;
     }
 
-    // Fallback pour les chemins non encore couverts en backward GPU.
+#endif // ENABLE_CUDA
+
+#ifdef ENABLE_CUDA
+    return false;
+#else
     return RuntimeLayerDispatch::cpu_backward_layer(inputs, grad_outputs, grad_inputs, layer, training);
+#endif
+}
+
+bool CudaRuntime::supportsOptimizer() const {
+#ifdef ENABLE_CUDA
+    return isInitialized() && !config_.disabled;
+#else
+    return false;
+#endif
+}
+bool CudaRuntime::optimizerStep(const RuntimeOptimizerRequest& request) {
+#ifdef ENABLE_CUDA
+    if(!supportsOptimizer() || (!optimizerDeviceSizeFits(request) || !optimizerRequestValid(request)) || cudaSetDevice(config_.device_index)!=cudaSuccess)return false;
+    auto memory=optimizerPack(request);auto args=optimizerParameters(request);
+    Impl::DeviceBuf data,parameters;
+    if(!data.alloc(memory.size()*4) || !parameters.alloc(args.size()*4) ||
+       !data.copyFromHost(memory.data(),memory.size()*4) || !parameters.copyFromHost(args.data(),args.size()*4))return false;
+    const int n=int(request.count);
+    std::vector<int> passes{0};if(args[2]==4 || args[2]==8){passes.push_back(1);passes.push_back(3);passes.push_back(2);}
+    for(int pass:passes) {
+        if(cudaMemcpy(parameters.ptr,&pass,4,cudaMemcpyHostToDevice)!=cudaSuccess)return false;
+        mimir_optimizer<<<pass==3?1:(n+255)/256,256>>>(static_cast<float*>(data.ptr),static_cast<int*>(parameters.ptr));
+        if(!CudaNativeOps::finished())return false;
+    }
+    if(!data.copyToHost(memory.data(),memory.size()*4))return false;
+    return optimizerCommit(request,memory);
+#else
+    (void)request;return false;
+#endif
+}
+
+#include "runtimes/losses/LossDispatch.hpp"
+bool CudaRuntime::reconstructionLoss(const RuntimeLossGrad::Request& r,RuntimeLossGrad::LossWithGrad& out) {
+#ifdef ENABLE_CUDA
+    if(!supportsReconstructionLoss() || !RuntimeLossGrad::deviceSizeFits(r) || cudaSetDevice(config_.device_index)!=cudaSuccess)return false;
+    auto memory=RuntimeLossGrad::pack(r);auto args=RuntimeLossGrad::parameters(r);
+    Impl::DeviceBuf data,parameters;
+    if(!data.alloc(memory.size()*4) || !parameters.alloc(args.size()*4) ||
+       !data.copyFromHost(memory.data(),memory.size()*4) || !parameters.copyFromHost(args.data(),args.size()*4))return false;
+    for(int pass:RuntimeLossGrad::passes(args)) {
+        if(cudaMemcpy(parameters.ptr,&pass,4,cudaMemcpyHostToDevice)!=cudaSuccess)return false;
+        mimir_reconstruction<<<pass==91?1:(args[1]+255)/256,256>>>(static_cast<float*>(data.ptr),static_cast<int*>(parameters.ptr));
+        if(!CudaNativeOps::finished())return false;
+    }
+    if(!data.copyToHost(memory.data(),memory.size()*4))return false;
+    return RuntimeLossGrad::unpack(r,memory,out);
+#else
+    (void)r;(void)out;return false;
+#endif
 }

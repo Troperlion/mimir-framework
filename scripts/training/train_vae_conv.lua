@@ -249,6 +249,29 @@ cfg.latent_c = opt_int("latent-c", cfg.latent_c or 32)
 
 cfg.base_channels = opt_int("base-channels", cfg.base_channels or 64)
 
+-- Latent topology belongs to the checkpoint on resume. New configuration
+-- defaults must never inject untrained branches into a legacy graph.
+do
+  local saved = resume_architecture and resume_architecture.model_config
+  for _, key in ipairs({"latent_spatial_context", "latent_detail_path", "latent_context_channels"}) do
+    local flag = key:gsub("_", "-")
+    local is_width = key == "latent_context_channels"
+    local fallback = is_width and 32 or false
+    local checkpoint_value = saved and saved[key]
+    if checkpoint_value == nil then checkpoint_value = fallback end
+    local default = cfg[key]
+    if saved then default = checkpoint_value end
+    local value
+    if is_width then value = opt_int(flag, opt_int(key, default or 32))
+    else value = opt_bool(flag, opt_bool(key, default)) end
+    if saved and (opts[flag] ~= nil or opts[key] ~= nil) and value ~= checkpoint_value then
+      error("Topologie latente incompatible avec le checkpoint: --" .. flag .. "; démarrer un nouvel entraînement pour activer cette branche.")
+    end
+    cfg[key] = value
+  end
+end
+
+
 -- Upsampling du décodeur. Un nouveau run conserve le défaut historique du
 -- script, tandis qu'une reprise réutilise la topologie du checkpoint sauf
 -- surcharge explicite dans CONF ou en CLI.
@@ -521,6 +544,20 @@ cfg.seq_len = opt_int("seq-len", cfg.seq_len or 64)
 cfg.text_d_model = opt_int("text-d-model", cfg.text_d_model or 64)
 cfg.proj_dim = opt_int("proj-dim", cfg.proj_dim or (cfg.text_cond and 64 or 0))
 cfg.align_weight = opt_num("align-weight", cfg.align_weight or 0.1)
+-- Supervision spatiale active par défaut, indépendamment du conditionnement texte.
+-- Le runtime affiche automatiquement son icône sur [DS] si la VIZ est ouverte.
+cfg.bbox_loss_weight = opt_num("bbox-loss-weight", cfg.bbox_loss_weight or 1.0)
+if cfg.bbox_loss_weight ~= cfg.bbox_loss_weight or cfg.bbox_loss_weight == math.huge or cfg.bbox_loss_weight < 0 then
+  error("--bbox-loss-weight doit être fini et >= 0")
+end
+
+for role, default in pairs({primary=3.0, secondary=2.0, other=1.0}) do
+  local key = "relation_" .. role .. "_weight"
+  cfg[key] = opt_num("relation-" .. role .. "-weight", cfg[key] or default)
+  if cfg[key] ~= cfg[key] or cfg[key] == math.huge or cfg[key] < 0 then
+    error("--relation-" .. role .. "-weight doit être fini et >= 0")
+  end
+end
 
 -- IMPORTANT: base tokenizer commun (si texte activé)
 local base_tok_path = opt_str("base-tokenizer", BaseTok.default_path())
@@ -836,6 +873,11 @@ log(string.format("  - out_dir(resume_from)=%s", out_dir))
 log(string.format("  - output_model(save_to)=%s", save_out_dir))
 log(string.format("  - epochs=%d", epochs))
 log(string.format("  - learning_rate=%g", lr))
+if cfg.bbox_loss_weight > 0 then
+  log(string.format("  - bbox: activées (poids=%g), icône [DS] automatique dans VIZ", cfg.bbox_loss_weight))
+else
+  log("  - bbox: désactivées (poids=0)")
+end
 log(string.format("  - base_tokenizer=%s", base_tok_path))
 log("  - cfg:")
 do
@@ -870,9 +912,9 @@ if (tonumber(n_or_err) or 0) == 0 then
   error(string.format(
     "Dataset vide: 0 item chargé depuis '%s' (min_modalities=%d).\n" ..
     "  - Vérifiez que le dossier existe et contient des images.\n" ..
-    "  - Avec --text-cond true (min_modalities=2), chaque image doit avoir un fichier .txt " ..
+    "  - Avec --text-cond true (min_modalities=2), chaque image doit avoir une annotation .json ou un fichier .txt " ..
     "avec le même stem dans le même répertoire.\n" ..
-    "  - Structure attendue: dataset_root/<stem>.jpg + <stem>.txt",
+    "  - Structure attendue: dataset_root/<stem>.jpg + <stem>.json (ou <stem>.txt)",
     dataset_root, min_mod
   ))
 end
@@ -948,8 +990,8 @@ if ok_train == false and tostring(err_train) == "STOP_REQUESTED" then
   FS.mkdir_p(last_dir)
   local ok_save_stop, err_save_stop = Mimir.Serialization.save(last_dir, "raw_folder", {
     save_optimizer = true,
-    save_tokenizer = true,
-    save_encoder = true,
+    save_tokenizer = cfg.text_cond,
+    save_encoder = false,
     include_checksums = true,
     include_git_info = true,
     include_gradients = true,
@@ -1007,7 +1049,7 @@ do
   local endtrain_path = save_out_dir .. "/endtrain.json"
   local ok_dbg_end, err_dbg_end = Mimir.Serialization.save(endtrain_path, "debug_json", {
     save_optimizer = true,
-    save_tokenizer = true,
+    save_tokenizer = false,
     save_encoder = true,
     include_checksums = true,
     include_git_info = true,
@@ -1024,15 +1066,15 @@ end
 do
   local st_path = save_out_dir .. "/model.safetensors"
   local ok_st, err_st = Mimir.Serialization.save(st_path, "safetensors", {
-    save_optimizer = true,
-    save_tokenizer = true,
-    save_encoder = true,
+    save_optimizer = false,
+    save_tokenizer = false,
+    save_encoder = false,
     include_checksums = true,
     include_git_info = true,
-    include_gradients = true,
+    include_gradients = false,
     include_activations = true,
-    include_optimizer_state = true,
-    include_weight_deltas = true,
+    include_optimizer_state = false,
+    include_weight_deltas = false,
   })
   assert_ok(ok_st, err_st, "Serialization.save(model.safetensors) failed")
   log("✓ SafeTensors écrit: " .. st_path)
@@ -1040,8 +1082,8 @@ end
 
 local ok_save, err_save = Mimir.Serialization.save(save_out_dir, "raw_folder", {
   save_optimizer = true,
-  save_tokenizer = true,
-  save_encoder = true,
+  save_tokenizer = false,
+  save_encoder = false,
   include_checksums = true,
   include_git_info = true,
   include_gradients = true,

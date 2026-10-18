@@ -1,6 +1,8 @@
 #include "LumenLatentDiffusionModel.hpp"
 #include "Models/Vision/VAEConvModel.hpp"
 #include "Serialization/Serialization.hpp"
+#include "training/BBoxSupervision.hpp"
+#include "runtimes/ops_loss_and_grad.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -12,6 +14,82 @@
 #include <unordered_map>
 
 namespace {
+
+// One numerical contract for corruption, previews and deterministic DDIM.
+class DiffusionSchedule {
+public:
+    explicit DiffusionSchedule(const LumenLatentDiffusionModel::Config& cfg) {
+        if (cfg.diffusion_steps < 2 || !std::isfinite(cfg.beta_start) ||
+            !std::isfinite(cfg.beta_end) || cfg.beta_start <= 0.f ||
+            cfg.beta_end < cfg.beta_start || cfg.beta_end >= 1.f) {
+            throw std::invalid_argument("Lumen: invalid diffusion schedule");
+        }
+        double cumulative = 1.;
+        for (int t = 0; t < cfg.diffusion_steps; ++t) {
+            const double beta = cfg.beta_start + double(t) /
+                (cfg.diffusion_steps - 1) * (cfg.beta_end - cfg.beta_start);
+            cumulative *= 1. - beta;
+            alpha_.push_back(static_cast<float>(cumulative));
+        }
+    }
+    int size() const { return static_cast<int>(alpha_.size()); }
+    float signal(int t) const { return std::sqrt(std::max(alpha_.at(t), 1e-8f)); }
+    float noise(int t) const { return std::sqrt(std::max(0.f, 1.f - alpha_.at(t))); }
+    std::vector<float> corrupt(const std::vector<float>& clean,
+                               const std::vector<float>& epsilon, int t) const {
+        if (clean.size() != epsilon.size()) throw std::invalid_argument("Lumen: noise shape mismatch");
+        const float signal_scale = signal(t), noise_scale = noise(t);
+        std::vector<float> result(clean.size());
+        for (size_t i = 0; i < result.size(); ++i)
+            result[i] = signal_scale * clean[i] + noise_scale * epsilon[i];
+        return result;
+    }
+    void advance(std::vector<float>& sample, const std::vector<float>& epsilon,
+                 int t, int previous) const {
+        if (sample.size() != epsilon.size()) throw std::invalid_argument("Lumen: prediction shape mismatch");
+        const float signal_scale = signal(t), noise_scale = noise(t);
+        const float a = previous < 0 ? 1.f : signal(previous);
+        const float b = previous < 0 ? 0.f : noise(previous);
+        for (size_t i = 0; i < sample.size(); ++i) {
+            const float clean = (sample[i] - noise_scale * epsilon[i]) / signal_scale;
+            sample[i] = a * clean + b * epsilon[i];
+        }
+    }
+private:
+    std::vector<float> alpha_;
+};
+
+// Sample before allocating: full-resolution decoder outputs stay outside the UI snapshot.
+template<class Value, class Colour>
+Model::VizFrame rgbTip(int width, int height, int max_side, const std::string& label,
+                       const std::string& info, Value value, Colour colour) {
+    Model::VizFrame frame;
+    const double scale = std::min(1., double(std::max(1, max_side)) / std::max(width, height));
+    frame.w = std::max(1, int(std::lround(width * scale)));
+    frame.h = std::max(1, int(std::lround(height * scale)));
+    frame.channels = frame.tensor_sample_channels = 3;
+    frame.label = label;
+    frame.tensor_info = info + " | source=HWC " + std::to_string(height) + "x" + std::to_string(width) + "x3";
+    const size_t count = static_cast<size_t>(frame.w) * frame.h * 3;
+    frame.pixels.reserve(count);
+    frame.tensor_values.reserve(count);
+    frame.tensor_indices.reserve(count);
+    for (int y = 0; y < frame.h; ++y) for (int x = 0; x < frame.w; ++x) {
+        const size_t source = (static_cast<size_t>(y * height / frame.h) * width + x * width / frame.w) * 3;
+        for (int c = 0; c < 3; ++c) {
+            const float raw = value(source + c);
+            frame.tensor_values.push_back(raw);
+            frame.tensor_indices.push_back(source + c);
+            frame.pixels.push_back(colour(raw));
+        }
+    }
+    return frame;
+}
+
+uint8_t decodedColour(float value) {
+    if (!std::isfinite(value)) return 0;
+    return static_cast<uint8_t>(std::lround(std::clamp(value * .5f + .5f, 0.f, 1.f) * 255.f));
+}
 
 size_t parameterCount(int out_channels, int in_channels, int kernel_size) {
     return static_cast<size_t>(out_channels) * static_cast<size_t>(in_channels) *
@@ -104,6 +182,32 @@ std::unordered_map<std::string, float> diffusionDiagnostics(
     return metrics;
 }
 
+struct DiffusionLoss {
+    RuntimeLossGrad::LossWithGrad objective;
+    float mse_unweighted=0.0f;
+};
+
+DiffusionLoss diffusionLoss(const std::vector<float>& prediction,
+                            const std::vector<float>& target,
+                            const std::vector<float>* weights,
+                            const std::vector<SpatialRelation>* relations) {
+    if(prediction.size()!=target.size())
+        throw std::invalid_argument("Lumen: diffusion prediction and target sizes differ");
+    if(weights && weights->size()!=prediction.size())
+        throw std::invalid_argument("Lumen: spatial loss weights size mismatch");
+    RuntimeLossGrad::PixelLossOptions options;
+    options.weights=weights;options.relations=relations;
+    DiffusionLoss result;
+    // Keep epsilon prediction on MSE. The runtime owns both its scalar value
+    // and its VJP, including spatial weights and relational supervision.
+    result.objective=RuntimeLossGrad::pixel_loss_and_grad(prediction,target,"mse",options);
+    const bool weighted=weights || (relations && !relations->empty());
+    result.mse_unweighted=static_cast<float>(weighted
+        ? RuntimeLossGrad::pixel_loss_and_grad(prediction,target,"mse").loss
+        : result.objective.loss);
+    return result;
+}
+
 } // namespace
 
 LumenLatentDiffusionModel::LumenLatentDiffusionModel() {
@@ -113,7 +217,25 @@ LumenLatentDiffusionModel::LumenLatentDiffusionModel() {
 
 std::optional<Model::TrainStepResult> LumenLatentDiffusionModel::trainStep(
     const TrainStepRequest& request) {
+    applyRuntimeConfiguration();
     if (request.optimizer == nullptr || request.target == nullptr) return std::nullopt;
+    if (request.annotation) {
+        auto weights = BBoxSupervision::makeWeights(request.annotation,cfg_.latent_w,cfg_.latent_h,
+            cfg_.latent_c,BBoxSupervision::Layout::CHW,modelConfig.value("bbox_loss_weight",1.0f), &modelConfig);
+        if (request.loss_weights) BBoxSupervision::combineMask(weights,*request.loss_weights);
+        auto adapted=request; adapted.annotation=nullptr;
+        adapted.relations = &weights.relations;
+        adapted.loss_weights=weights.values.empty()?nullptr:&weights.values;
+        auto result=trainStep(adapted);
+        if (result) {
+            result->metrics["bbox_count"]=static_cast<float>(weights.bbox_count);
+            result->metrics["skeleton_region_count"]=static_cast<float>(weights.skeleton_region_count);
+            result->metrics["bbox_loss_weight"]=weights.strength;
+            result->metrics["relation_count"]=static_cast<float>(weights.relations.size());
+        }
+        return result;
+    }
+
 
     std::unordered_map<std::string, std::vector<float>> float_inputs;
     for (const auto& [name, values] : request.float_inputs) {
@@ -128,16 +250,18 @@ std::optional<Model::TrainStepResult> LumenLatentDiffusionModel::trainStep(
     if (float_inputs.empty()) return std::nullopt;
 
     if (request.mode == TrainStepMode::Optimize) zeroGradients();
-    const std::vector<float>& prediction =
-        forwardPassNamedView(float_inputs, int_inputs, true);
+    (void)forwardPassNamedView(float_inputs, int_inputs, true);
+    const auto& prediction = getTensor("x"); // internal epsilon head, public output is z
 
     TrainStepResult result;
-    result.loss = computeLoss(prediction, *request.target, "mse");
     result.metrics = diffusionDiagnostics(prediction, *request.target);
+    auto loss=diffusionLoss(prediction,*request.target,request.loss_weights,request.relations);
+    result.loss=static_cast<float>(loss.objective.loss);
+    result.metrics["relation_loss"]=static_cast<float>(loss.objective.relation_loss);
+    std::vector<float> loss_gradient=std::move(loss.objective.grad);
+    result.metrics["relation_count"] = request.relations ? static_cast<float>(request.relations->size()) : 0.0f;
+    result.metrics["mse_unweighted"]=loss.mse_unweighted;
     result.metrics["mse"] = result.loss;
-
-    std::vector<float> loss_gradient;
-    computeLossGradientInto(prediction, *request.target, loss_gradient, "mse");
     if (request.mode == TrainStepMode::Accumulate && request.grad_scale != 1.0f) {
         for (float& gradient : loss_gradient) gradient *= request.grad_scale;
     }
@@ -225,6 +349,9 @@ static void adaptLumenConfigToVaeCheckpoint(
     adapt_int("latent_h", cfg.latent_h);
     adapt_int("latent_c", cfg.latent_c);
     adapt_int("base_channels", cfg.vae_base_channels);
+    adapt_bool("latent_spatial_context", cfg.vae_latent_spatial_context);
+    adapt_bool("latent_detail_path", cfg.vae_latent_detail_path);
+    adapt_int("latent_context_channels", cfg.vae_latent_context_channels);
     adapt_bool("stochastic_latent", cfg.vae_stochastic_latent);
     adapt_bool("resnet", cfg.vae_resnet);
     adapt_bool("attention", cfg.vae_attention);
@@ -246,109 +373,98 @@ static void adaptLumenConfigToVaeCheckpoint(
 
 bool LumenLatentDiffusionModel::InitVizTips() {
     clearVizTipsRegistry();
-    clearVizTaps();
-    registerVizTip("lumen/text/token_embedding", "Conditioning/tokens");
-    registerVizTip("lumen/text/add_position", "Conditioning/position");
-    registerVizTip("lumen/time/projection", "Diffusion/timestep");
-    registerVizTip("lumen/dit/patch_embed", "DiT/patches");
-    registerVizTip("lumen/dit/block1/self_attention", "DiT/self_attention");
-    registerVizTip("lumen/dit/block1/cross_attention", "DiT/cross_attention");
-    registerVizTip("lumen/dit/unpatchify", "DiT/epsilon_rgb");
+    // Keep canonical layer labels so graph selection and tensor picking stay linked.
+    for (const auto& layer : getLayers()) {
+        const auto& name = layer.name;
+        std::string tip;
+        if (name == "lumen/output/z") tip = "role=model_output tensor=z | reconstructed image";
+        else if (name == "lumen/text/token_embedding") tip = "Prompt/tokens";
+        else if (name == "lumen/text/final_norm") tip = "Prompt/context";
+        else if (name == "lumen/time/output") tip = "Diffusion/time_condition";
+        else if (name == "lumen/dit/patch_embed") tip = "DiT/latent_patches";
+        else if (name == "lumen/dit/final_norm") tip = "DiT/features";
+        else if (name == "lumen/dit/unpatchify") tip = "DiT/epsilon_latent";
+        else if (name.rfind("lumen/dit/block", 0) == 0) {
+            const auto slash = name.find('/', std::string("lumen/dit/").size());
+            const auto block = name.substr(std::string("lumen/dit/").size(), slash - std::string("lumen/dit/").size());
+            const auto operation = name.substr(slash + 1);
+            if (operation == "self_attention" || operation == "cross_attention" || operation == "add_mlp")
+                tip = "DiT/" + block + "/" + operation;
+        }
+        if (!tip.empty()) registerVizTip(name, tip);
+    }
     return true;
 }
 
 bool LumenLatentDiffusionModel::UpdateVizTips(const Layer& layer, VizFrame& frame) {
-    if (Model::UpdateVizTips(layer, frame)) return true;
-    if (layer.name.empty()) return false;
-
-    auto attach = [&](const std::string& label) {
-        if (frame.label.empty()) frame.label = label;
-        else frame.label += " | " + label;
+    const bool selected = Model::UpdateVizTips(layer, frame);
+    if (!selected) return false;
+    if (layer.name == "lumen/output/z" && cfg_.image_c == 3 && !layer.inputs.empty() && hasTensor(layer.inputs[0])) {
+        const auto& image = getTensor(layer.inputs[0]);
+        if (image.size() == size_t(cfg_.image_w) * cfg_.image_h * 3)
+            frame = rgbTip(cfg_.image_w, cfg_.image_h, getVizTapsMaxSide(), frame.label,
+                "z: single-pass reconstructed RGB [-1,1]", [&](size_t i) { return image[i]; }, decodedColour);
         return true;
-    };
-    const std::string& name = layer.name;
-    if (name.find("lumen/text/") == 0) return attach("Conditioning/text");
-    if (name.find("lumen/time/") == 0) return attach("Diffusion/time");
-    if (name.find("lumen/dit/") == 0) return attach("Diffusion Transformer");
-    return false;
+    }
+    if (layer.name.rfind("lumen/text/", 0) == 0) {
+        frame.tensor_info += " | prompt_tokens=" + std::to_string(
+            modelConfig.value("text_active_seq_len", cfg_.text_seq_len));
+    } else if (layer.name == "lumen/dit/unpatchify") {
+        frame.tensor_info += " | epsilon CHW " + std::to_string(cfg_.latent_c) + "x" +
+            std::to_string(cfg_.latent_h) + "x" + std::to_string(cfg_.latent_w);
+    } else if (layer.name.rfind("lumen/dit/block", 0) == 0) {
+        frame.tensor_info += " | latent_patch_grid=" +
+            std::to_string(cfg_.latent_h / cfg_.patch_size) + "x" +
+            std::to_string(cfg_.latent_w / cfg_.patch_size);
+    }
+    return true;
 }
 
 void LumenLatentDiffusionModel::addDiffusionVizTips(
     const std::vector<float>& generated_image,
-    const std::vector<unsigned char>& original_image
-) {
+    const std::vector<unsigned char>& original_image) {
     if (!isVizTapsEnabled() || cfg_.image_c != 3) return;
-    const size_t image_size = static_cast<size_t>(cfg_.image_w) * cfg_.image_h * 3;
-    if (generated_image.size() != image_size || original_image.size() != image_size) return;
-
-    std::vector<uint8_t> generated(image_size);
-    std::vector<uint8_t> absolute(image_size);
-    std::vector<uint8_t> normalized(image_size);
-    std::vector<uint8_t> positive(image_size);
-    std::vector<uint8_t> negative(image_size);
-    for (size_t index = 0; index < image_size; ++index) {
-        const float value = std::clamp(generated_image[index] * 0.5f + 0.5f, 0.0f, 1.0f);
-        generated[index] = static_cast<uint8_t>(std::lround(value * 255.0f));
-        const int delta = static_cast<int>(generated[index]) -
-                          static_cast<int>(original_image[index]);
-        absolute[index] = static_cast<uint8_t>(std::abs(delta));
-        normalized[index] = static_cast<uint8_t>(std::lround(127.5f + 0.5f * delta));
-        positive[index] = static_cast<uint8_t>(std::max(0, delta));
-        negative[index] = static_cast<uint8_t>(std::max(0, -delta));
-    }
-
-    auto add_frame = [&](const char* label, const std::vector<uint8_t>& pixels) {
-        VizFrame frame;
-        frame.pixels = pixels;
-        frame.w = cfg_.image_w;
-        frame.h = cfg_.image_h;
-        frame.channels = 3;
-        frame.label = label;
-        addVizTapFrame(std::move(frame));
+    const size_t count = static_cast<size_t>(cfg_.image_w) * cfg_.image_h * 3;
+    if (generated_image.size() != count || original_image.size() != count) return;
+    auto emit = [&](const char* label, const char* info, auto value, auto colour) {
+        addVizTapFrame(rgbTip(cfg_.image_w, cfg_.image_h, getVizTapsMaxSide(), label, info, value, colour));
     };
-
-    add_frame("resdiff_abs", absolute);
-    add_frame("resdiff_norm", normalized);
-    add_frame("resdiff_max", positive);
-    add_frame("resdiff_min", negative);
-    add_frame("diffusion_out", generated);
+    auto delta = [&](size_t i) { return float(int(decodedColour(generated_image[i])) - int(original_image[i])); };
+    emit("resdiff_abs", "absolute pixel residual [0,255]",
+        [&](size_t i) { return std::abs(delta(i)); },
+        [](float d) { return uint8_t(std::abs(d)); });
+    emit("resdiff_norm", "signed pixel residual [-255,255]", delta,
+        [](float d) { return uint8_t(std::lround(127.5f + .5f * d)); });
+    emit("resdiff_max", "positive pixel residual [0,255]",
+        [&](size_t i) { return std::max(0.f, delta(i)); }, [](float d) { return uint8_t(d); });
+    emit("resdiff_min", "negative pixel residual magnitude [0,255]",
+        [&](size_t i) { return std::max(0.f, -delta(i)); }, [](float d) { return uint8_t(d); });
+    emit("diffusion_out", "decoded model prediction [-1,1]",
+        [&](size_t i) { return generated_image[i]; }, decodedColour);
+    emit("diffusion/reference", "dataset pixels [0,255]",
+        [&](size_t i) { return float(original_image[i]); }, [](float v) { return uint8_t(v); });
 }
 
 void LumenLatentDiffusionModel::addDiffusionComparisonVizTips(
     const std::vector<float>& oracle_image,
     const std::vector<float>& noisy_baseline_image,
-    const std::vector<float>& predicted_image,
-    int timestep
-) {
+    const std::vector<float>& predicted_image, int timestep) {
     if (!isVizTapsEnabled() || cfg_.image_c != 3) return;
-    const size_t image_size = static_cast<size_t>(cfg_.image_w) * cfg_.image_h * 3;
-    if (oracle_image.size() != image_size ||
-        noisy_baseline_image.size() != image_size ||
-        predicted_image.size() != image_size) {
-        return;
-    }
-
-    auto add_frame = [&](const char* name, const std::vector<float>& image) {
-        VizFrame frame;
-        frame.pixels.resize(image_size);
-        for (size_t index = 0; index < image_size; ++index) {
-            const float normalized = std::clamp(image[index] * 0.5f + 0.5f, 0.0f, 1.0f);
-            frame.pixels[index] = static_cast<uint8_t>(std::lround(normalized * 255.0f));
-        }
-        frame.w = cfg_.image_w;
-        frame.h = cfg_.image_h;
-        frame.channels = 3;
-        frame.label = std::string("diffusion/compare/") + name +
-                      " | timestep=" + std::to_string(timestep);
-        addVizTapFrame(std::move(frame));
+    const size_t count = static_cast<size_t>(cfg_.image_w) * cfg_.image_h * 3;
+    if (oracle_image.size() != count || noisy_baseline_image.size() != count || predicted_image.size() != count) return;
+    auto emit = [&](const char* name, const std::vector<float>& image) {
+        const std::string label = std::string("diffusion/compare/") + name + " | timestep=" + std::to_string(timestep);
+        addVizTapFrame(rgbTip(cfg_.image_w, cfg_.image_h, getVizTapsMaxSide(), label,
+            "decoded latent [-1,1] | timestep=" + std::to_string(timestep),
+            [&](size_t i) { return image[i]; }, decodedColour));
     };
-
-    add_frame("A_oracle_decode_z0", oracle_image);
-    add_frame("B_noisy_baseline", noisy_baseline_image);
-    add_frame("C_model_decode_z0_pred", predicted_image);
+    emit("A_oracle_decode_z0", oracle_image);
+    emit("B_noisy_baseline", noisy_baseline_image);
+    emit("C_model_decode_z0_pred", predicted_image);
 }
 
 void LumenLatentDiffusionModel::buildFromConfig(const Config& cfg) {
+    const DiffusionSchedule validated_schedule(cfg);
     cfg_ = cfg;
     if (!cfg_.vae_checkpoint.empty()) {
         Model checkpoint_metadata;
@@ -404,6 +520,9 @@ void LumenLatentDiffusionModel::buildFromConfig(const Config& cfg) {
         vae_cfg.latent_h = cfg_.latent_h;
         vae_cfg.latent_c = cfg_.latent_c;
         vae_cfg.base_channels = cfg_.vae_base_channels;
+        vae_cfg.latent_spatial_context = cfg_.vae_latent_spatial_context;
+        vae_cfg.latent_detail_path = cfg_.vae_latent_detail_path;
+        vae_cfg.latent_context_channels = cfg_.vae_latent_context_channels;
         vae_cfg.stochastic_latent = cfg_.vae_stochastic_latent;
         vae_cfg.resnet = cfg_.vae_resnet;
         vae_cfg.attention = cfg_.vae_attention;
@@ -484,12 +603,15 @@ void LumenLatentDiffusionModel::buildFromConfig(const Config& cfg) {
 
     setHasEncoder(false);
     buildInto(*this, cfg_);
+    appendReconstructionGraph();
 
     if (vae_encoder_ && vae_decoder_) {
-        nlohmann::json decoder_graph_inputs = {{"latent", "__input__"}};
+        // Frozen codec: show its decoded comparisons, avoid capturing every internal
+        // layer three times for one preview. The external graph remains available.
+        vae_encoder_->modelConfig["viz_taps_suppressed"] = true;
+        vae_decoder_->modelConfig["viz_taps_suppressed"] = true;
         nlohmann::json decoder_skip_inputs = nlohmann::json::array();
         for (const auto& binding : vae_skip_bindings_) {
-            decoder_graph_inputs[binding.decoder_input] = binding.decoder_input;
             decoder_skip_inputs.push_back(binding.decoder_input);
         }
         modelConfig["external_graphs"]["vae_encoder"] =
@@ -497,12 +619,6 @@ void LumenLatentDiffusionModel::buildFromConfig(const Config& cfg) {
                 {"inputs", {{"image", "__input__"}}},
                 {"outputs", {{"latent", vae_encoder_output_}}},
                 {"feeds", {{"model", "lumen"}, {"input", "__input__"}}},
-            });
-        modelConfig["external_graphs"]["vae_decoder"] =
-            external_execution_graph(*vae_decoder_, {
-                {"inputs", decoder_graph_inputs},
-                {"outputs", {{"image", "x"}}},
-                {"fed_by", {{"model", "lumen"}, {"output", "x"}}},
             });
         modelConfig["vae_skip_bindings"] = nlohmann::json::array();
         for (const auto& binding : vae_skip_bindings_) {
@@ -524,13 +640,94 @@ void LumenLatentDiffusionModel::buildFromConfig(const Config& cfg) {
                 {"output", "x"},
             }},
             {"image_decoder", {
-                {"model", "vae_decoder"},
-                {"input", "__input__"},
+                {"model", "lumen"},
+                {"input", "lumen/reconstruction/unshifted"},
                 {"skip_inputs", decoder_skip_inputs},
-                {"output", "x"},
+                {"output", "z"},
             }},
         };
     }
+    modelConfig["graph_bindings"]["model_output"] = {{"model", "lumen"}, {"output", "z"}};
+}
+
+void LumenLatentDiffusionModel::appendReconstructionGraph() {
+    auto binary = [&](const std::string& name, const std::string& type,
+                      const std::string& left, const std::string& right) {
+        push(name, type, 0);
+        auto* layer = getLayerByName(name);
+        layer->inputs = {left, right};
+        layer->output = name;
+    };
+    const std::string root = "lumen/reconstruction/";
+    binary(root + "scaled_epsilon", "Multiply", "x", "diffusion_noise_scale");
+    binary(root + "signal", "Subtract", "__input__", root + "scaled_epsilon");
+    binary(root + "clean_latent", "Divide", root + "signal", "diffusion_signal_scale");
+    std::string image;
+    if (vae_decoder_) {
+        binary(root + "unscaled", "Divide", root + "clean_latent", "vae_decode_scale");
+        binary(root + "unshifted", "Add", root + "unscaled", "vae_decode_shift");
+        const std::string prefix = root + "decoder/";
+        for (const auto& source : vae_decoder_->getLayers()) {
+            Layer layer = source;
+            layer.name = prefix + source.name;
+            layer.output = prefix + (source.output.empty() ? "x" : source.output);
+            for (auto& input : layer.inputs)
+                input = input == "__input__" ? root + "unshifted" : prefix + input;
+            if (!layer.shared_weights_from.empty()) layer.shared_weights_from = prefix + layer.shared_weights_from;
+            if (source.getWeightsSize())
+                layer.weights.assign(source.getWeights(), source.getWeights() + source.getWeightsSize());
+            layer.weight_block = nullptr;
+            layer.grad_weights.clear();
+            getMutableLayers().push_back(std::move(layer));
+        }
+        modelConfig["frozen_layer_prefixes"] = json::array({prefix});
+        modelConfig["initialize_from_layer_weights"] = true;
+        image = prefix + "x";
+    } else {
+        push(root + "to_hwc", "Permute", 0);
+        auto* layer = getLayerByName(root + "to_hwc");
+        layer->inputs = {root + "clean_latent"};
+        layer->output = root + "image_hwc";
+        layer->shape = {cfg_.latent_c, cfg_.latent_h, cfg_.latent_w};
+        layer->permute_dims = {1, 2, 0};
+        image = layer->output;
+    }
+    push("lumen/output/z", "Identity", 0);
+    auto* output = getLayerByName("lumen/output/z");
+    output->inputs = {image};
+    output->output = "z";
+    output->output_width = cfg_.image_w;
+    output->output_height = cfg_.image_h;
+    output->out_channels = cfg_.image_c;
+    modelConfig["forward_output_tensor"] = "z";
+    modelConfig["inference_output_tensor"] = "z";
+    modelConfig["output_tensor"] = "z";
+    modelConfig["diffusion_prediction_tensor"] = "x";
+    modelConfig["output_dim"] = cfg_.image_w * cfg_.image_h * cfg_.image_c;
+    modelConfig["architecture_version"] = 5;
+    modelConfig["graph_bindings"]["model_output"] = {{"model", "lumen"}, {"output", "z"}};
+}
+
+LumenLatentDiffusionModel::DiffusionExample LumenLatentDiffusionModel::prepareExample(
+    const std::vector<unsigned char>& pixels, unsigned int seed) {
+    const size_t values = static_cast<size_t>(cfg_.image_w) * cfg_.image_h * cfg_.image_c;
+    if (pixels.size() != values) throw std::runtime_error("Lumen: image size mismatch");
+    std::vector<float> image(values);
+    std::transform(pixels.begin(), pixels.end(), image.begin(),
+                   [](unsigned char value) { return value / 127.5f - 1.f; });
+    DiffusionExample example;
+    example.clean = encodeImage(image);
+    const size_t latent_values = static_cast<size_t>(cfg_.latent_w) * cfg_.latent_h * cfg_.latent_c;
+    if (example.clean.size() != latent_values) throw std::runtime_error("Lumen: latent size mismatch");
+    const DiffusionSchedule schedule(cfg_);
+    std::mt19937 random(seed);
+    std::uniform_int_distribution<int> timestep(0, schedule.size() - 1);
+    std::normal_distribution<float> normal(0.f, 1.f);
+    example.timestep = timestep(random);
+    example.noise.resize(latent_values);
+    for (float& value : example.noise) value = normal(random);
+    example.noisy = schedule.corrupt(example.clean, example.noise, example.timestep);
+    return example;
 }
 
 LumenLatentDiffusionModel::TrainStats LumenLatentDiffusionModel::trainDiffusionStep(
@@ -538,114 +735,42 @@ LumenLatentDiffusionModel::TrainStats LumenLatentDiffusionModel::trainDiffusionS
     const std::string& prompt,
     unsigned int seed,
     Optimizer& optimizer,
-    float learning_rate
+    float learning_rate,
+    const json* annotation,
+    float bbox_loss_weight,
+    bool drop_conditioning
 ) {
-    const size_t image_values = static_cast<size_t>(cfg_.image_w) *
-                                static_cast<size_t>(cfg_.image_h) *
-                                static_cast<size_t>(cfg_.image_c);
-    if (rgb_image.size() != image_values) {
-        throw std::runtime_error(
-            "LumenLatentDiffusionModel: training image size mismatch; expected " +
-            std::to_string(image_values) + " RGB values");
-    }
-    if (!std::isfinite(learning_rate) || learning_rate <= 0.0f) {
-        throw std::runtime_error("LumenLatentDiffusionModel: learning rate must be positive");
-    }
-    std::vector<float> image(image_values);
-    for (size_t index = 0; index < image_values; ++index) {
-        image[index] = static_cast<float>(rgb_image[index]) / 127.5f - 1.0f;
-    }
-    std::vector<float> clean_latent = encodeImage(image);
-    const size_t latent_values = static_cast<size_t>(cfg_.latent_w) *
-                                 cfg_.latent_h * cfg_.latent_c;
-    if (clean_latent.size() != latent_values) {
-        throw std::runtime_error("LumenLatentDiffusionModel: training latent tensor size mismatch");
-    }
-    std::mt19937 random(seed);
-    std::uniform_int_distribution<int> timestep_distribution(0, std::max(1, cfg_.diffusion_steps) - 1);
-    std::normal_distribution<float> normal(0.0f, 1.0f);
-    const int timestep = timestep_distribution(random);
-
-    float alpha_bar = 1.0f;
-    const int total_steps = std::max(2, cfg_.diffusion_steps);
-    const float beta_start = std::clamp(cfg_.beta_start, 1e-7f, 0.999f);
-    const float beta_end = std::clamp(cfg_.beta_end, beta_start, 0.999f);
-    for (int index = 0; index <= timestep; ++index) {
-        const float ratio = static_cast<float>(index) / static_cast<float>(total_steps - 1);
-        alpha_bar *= 1.0f - (beta_start + ratio * (beta_end - beta_start));
-    }
-
-    std::vector<float> noise(latent_values);
-    std::vector<float> noisy_latent(latent_values);
-    const float signal_scale = std::sqrt(std::max(alpha_bar, 1e-8f));
-    const float noise_scale = std::sqrt(std::max(0.0f, 1.0f - alpha_bar));
-    for (size_t index = 0; index < latent_values; ++index) {
-        noise[index] = normal(random);
-        noisy_latent[index] = signal_scale * clean_latent[index] + noise_scale * noise[index];
-    }
-
+    applyRuntimeConfiguration();
+    if (!std::isfinite(learning_rate) || learning_rate <= 0.f)
+        throw std::invalid_argument("Lumen: learning rate must be positive");
+    const auto example = prepareExample(rgb_image, seed);
+    const auto& clean_latent = example.clean;
+    const auto& noise = example.noise;
+    const auto& noisy_latent = example.noisy;
+    const int timestep = example.timestep;
     const int context_dim = std::max(8, cfg_.hidden_size);
     const std::vector<float> timestep_embedding = timestepEmbedding(timestep, context_dim);
-    const std::vector<int> text_ids = promptIds(prompt);
+    const std::vector<int> text_ids = (drop_conditioning ? promptIds("") : conditionedPromptIds(prompt,annotation));
+    const auto bbox_weights=BBoxSupervision::makeWeights(annotation,cfg_.latent_w,cfg_.latent_h,
+        cfg_.latent_c,BBoxSupervision::Layout::CHW,bbox_loss_weight, &modelConfig);
     TrainStepRequest request;
+    if (!bbox_weights.values.empty()) request.loss_weights=&bbox_weights.values;
+    request.relations=&bbox_weights.relations;
     request.float_inputs = {{"__input__", &noisy_latent}, {"timestep", &timestep_embedding}};
     request.int_inputs = {{"text_ids", &text_ids}};
     request.target = &noise;
     request.optimizer = &optimizer;
     request.learning_rate = learning_rate;
+    const DiffusionSchedule schedule(cfg_);
+    const std::vector<float> signal_scale{schedule.signal(timestep)}, noise_scale{schedule.noise(timestep)};
+    request.float_inputs["diffusion_signal_scale"] = &signal_scale;
+    request.float_inputs["diffusion_noise_scale"] = &noise_scale;
     const auto step_result = trainStep(request);
     if (!step_result.has_value()) {
         throw std::runtime_error("LumenLatentDiffusionModel: training request rejected");
     }
-    if (isVizTapsEnabled()) {
-        const int preview_timestep = std::clamp(
-            modelConfig.value("preview_timestep", cfg_.preview_timestep),
-            0,
-            total_steps - 1);
-        float preview_alpha_bar = 1.0f;
-        for (int index = 0; index <= preview_timestep; ++index) {
-            const float ratio = static_cast<float>(index) /
-                                static_cast<float>(total_steps - 1);
-            preview_alpha_bar *=
-                1.0f - (beta_start + ratio * (beta_end - beta_start));
-        }
-        const float preview_signal_scale =
-            std::sqrt(std::max(preview_alpha_bar, 1e-8f));
-        const float preview_noise_scale =
-            std::sqrt(std::max(0.0f, 1.0f - preview_alpha_bar));
-        std::vector<float> preview_noisy_latent(latent_values);
-        for (size_t index = 0; index < latent_values; ++index) {
-            preview_noisy_latent[index] =
-                preview_signal_scale * clean_latent[index] +
-                preview_noise_scale * noise[index];
-        }
-        const std::vector<float> preview_prediction = forwardPassNamed(
-            {{"__input__", preview_noisy_latent},
-             {"timestep", timestepEmbedding(preview_timestep, context_dim)}},
-            {{"text_ids", promptIds(prompt)}},
-            true);
-        if (preview_prediction.size() == preview_noisy_latent.size()) {
-            std::vector<float> predicted_clean(preview_prediction.size());
-            std::vector<float> noisy_baseline(preview_prediction.size());
-            for (size_t index = 0; index < preview_prediction.size(); ++index) {
-                predicted_clean[index] =
-                    (preview_noisy_latent[index] -
-                     preview_noise_scale * preview_prediction[index]) /
-                    preview_signal_scale;
-                noisy_baseline[index] =
-                    preview_noisy_latent[index] / preview_signal_scale;
-            }
-            const std::vector<float> oracle_image = decodeImage(clean_latent, true);
-            const std::vector<float> noisy_baseline_image = decodeImage(noisy_baseline, true);
-            const std::vector<float> predicted_image = decodeImage(predicted_clean, true);
-            addDiffusionComparisonVizTips(
-                oracle_image,
-                noisy_baseline_image,
-                predicted_image,
-                preview_timestep);
-            addDiffusionVizTips(predicted_image, rgb_image);
-        }
-    }
+    // z is reconstructed by the same forward graph, without an inference loop.
+    // Additional oracle/baseline comparisons belong only to validation.
 
     TrainStats stats;
     const auto metric = [&](const char* name) {
@@ -654,6 +779,12 @@ LumenLatentDiffusionModel::TrainStats LumenLatentDiffusionModel::trainDiffusionS
     };
     stats.loss = step_result->loss;
     stats.mse = metric("mse");
+    stats.mse_unweighted = metric("mse_unweighted");
+    stats.skeleton_region_count=bbox_weights.skeleton_region_count;
+    stats.relation_count=bbox_weights.relation_count;
+    stats.bbox_count=bbox_weights.bbox_count;
+    stats.bbox_loss_weight=bbox_weights.strength;
+    stats.relation_loss=metric("relation_loss");
     stats.kl = metric("kl");
     stats.kl_beta_effective = 0.0f;
     stats.grad_norm = step_result->grad_norm;
@@ -670,54 +801,26 @@ LumenLatentDiffusionModel::TrainStats LumenLatentDiffusionModel::trainDiffusionS
 LumenLatentDiffusionModel::TrainStats LumenLatentDiffusionModel::validateDiffusionStep(
     const std::vector<unsigned char>& rgb_image,
     const std::string& prompt,
-    unsigned int seed
+    unsigned int seed,
+    const json* annotation,
+    float bbox_loss_weight
 ) {
-    const size_t image_values = static_cast<size_t>(cfg_.image_w) *
-                                static_cast<size_t>(cfg_.image_h) *
-                                static_cast<size_t>(cfg_.image_c);
-    if (rgb_image.size() != image_values) {
-        throw std::runtime_error(
-            "LumenLatentDiffusionModel: validation image size mismatch; expected " +
-            std::to_string(image_values) + " values");
-    }
-    std::vector<float> image(image_values);
-    for (size_t index = 0; index < image_values; ++index) {
-        image[index] = static_cast<float>(rgb_image[index]) / 127.5f - 1.0f;
-    }
-    std::vector<float> clean_latent = encodeImage(image);
-    const size_t latent_values = static_cast<size_t>(cfg_.latent_w) *
-                                 cfg_.latent_h * cfg_.latent_c;
-    if (clean_latent.size() != latent_values) {
-        throw std::runtime_error("LumenLatentDiffusionModel: validation latent tensor size mismatch");
-    }
-    std::mt19937 random(seed);
-    std::uniform_int_distribution<int> timestep_distribution(
-        0, std::max(1, cfg_.diffusion_steps) - 1);
-    std::normal_distribution<float> normal(0.0f, 1.0f);
-    const int timestep = timestep_distribution(random);
-    const int total_steps = std::max(2, cfg_.diffusion_steps);
-    const float beta_start = std::clamp(cfg_.beta_start, 1e-7f, 0.999f);
-    const float beta_end = std::clamp(cfg_.beta_end, beta_start, 0.999f);
-    float alpha_bar = 1.0f;
-    for (int index = 0; index <= timestep; ++index) {
-        const float ratio = static_cast<float>(index) / static_cast<float>(total_steps - 1);
-        alpha_bar *= 1.0f - (beta_start + ratio * (beta_end - beta_start));
-    }
-
-    std::vector<float> noise(latent_values);
-    std::vector<float> noisy_latent(latent_values);
-    const float signal_scale = std::sqrt(std::max(alpha_bar, 1e-8f));
-    const float noise_scale = std::sqrt(std::max(0.0f, 1.0f - alpha_bar));
-    for (size_t index = 0; index < latent_values; ++index) {
-        noise[index] = normal(random);
-        noisy_latent[index] = signal_scale * clean_latent[index] + noise_scale * noise[index];
-    }
-
+    applyRuntimeConfiguration();
+    const auto example = prepareExample(rgb_image, seed);
+    const auto& clean_latent = example.clean;
+    const auto& noise = example.noise;
+    const auto& noisy_latent = example.noisy;
+    const int timestep = example.timestep;
+    const DiffusionSchedule schedule(cfg_);
+    const float signal_scale = schedule.signal(timestep);
+    const float noise_scale = schedule.noise(timestep);
     const int context_dim = std::max(8, cfg_.hidden_size);
-    const std::vector<float> prediction = forwardPassNamed(
+    (void)forwardPassNamed(
         {{"__input__", noisy_latent},
-         {"timestep", timestepEmbedding(timestep, context_dim)}},
-        {{"text_ids", promptIds(prompt)}}, false);
+         {"timestep", timestepEmbedding(timestep, context_dim)},
+         {"diffusion_signal_scale", {signal_scale}}, {"diffusion_noise_scale", {noise_scale}}},
+        {{"text_ids", conditionedPromptIds(prompt,annotation)}}, false);
+    const auto prediction = getTensor("x");
     if (prediction.size() != noise.size()) {
         throw std::runtime_error("LumenLatentDiffusionModel: validation output size mismatch");
     }
@@ -728,7 +831,7 @@ LumenLatentDiffusionModel::TrainStats LumenLatentDiffusionModel::validateDiffusi
             (noisy_latent[index] - noise_scale * prediction[index]) / signal_scale;
         noisy_baseline[index] = noisy_latent[index] / signal_scale;
     }
-    const std::vector<float> reconstructed = decodeImage(predicted_clean, true);
+    const std::vector<float> reconstructed = hasTensor("z") ? getTensor("z") : decodeImage(predicted_clean, true);
     if (isVizTapsEnabled()) {
         const std::vector<float> oracle_image = decodeImage(clean_latent, true);
         const std::vector<float> noisy_baseline_image = decodeImage(noisy_baseline, true);
@@ -740,23 +843,25 @@ LumenLatentDiffusionModel::TrainStats LumenLatentDiffusionModel::validateDiffusi
         addDiffusionVizTips(reconstructed, rgb_image);
     }
 
-    double squared_error = 0.0;
-    for (size_t index = 0; index < noise.size(); ++index) {
-        const double difference = static_cast<double>(prediction[index]) - noise[index];
-        squared_error += difference * difference;
+    std::vector<float> generated_image(reconstructed.size()),target_image(reconstructed.size());
+    for(size_t index=0;index<reconstructed.size();++index) {
+        generated_image[index]=static_cast<float>(std::clamp(
+            static_cast<double>(reconstructed[index])*.5+.5,0.0,1.0));
+        target_image[index]=static_cast<float>(static_cast<double>(rgb_image[index])/255.0);
     }
-    double reconstruction_abs_error = 0.0;
-    double reconstruction_squared_error = 0.0;
-    for (size_t index = 0; index < reconstructed.size(); ++index) {
-        const double generated = std::clamp(
-            static_cast<double>(reconstructed[index]) * 0.5 + 0.5, 0.0, 1.0);
-        const double original = static_cast<double>(rgb_image[index]) / 255.0;
-        const double difference = generated - original;
-        reconstruction_abs_error += std::abs(difference);
-        reconstruction_squared_error += difference * difference;
-    }
+    const auto reconstruction_mae=RuntimeLossGrad::pixel_loss_and_grad(generated_image,target_image,"mae");
+    const auto reconstruction_mse=RuntimeLossGrad::pixel_loss_and_grad(generated_image,target_image,"mse");
+    const auto bbox_weights=BBoxSupervision::makeWeights(annotation,cfg_.latent_w,cfg_.latent_h,
+        cfg_.latent_c,BBoxSupervision::Layout::CHW,bbox_loss_weight, &modelConfig);
+    const auto loss=diffusionLoss(prediction,noise,
+        bbox_weights.values.empty()?nullptr:&bbox_weights.values,&bbox_weights.relations);
     TrainStats stats;
-    stats.loss = static_cast<float>(squared_error / static_cast<double>(noise.size()));
+    stats.loss=static_cast<float>(loss.objective.loss);
+    stats.mse_unweighted=loss.mse_unweighted;
+    stats.relation_loss=static_cast<float>(loss.objective.relation_loss);
+    stats.skeleton_region_count=bbox_weights.skeleton_region_count;
+    stats.relation_count=bbox_weights.relation_count;
+    stats.bbox_count=bbox_weights.bbox_count; stats.bbox_loss_weight=bbox_weights.strength;
     stats.mse = stats.loss;
     const auto diagnostics = diffusionDiagnostics(prediction, noise);
     stats.kl = diagnostics.at("kl");
@@ -765,10 +870,8 @@ LumenLatentDiffusionModel::TrainStats LumenLatentDiffusionModel::validateDiffusi
     stats.moment_mismatch = diagnostics.at("moment_mismatch");
     stats.spatial_coherence = diagnostics.at("spatial_coherence");
     stats.temporal_consistency = diagnostics.at("temporal_consistency");
-    stats.reconstruction_mae = static_cast<float>(
-        reconstruction_abs_error / static_cast<double>(reconstructed.size()));
-    stats.reconstruction_mse = static_cast<float>(
-        reconstruction_squared_error / static_cast<double>(reconstructed.size()));
+    stats.reconstruction_mae=static_cast<float>(reconstruction_mae.loss);
+    stats.reconstruction_mse=static_cast<float>(reconstruction_mse.loss);
     stats.timestep = timestep;
     return stats;
 }
@@ -803,7 +906,12 @@ void LumenLatentDiffusionModel::buildInto(Model& model, const Config& cfg) {
     model.modelConfig["latent_h"] = latent_h;
     model.modelConfig["latent_c"] = latent_c;
     model.modelConfig["architecture"] = "dit_latent_vae_conv";
-    model.modelConfig["architecture_version"] = 2;
+    model.modelConfig["architecture_version"] = 4;
+    model.modelConfig["time_projection_layout"] = "packed_per_block";
+    model.modelConfig["viz_registered_tips_only"] = true;
+    model.modelConfig["preview_source"] = "validation";
+    model.modelConfig["prediction_type"] = "epsilon";
+    model.modelConfig["sampler"] = "ddim";
     model.modelConfig["patch_size"] = patch_size;
     model.modelConfig["patch_tokens"] = patch_tokens;
     model.modelConfig["hidden_size"] = context_dim;
@@ -812,6 +920,7 @@ void LumenLatentDiffusionModel::buildInto(Model& model, const Config& cfg) {
     model.modelConfig["context_dim"] = context_dim;
     model.modelConfig["vocab_size"] = vocab;
     model.modelConfig["text_seq_len"] = text_len;
+    model.modelConfig["dynamic_text_seq_len"] = cfg.dynamic_text_seq_len;
     model.modelConfig["text_layers"] = std::max(1, cfg.text_layers);
     model.modelConfig["num_heads"] = heads;
     model.modelConfig["diffusion_steps"] = std::max(2, cfg.diffusion_steps);
@@ -824,6 +933,9 @@ void LumenLatentDiffusionModel::buildInto(Model& model, const Config& cfg) {
     model.modelConfig["vae_scale"] = cfg.vae_scale;
     model.modelConfig["vae_shift"] = cfg.vae_shift;
     model.modelConfig["vae_decoder_upsample"] = cfg.vae_decoder_upsample;
+    model.modelConfig["vae_latent_spatial_context"] = cfg.vae_latent_spatial_context;
+    model.modelConfig["vae_latent_detail_path"] = cfg.vae_latent_detail_path;
+    model.modelConfig["vae_latent_context_channels"] = cfg.vae_latent_context_channels;
     model.modelConfig["vae_calibrated"] =
         std::isfinite(cfg.vae_scale) && cfg.vae_scale > 0.0f;
     model.modelConfig["input_dim"] = latent_w * latent_h * latent_c;
@@ -986,7 +1098,15 @@ void LumenLatentDiffusionModel::buildInto(Model& model, const Config& cfg) {
         layer->out_features = context_dim;
         layer->use_bias = true;
     }
-    addActivation("lumen/time/activation", "lumen/time/projected", "lumen/time/condition");
+    addActivation("lumen/time/activation", "lumen/time/projected", "lumen/time/activated");
+    model.push("lumen/time/output", "Linear", static_cast<size_t>(context_dim) * context_dim + context_dim);
+    if (auto* layer = model.getLayerByName("lumen/time/output")) {
+        layer->inputs = {"lumen/time/activated"};
+        layer->output = "lumen/time/condition";
+        layer->in_features = context_dim;
+        layer->out_features = context_dim;
+        layer->use_bias = true;
+    }
 
     model.push("lumen/dit/input", "Identity", 0);
     if (auto* layer = model.getLayerByName("lumen/dit/input")) {
@@ -1014,12 +1134,6 @@ void LumenLatentDiffusionModel::buildInto(Model& model, const Config& cfg) {
         layer->inputs = {"lumen/dit/patch_tokens", "lumen/dit/position_values"};
         layer->output = "lumen/dit/positioned";
     }
-    model.push("lumen/dit/add_time", "Add", 0);
-    if (auto* layer = model.getLayerByName("lumen/dit/add_time")) {
-        layer->inputs = {"lumen/dit/positioned", "lumen/time/condition"};
-        layer->output = "lumen/dit/conditioned0";
-    }
-
     auto addNorm = [&](const std::string& name,
                        const std::string& input,
                        const std::string& output) {
@@ -1034,11 +1148,33 @@ void LumenLatentDiffusionModel::buildInto(Model& model, const Config& cfg) {
         }
     };
 
-    std::string tokens = "lumen/dit/conditioned0";
+    model.push("lumen/time/block_projection", "Linear",
+               static_cast<size_t>(depth) * context_dim * (context_dim + 1));
+    if (auto* layer = model.getLayerByName("lumen/time/block_projection")) {
+        layer->inputs = {"lumen/time/condition"};
+        layer->output = "lumen/time/blocks_packed";
+        layer->in_features = context_dim;
+        layer->out_features = depth * context_dim;
+        layer->use_bias = true;
+    }
+    model.push("lumen/time/split_blocks", "Split", 0);
+    if (auto* layer = model.getLayerByName("lumen/time/split_blocks")) {
+        layer->inputs = {"lumen/time/blocks_packed"};
+        layer->output = "lumen/time/blocks";
+        layer->split_sizes.assign(depth, context_dim);
+        layer->split_axis = 0;
+    }
+    std::string tokens = "lumen/dit/positioned";
     const size_t attention_params = static_cast<size_t>(4) *
         static_cast<size_t>(context_dim) * static_cast<size_t>(context_dim);
     for (int index = 0; index < depth; ++index) {
         const std::string prefix = "lumen/dit/block" + std::to_string(index + 1);
+        model.push(prefix + "/add_time", "Add", 0);
+        if (auto* layer = model.getLayerByName(prefix + "/add_time")) {
+            layer->inputs = {tokens, "lumen/time/blocks_" + std::to_string(index)};
+            layer->output = prefix + "/conditioned";
+        }
+        tokens = prefix + "/conditioned";
         addNorm(prefix + "/norm1", tokens, prefix + "/norm1_out");
         model.push(prefix + "/self_attention", "SelfAttention", attention_params);
         if (auto* layer = model.getLayerByName(prefix + "/self_attention")) {
@@ -1134,21 +1270,113 @@ void LumenLatentDiffusionModel::buildInto(Model& model, const Config& cfg) {
         layer->in_channels = patch_dim;
         layer->input_height = patch_h;
         layer->input_width = patch_w;
+        layer->output_width = latent_w;
+        layer->output_height = latent_h;
     }
+    // Explicit tip geometry avoids treating token-major features as full images.
+    for (auto& layer : model.getMutableLayers()) {
+        if (layer.name.rfind("lumen/text/", 0) == 0) {
+            layer.output_width = context_dim;
+            layer.output_height = text_len;
+        } else if (layer.name.rfind("lumen/time/", 0) == 0) {
+            layer.output_width = layer.output_height = 1;
+        } else if (layer.name.rfind("lumen/dit/block", 0) == 0 || layer.name == "lumen/dit/final_norm") {
+            layer.output_width = patch_w;
+            layer.output_height = patch_h;
+        }
+    }
+}
+
+std::vector<int> LumenLatentDiffusionModel::conditionedPromptIds(const std::string& prompt, const json* annotation) const {
+    const auto context=BBoxSupervision::groundedPrompt(prompt,annotation);
+    if(!modelConfig.value("dynamic_text_seq_len",cfg_.dynamic_text_seq_len) && annotation && annotation->is_object() && annotation->contains("entities") && !(*annotation)["entities"].empty()) {
+        const auto count=getTokenizer().tokenize(context).size();
+        if(count>static_cast<size_t>(cfg_.text_seq_len))throw std::invalid_argument(
+            "Lumen annotation context requires "+std::to_string(count)+" tokens; increase text_seq_len (current "+std::to_string(cfg_.text_seq_len)+")");
+    }
+    return promptIds(context);
 }
 
 std::vector<int> LumenLatentDiffusionModel::promptIds(const std::string& prompt) const {
     std::vector<int> ids = getTokenizer().tokenize(prompt);
     const int pad = std::max(0, getTokenizer().getPadId());
     const int unknown = std::max(0, getTokenizer().getUnkId());
-    ids.resize(static_cast<size_t>(std::max(1, cfg_.text_seq_len)), pad);
-    if (ids.size() > static_cast<size_t>(cfg_.text_seq_len)) {
-        ids.resize(static_cast<size_t>(cfg_.text_seq_len));
+    if (!modelConfig.value("dynamic_text_seq_len",cfg_.dynamic_text_seq_len)) {
+        ids.resize(static_cast<size_t>(std::max(1,cfg_.text_seq_len)),pad);
+    } else if(ids.empty()) {
+        ids.push_back(pad);
     }
     for (int& id : ids) {
         if (id < 0 || id >= cfg_.vocab_size) id = unknown;
     }
     return ids;
+}
+
+const std::vector<float>& LumenLatentDiffusionModel::forwardPassNamedView(
+    const std::unordered_map<std::string,std::vector<float>>& float_inputs,
+    const std::unordered_map<std::string,std::vector<int>>& int_inputs,
+    bool training) {
+    if(modelConfig.value("dynamic_text_seq_len",cfg_.dynamic_text_seq_len)) {
+        // Match Model's legacy alias precedence and normalize an absent/empty context.
+        auto ids=int_inputs.find("seq");
+        if(ids==int_inputs.end())ids=int_inputs.find("text_ids");
+        if(ids==int_inputs.end() || ids->second.empty()) {
+            auto normalized=int_inputs;normalized.erase("seq");
+            normalized["text_ids"]={std::max(0,getTokenizer().getPadId())};
+            return forwardPassNamedView(float_inputs,normalized,training);
+        }
+        if(ids!=int_inputs.end()) {
+            const size_t count=std::max<size_t>(1,ids->second.size());
+            if(count>size_t(std::numeric_limits<int>::max()))throw std::invalid_argument("Lumen: text context too long");
+            bool changed=false;
+            for(auto& layer:getMutableLayers())if(layer.name.rfind("lumen/text/",0)==0) {
+                if(layer.seq_len>0 && layer.seq_len!=int(count)){layer.seq_len=int(count);changed=true;}
+                if (layer.output_width != std::max(8, cfg_.hidden_size) || layer.output_height != int(count)) {
+                    layer.output_width = std::max(8, cfg_.hidden_size);
+                    layer.output_height = int(count);
+                    changed = true;
+                }
+                if(layer.name=="lumen/text/position" && layer.shape!=std::vector<int>{-1,layer.embed_dim}) {
+                    layer.shape={-1,layer.embed_dim};changed=true;
+                }
+            }
+            if(changed)static_plan_.built=false;
+            modelConfig["text_active_seq_len"]=count;
+        }
+    }
+    if (!getLayerByName("lumen/output/z"))
+        return Model::forwardPassNamedView(float_inputs, int_inputs, training); // serialized legacy graph
+    // Topology owns these fields, including when loading an older epsilon-only
+    // checkpoint into the already-built reconstruction graph.
+    modelConfig["forward_output_tensor"] = "z";
+    modelConfig["output_tensor"] = "z";
+    modelConfig["output_dim"] = cfg_.image_w * cfg_.image_h * cfg_.image_c;
+    modelConfig["architecture_version"] = 5;
+    if (!modelConfig.contains("inference_output_tensor")) modelConfig["inference_output_tensor"] = "z";
+    if (vae_decoder_) {
+        auto& prefixes = modelConfig["frozen_layer_prefixes"];
+        if (!prefixes.is_array()) prefixes = json::array();
+        const std::string prefix = "lumen/reconstruction/decoder/";
+        if (std::find(prefixes.begin(), prefixes.end(), json(prefix)) == prefixes.end()) prefixes.push_back(prefix);
+    }
+    auto inputs = float_inputs;
+    const DiffusionSchedule schedule(cfg_);
+    if (!inputs.count("diffusion_signal_scale")) inputs["diffusion_signal_scale"] = {schedule.signal(0)};
+    if (!inputs.count("diffusion_noise_scale")) inputs["diffusion_noise_scale"] = {schedule.noise(0)};
+    const bool decoder_tail = training || modelConfig.value("inference_output_tensor", std::string("z")) != "x";
+    inputs["vae_decode_scale"] = {vae_decoder_ ? modelConfig.value("vae_scale", cfg_.vae_scale) : 1.f};
+    inputs["vae_decode_shift"] = {vae_decoder_ ? modelConfig.value("vae_shift", cfg_.vae_shift) : 0.f};
+    if (decoder_tail && vae_decoder_ && (!std::isfinite(inputs["vae_decode_scale"][0]) || inputs["vae_decode_scale"][0] <= 0.f))
+        throw std::runtime_error("Lumen: calibrate the VAE before reconstructing z");
+    // Binary runtime operators consume matching tensor shapes; expand schedule
+    // and calibration scalars here instead of relying on backend broadcasting.
+    const size_t latent_values = size_t(cfg_.latent_w) * cfg_.latent_h * cfg_.latent_c;
+    for (const char* name : {"diffusion_signal_scale", "diffusion_noise_scale", "vae_decode_scale", "vae_decode_shift"}) {
+        auto& values = inputs[name];
+        if (values.size() == 1) values.assign(latent_values, values[0]);
+        if (values.size() != latent_values) throw std::invalid_argument(std::string("Lumen: invalid coefficient shape: ") + name);
+    }
+    return Model::forwardPassNamedView(inputs,int_inputs,training);
 }
 
 std::vector<float> LumenLatentDiffusionModel::timestepEmbedding(int timestep, int dim) const {
@@ -1366,92 +1594,68 @@ std::vector<float> LumenLatentDiffusionModel::decodeImage(
 }
 
 LumenLatentDiffusionModel::GeneratedImage LumenLatentDiffusionModel::generate(
-    const std::string& prompt,
-    int seed,
-    int sample_steps,
-    float guidance_scale,
-    const std::function<void(int, int)>& progress
-) {
-    if (getMutableLayers().empty()) {
-        throw std::runtime_error("LumenLatentDiffusionModel: model is not built");
+    const std::string& prompt, int seed, int sample_steps, float guidance_scale,
+    const std::function<void(int, int)>& progress) {
+    if (getLayers().empty()) throw std::runtime_error("Lumen: model is not built");
+    if (sample_steps < 1 || !std::isfinite(guidance_scale))
+        throw std::invalid_argument("Lumen: invalid sampling settings");
+    struct RestoreOutput {
+        json& config;
+        json saved;
+        ~RestoreOutput() { if (saved.is_null()) config.erase("inference_output_tensor"); else config["inference_output_tensor"] = saved; }
+    } restore{modelConfig, modelConfig.value("inference_output_tensor", json())};
+    modelConfig["inference_output_tensor"] = "x";
+    const DiffusionSchedule schedule(cfg_);
+    const int steps = std::min(sample_steps, schedule.size());
+    std::vector<int> timesteps;
+    for (int i = 0; i < steps; ++i) {
+        timesteps.push_back(steps == 1 ? schedule.size() - 1 :
+            static_cast<int>(std::lround(double(steps - 1 - i) *
+                (schedule.size() - 1) / (steps - 1))));
     }
-    const int image_dim = cfg_.latent_w * cfg_.latent_h * cfg_.latent_c;
-    const int context_dim = std::max(8, cfg_.hidden_size);
-    const int total_steps = std::max(2, cfg_.diffusion_steps);
-    const int steps = std::clamp(sample_steps, 1, total_steps);
-    const float beta_start = std::clamp(cfg_.beta_start, 1e-7f, 0.999f);
-    const float beta_end = std::clamp(cfg_.beta_end, beta_start, 0.999f);
-
-    std::vector<float> alpha_bar(static_cast<size_t>(total_steps));
-    float cumulative = 1.0f;
-    for (int index = 0; index < total_steps; ++index) {
-        const float ratio = static_cast<float>(index) / static_cast<float>(total_steps - 1);
-        const float beta = beta_start + ratio * (beta_end - beta_start);
-        cumulative *= 1.0f - beta;
-        alpha_bar[static_cast<size_t>(index)] = cumulative;
-    }
-
+    const size_t count = static_cast<size_t>(cfg_.latent_w) * cfg_.latent_h * cfg_.latent_c;
     std::mt19937 random(static_cast<unsigned int>(seed));
-    std::normal_distribution<float> normal(0.0f, 1.0f);
-    std::vector<float> sample(static_cast<size_t>(image_dim));
+    std::normal_distribution<float> normal(0.f, 1.f);
+    std::vector<float> sample(count);
     for (float& value : sample) value = normal(random);
-
-    const std::vector<int> conditioned_ids = promptIds(prompt);
-    const std::vector<int> unconditioned_ids = promptIds("");
-    for (int step_index = steps - 1; step_index >= 0; --step_index) {
-        const int timestep = static_cast<int>(std::lround(
-            static_cast<double>(step_index) * static_cast<double>(total_steps - 1) /
-            static_cast<double>(std::max(1, steps - 1))));
-        const int previous_timestep = step_index > 0
-            ? static_cast<int>(std::lround(
-                  static_cast<double>(step_index - 1) * static_cast<double>(total_steps - 1) /
-                  static_cast<double>(std::max(1, steps - 1))))
-            : -1;
-
-        std::unordered_map<std::string, std::vector<float>> float_inputs{
-            {"__input__", sample},
-            {"timestep", timestepEmbedding(timestep, context_dim)},
-        };
-        const std::vector<float> unconditioned = forwardPassNamed(
-            float_inputs, {{"text_ids", unconditioned_ids}}, false);
-        const std::vector<float> conditioned = forwardPassNamed(
-            float_inputs, {{"text_ids", conditioned_ids}}, false);
-        if (conditioned.size() != sample.size() || unconditioned.size() != sample.size()) {
-            throw std::runtime_error("LumenLatentDiffusionModel: denoiser output size mismatch");
+    const auto conditioned_ids = promptIds(prompt);
+    const auto empty_ids = promptIds("");
+    for (int i = 0; i < steps; ++i) {
+        const int t = timesteps[i];
+        const std::unordered_map<std::string, std::vector<float>> inputs{
+            {"__input__", sample}, {"timestep", timestepEmbedding(t, std::max(8, cfg_.hidden_size))}};
+        std::vector<float> unconditional;
+        if (guidance_scale != 1.f)
+            unconditional = forwardPassNamed(inputs, {{"text_ids", empty_ids}}, false);
+        auto epsilon = forwardPassNamed(inputs, {{"text_ids", conditioned_ids}}, false);
+        if (epsilon.size() != count || (guidance_scale != 1.f && unconditional.size() != count))
+            throw std::runtime_error("Lumen: denoiser output size mismatch");
+        for (size_t j = 0; j < count; ++j) {
+            if (guidance_scale != 1.f)
+                epsilon[j] = unconditional[j] + guidance_scale * (epsilon[j] - unconditional[j]);
+            if (!std::isfinite(epsilon[j])) throw std::runtime_error("Lumen: non-finite noise prediction");
         }
-
-        std::vector<float> diffusion_output(sample.size());
-        for (size_t index = 0; index < sample.size(); ++index) {
-            diffusion_output[index] = unconditioned[index] + guidance_scale *
-                (conditioned[index] - unconditioned[index]);
-        }
-        const float current_alpha = std::max(alpha_bar[static_cast<size_t>(timestep)], 1e-8f);
-        const float previous_alpha = previous_timestep >= 0
-            ? std::max(alpha_bar[static_cast<size_t>(previous_timestep)], 1e-8f)
-            : 1.0f;
-        const float sqrt_current = std::sqrt(current_alpha);
-        const float sqrt_current_noise = std::sqrt(std::max(0.0f, 1.0f - current_alpha));
-        const float sqrt_previous = std::sqrt(previous_alpha);
-        const float sqrt_previous_noise = std::sqrt(std::max(0.0f, 1.0f - previous_alpha));
-
-        for (size_t index = 0; index < sample.size(); ++index) {
-            const float epsilon = diffusion_output[index];
-            const float clean = (sample[index] - sqrt_current_noise * epsilon) / sqrt_current;
-            sample[index] = sqrt_previous * clean + sqrt_previous_noise * epsilon;
-        }
-        if (progress) progress(steps - step_index, steps);
+        schedule.advance(sample, epsilon, t, i + 1 < steps ? timesteps[i + 1] : -1);
+        if (progress) progress(i + 1, steps);
     }
-
-    const std::vector<float> decoded = decodeImage(sample);
-
+    const auto decoded = decodeImage(sample);
+    const size_t expected = static_cast<size_t>(cfg_.image_w) * cfg_.image_h * cfg_.image_c;
+    if (decoded.size() != expected) throw std::runtime_error("Lumen: decoded image size mismatch");
+    storeTensor("z", decoded);
+    if (isVizTapsEnabled() && cfg_.image_c == 3) {
+        addVizTapFrame(rgbTip(cfg_.image_w, cfg_.image_h, getVizTapsMaxSide(),
+            "lumen_diffusion/blocks/lumen/output/z/Identity | role=model_output tensor=z",
+            "z: sampled RGB [-1,1]", [&](size_t i) { return decoded[i]; }, decodedColour));
+    }
     GeneratedImage image;
     image.w = cfg_.image_w;
     image.h = cfg_.image_h;
     image.channels = cfg_.image_c;
-    image.pixels.resize(decoded.size());
-    for (size_t index = 0; index < decoded.size(); ++index) {
-        const float normalized = std::clamp(decoded[index] * 0.5f + 0.5f, 0.0f, 1.0f);
-        image.pixels[index] = static_cast<unsigned char>(std::lround(normalized * 255.0f));
+    image.pixels.reserve(expected);
+    for (float value : decoded) {
+        if (!std::isfinite(value)) throw std::runtime_error("Lumen: non-finite decoded image");
+        image.pixels.push_back(static_cast<unsigned char>(std::lround(
+            std::clamp(value * .5f + .5f, 0.f, 1.f) * 255.f)));
     }
     return image;
 }

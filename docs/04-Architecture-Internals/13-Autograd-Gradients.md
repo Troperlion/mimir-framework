@@ -19,7 +19,7 @@ Source de vérité :
 - Orchestration du graphe : `src/Model.cpp` (`Model::backwardPass`, `zeroGradients`, `getGradients`)
 - Dispatch forward/backward : `src/runtimes/RuntimeRouter.hpp`
 - État sauvegardé et activations intégrées : `src/runtimes/AbstractRuntime.hpp`
-- Backward natif OpenCL/Vulkan : `src/runtimes/NativeBackward.hpp`
+- Backward natif OpenCL/Vulkan : `src/runtimes/portable/PortableRuntime.cpp` et kernels `Portable*Ops.hpp`
 - Dispatch CPU partagé : `src/runtimes/cpu/RuntimeLayerDispatch.hpp`
 - Types et pertes autograd : `src/Autograd.hpp` ; adaptateurs de layers : `src/runtimes/Autograd.cpp`
 - Layout poids & champs layer : `src/Layers.hpp`
@@ -201,9 +201,40 @@ Pour VAEConv, `ModelTest.VAEConvContract` vérifie aussi qu’un gradient de rec
 
 ## Couverture OpenCL et Vulkan
 
-Les deux runtimes partagent 17 types de backward natif : Linear, MatMul, BatchMatMul, Add, Subtract, Multiply, Divide et dix activations. Le dispatcher conserve le CPU pour les opérations ou formes non prises en charge. Cela fournit un chemin fonctionnel commun, sans constituer une couverture GPU native complète des convolutions, normalisations et attentions.
+Les backends Vulkan et OpenCL conservent leurs chemins spécialisés et utilisent
+`PortableRuntime` pour les autres opérations et les passes arrière. Leur
+couverture par type correspond au dispatcher CPU exécutable : **72 types en
+forward et 73 en backward**, dont NMS avec stop-gradient. `Lambda` est refusé
+en forward par le dispatcher CPU lui-même ; son backward identité est supporté
+sur CPU, Vulkan et OpenCL. CUDA possède les mêmes familles de kernels mais
+n'implémente pas le backward `Lambda`.
 
-`RuntimeTest.OPENCLBackwardParity` et `RuntimeTest.VULKANBackwardParity` vérifient les valeurs, les gradients et leur accumulation, ainsi que le runtime effectivement sélectionné. Les tests sont ignorés (code 77) si le backend est indisponible.
+Les familles couvertes comprennent convolutions, normalisations, attention,
+projections/embeddings, pooling, transformations de tenseurs, récurrence,
+upsampling, dropout et reparamétrisation. Les configurations, formes de tenseurs
+et limites du device restent vérifiées ; cette couverture par type ne garantit
+pas que toute forme soit acceptée.
+
+Les nouveaux kernels de référence OpenCL/Vulkan exécutent leur calcul sur le
+device avec une invocation qui traite le travail logique séquentiellement.
+Ils privilégient la conformité numérique ; leur couverture ne garantit pas des
+performances supérieures au CPU. Le staging des tenseurs et l'accumulation des
+gradients de paramètres retournés restent sur l'hôte. Les calculs forward et
+backward ne sont pas remplacés par un appel arithmétique CPU caché.
+
+Pour NMS, le backward restitue des gradients nuls de la forme de chaque entrée.
+Il vérifie la longueur du gradient amont contre le nombre d'indices retenus.
+CPU, CUDA, OpenCL et Vulkan utilisent ce contrat de stop-gradient ; aucune
+surrogate différentiable n'est ajoutée aux frontières de sélection.
+
+Les contextes de forward conservent le masque de dropout et les activations
+nécessaires à la reparamétrisation pour reproduire le backward CPU.
+`RuntimeTest.OPENCLNativeOps` et `RuntimeTest.VULKANNativeOps` vérifient les
+valeurs, les gradients de paramètres et d'entrées, leur accumulation et le
+runtime sélectionné. `RuntimeTest.NMS` vérifie le CPU ; les tests existants
+`RuntimeTest.OPENCLBackwardParity` et `RuntimeTest.VULKANBackwardParity`
+conservent la couverture des familles historiques. Les tests GPU ignorent
+l'exécution avec le code 77 si le device est indisponible.
 
 ## Étapes suivantes
 

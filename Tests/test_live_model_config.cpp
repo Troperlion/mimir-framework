@@ -4,6 +4,18 @@
 #include <thread>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+
+struct AsyncMonitorPreviewTestAccess {
+    static void open(AsyncMonitor& monitor) {
+        monitor.htop_ = std::make_shared<HtopDisplay>(-1);
+        monitor.htop_->setRuntimeConfiguration(std::atomic_load(&monitor.runtime_config_));
+        monitor.processHtopKey('D');
+    }
+    static void key(AsyncMonitor& monitor, char key) { monitor.processHtopKey(key); }
+    static bool visible(AsyncMonitor& monitor) { return monitor.htop_->debugJsonVisible(); }
+};
 
 static size_t index_of(const std::shared_ptr<LiveModelConfig>& config, const std::string& key) {
     const auto rows = config->snapshot();
@@ -12,21 +24,72 @@ static size_t index_of(const std::shared_ptr<LiveModelConfig>& config, const std
 }
 int main(int argc, char** argv) {
     Model model;
-    model.modelConfig = {{"type","basic_mlp"},{"hidden_dim",16},{"training",{{"epochs",10}}}};
+    model.modelConfig = {{"type","basic_mlp"},{"bbox_loss_weight",1.0},{"hidden_dim",16},{"training",{{"epochs",10}}}};
     model.push("linear", "Linear", 1);
     auto& layer = model.getMutableLayers()[0];
     layer.inputs={"__input__"}; layer.output="x";
     layer.in_features=layer.out_features=1; layer.use_bias=false;
     model.allocateParams(); layer.getWeights()[0]=1;
+    // UI requests do not touch model data; the next forward services the export.
+    auto export_control = model.runtimeConfiguration();
+    AsyncMonitor export_monitor;
+    export_monitor.bindRuntimeConfiguration(export_control);
+    AsyncMonitorPreviewTestAccess::open(export_monitor);
+    TASSERT_TRUE(AsyncMonitorPreviewTestAccess::visible(export_monitor));
+    TASSERT_TRUE(export_control->debugJsonStatus().empty());
+    model.forwardPass(std::vector<float>{2}, true); // Training continues during input.
+    for (char c : std::string("checkpoints/debug/custom folder")) AsyncMonitorPreviewTestAccess::key(export_monitor,c);
+    AsyncMonitorPreviewTestAccess::key(export_monitor,'\t');
+    for (char c : std::string("live_test.json")) AsyncMonitorPreviewTestAccess::key(export_monitor,c);
+    AsyncMonitorPreviewTestAccess::key(export_monitor,'\n');
+    TASSERT_TRUE(!AsyncMonitorPreviewTestAccess::visible(export_monitor));
+    TASSERT_TRUE(!export_control->requestDebugJson());
+    TASSERT_TRUE(export_control->debugJsonStatus() == "DebugJSON en attente");
+    model.forwardPass(std::vector<float>{2}, true);
+    const auto export_status = export_control->debugJsonStatus();
+    TASSERT_TRUE(export_status.find("DebugJSON : ") == 0);
+    const auto export_path = export_status.substr(std::string("DebugJSON : ").size());
+    TASSERT_TRUE(export_path == "checkpoints/debug/custom folder/live_test.json");
+    std::ifstream debug_file(export_path);
+    nlohmann::json debug_dump;
+    debug_file >> debug_dump;
+    TASSERT_TRUE(debug_dump["format"] == "mimir_debug_dump");
+    debug_file.close();
+    TASSERT_TRUE(layer.getWeights()[0] == 1);
+    model.forwardPass(std::vector<float>{3}, true);
+    TASSERT_TRUE(export_control->debugJsonStatus() == export_status);
+    std::filesystem::remove(export_path);
+
     Optimizer opt;
     opt.type=OptimizerType::ADAMW; opt.decay_strategy=LRDecayStrategy::NONE;
     opt.initial_lr=0.1f; opt.weight_decay=0;
     model.publishRuntimeConfiguration(&opt);
     auto config=model.runtimeConfiguration();
+    TASSERT_TRUE(config->modelGraph()!=nullptr);
+    config->requestModelGraph(true);
+    model.forwardPass(std::vector<float>{3},true);
+    const auto graph_snapshot=config->modelGraph();
+    TASSERT_TRUE(graph_snapshot->at("nodes").size()==model.getLayers().size());
+    TASSERT_TRUE(graph_snapshot->at("mode")!="en attente");
+    config->requestModelGraph(false);
+
     std::string error;
     TASSERT_TRUE(!config->request("hidden_dim","32",error));
     TASSERT_TRUE(!config->request("training/epochs","2",error));
     TASSERT_TRUE(!config->request("unknown","2",error));
+    TASSERT_TRUE(config->snapshot()[index_of(config,"bbox_loss_weight")].owner==LiveModelConfig::Owner::Model);
+    TASSERT_TRUE(!config->request("bbox_loss_weight","-1",error));
+    TASSERT_TRUE(!config->request("bbox_loss_weight","nan",error));
+    TASSERT_TRUE(!config->request("bbox_loss_weight","true",error));
+    TASSERT_TRUE(config->request("bbox_loss_weight","0",error));
+    for(const auto& key : {"relation_primary_weight","relation_secondary_weight","relation_other_weight"}) {
+        TASSERT_TRUE(config->snapshot()[index_of(config,key)].owner==LiveModelConfig::Owner::Model);
+        TASSERT_TRUE(!config->request(key,"-1",error));
+        TASSERT_TRUE(!config->request(key,"nan",error));
+        TASSERT_TRUE(config->request(key,"4",error));
+    }
+    TASSERT_TRUE(model.modelConfig["bbox_loss_weight"]==1.0);
+
     TASSERT_TRUE(!config->request("grad_clip_norm","nan",error));
     TASSERT_TRUE(!config->request("grad_clip_norm","-1",error));
     TASSERT_TRUE(!config->request("beta1","1",error));
@@ -37,6 +100,10 @@ int main(int argc, char** argv) {
     // Forward consumes model changes; optimizer changes wait for its boundary.
     model.forwardPass(std::vector<float>{100},true);
     TASSERT_TRUE(model.modelConfig["grad_clip_norm"]==1);
+    TASSERT_TRUE(model.modelConfig["bbox_loss_weight"]==0);
+    TASSERT_TRUE(model.modelConfig["relation_primary_weight"]==4);
+    TASSERT_TRUE(model.modelConfig["relation_secondary_weight"]==4);
+    TASSERT_TRUE(model.modelConfig["relation_other_weight"]==4);
     TASSERT_TRUE(opt.weight_decay==0);
     model.backwardPass({1});
     model.optimizerStep(opt,0.1f,nullptr);

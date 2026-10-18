@@ -1,7 +1,11 @@
 #include "Model.hpp"
+#include "viz/ModelGraph.hpp"
 #include <limits>
+#include "Serialization/DebugJsonDump.hpp"
 
 void Model::publishRuntimeConfiguration(Optimizer* optimizer) {
+    if (!runtime_config_->modelGraph())
+        runtime_config_->publishModelGraph(Mimir::Viz::modelGraphSnapshot(layers,nullptr,"en attente",false,false,false));
     using Owner = LiveModelConfig::Owner;
     using Entry = LiveModelConfig::Entry;
     if (!modelConfig.is_object()) modelConfig = json::object();
@@ -53,6 +57,14 @@ void Model::publishRuntimeConfiguration(Optimizer* optimizer) {
     if (has_reparameterize) boolean("stochastic_latent", modelConfig.value("stochastic_latent", true));
     if (modelConfig.contains("use_kv_cache")) boolean("use_kv_cache", modelConfig["use_kv_cache"].get<bool>());
     const std::string type = modelConfig.value("type", "");
+    if (modelConfig.contains("image_w") || modelConfig.contains("image_dim") ||
+        modelConfig.contains("bbox_loss_weight")) {
+        number("bbox_loss_weight", 1.0, 0, 1e6);
+        number("relation_primary_weight", 3.0, 0, 1e6);
+        number("relation_secondary_weight", 2.0, 0, 1e6);
+        number("relation_other_weight", 1.0, 0, 1e6);
+        fields["bbox_loss_weight"].note = "Direct; poids bbox >= 0 (0 desactive la supervision bbox)";
+    }
     if (type == "vae" || type == "vae_conv" || type == "vae_text") {
         number("kl_beta", modelConfig.value("vae_kl_beta", 1.0), 0, 1e6);
         live("kl_warmup_steps", modelConfig.value("kl_warmup_steps", 0), Owner::Model,
@@ -85,6 +97,22 @@ void Model::publishRuntimeConfiguration(Optimizer* optimizer) {
 }
 
 void Model::applyRuntimeConfiguration() {
+    std::string debug_path;
+    if (runtime_config_->consumeDebugJson(&debug_path)) {
+        try {
+            Mimir::Serialization::DebugJsonOptions options;
+            options.include_gradients = true;
+            options.include_optimizer_state = true;
+            options.include_activations = true;
+            options.include_checksums = true;
+            Mimir::Serialization::DebugJsonDump dumper;
+            std::string error;
+            const bool ok = dumper.save_enhanced(debug_path, *this, options, &error);
+            runtime_config_->finishDebugJson(ok ? "DebugJSON : " + debug_path : "DebugJSON erreur : " + error);
+        } catch (const std::exception& e) {
+            runtime_config_->finishDebugJson(std::string("DebugJSON erreur : ") + e.what());
+        }
+    }
     runtime_config_->apply(LiveModelConfig::Owner::Model, [&](const std::string& key, const json& value) {
         modelConfig[key] = value;
         if (key == "skip_connections_enabled") skipConnectionControl()->enabled = value.get<bool>();

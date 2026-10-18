@@ -414,7 +414,7 @@ inline std::vector<std::string> get_all_supported_types() {
     return {
         "Conv2d", "ConvTranspose2d", "Conv1d", "DepthwiseConv2d",
         "Linear", "Bilinear",
-        "Embedding", "EmbeddingBag",
+        "Embedding", "EmbeddingBag", "PatchEmbed",
         "BatchNorm2d", "BatchNorm1d", "LayerNorm", "GroupNorm", "InstanceNorm2d", "RMSNorm",
         "ReLU", "LeakyReLU", "GELU", "GEGLU", "SiLU", "Tanh", "Sigmoid", "Softmax", "LogSoftmax", 
         "Softplus", "Mish", "HardSigmoid", "HardSwish",
@@ -427,7 +427,7 @@ inline std::vector<std::string> get_all_supported_types() {
         "UpsampleNearest", "UpsampleBilinear", "UpsampleBicubic", "PixelShuffle",
         "LSTM", "GRU", "RNN",
         "ZeroPad2d", "ReflectionPad2d", "ReplicationPad2d",
-        "Identity", "Constant", "Lambda"
+        "Identity", "Constant", "Reparameterize", "Lambda"
     };
 }
 

@@ -1,0 +1,175 @@
+#version 450
+layout(local_size_x=256) in;
+layout(set=0,binding=0,std430) buffer Data {float memory[];};
+layout(set=0,binding=1,std430) readonly buffer Params {int args[];};
+shared float sums[768];
+#define F(k) intBitsToFloat(args[9+(k)])
+#define BARRIER barrier()
+void main(){int i=int(gl_GlobalInvocationID.x),local=int(gl_LocalInvocationID.x),group=int(gl_WorkGroupID.x);
+#define LOSS_ADD(a,b) ((a)+(b))
+#define LOSS_SUB(a,b) ((a)-(b))
+#define LOSS_MUL(a,b) ((a)*(b))
+#define LOSS_BITS(x) floatBitsToInt(x)
+#define LOSS_FLOAT(x) intBitsToFloat(x)
+
+#define LOSS_PRODUCT(a,b,p,e) {precise float loss_pr_a=(a),loss_pr_b=(b),loss_pr_ah=LOSS_FLOAT(LOSS_BITS(loss_pr_a)&-4096),loss_pr_bh=LOSS_FLOAT(LOSS_BITS(loss_pr_b)&-4096);precise float loss_pr_al=LOSS_SUB(loss_pr_a,loss_pr_ah),loss_pr_bl=LOSS_SUB(loss_pr_b,loss_pr_bh),loss_pr_p=LOSS_MUL(loss_pr_a,loss_pr_b);precise float loss_pr_e=LOSS_ADD(LOSS_ADD(LOSS_ADD(LOSS_SUB(LOSS_MUL(loss_pr_ah,loss_pr_bh),loss_pr_p),LOSS_MUL(loss_pr_ah,loss_pr_bl)),LOSS_MUL(loss_pr_al,loss_pr_bh)),LOSS_MUL(loss_pr_al,loss_pr_bl));p=loss_pr_p;e=loss_pr_e;}
+#define LOSS_TWO(a,b,s,e) {precise float loss_ts_a=(a),loss_ts_b=(b),loss_ts_s=LOSS_ADD(loss_ts_a,loss_ts_b),loss_ts_v=LOSS_SUB(loss_ts_s,loss_ts_a);precise float loss_ts_e=LOSS_ADD(LOSS_SUB(loss_ts_a,LOSS_SUB(loss_ts_s,loss_ts_v)),LOSS_SUB(loss_ts_b,loss_ts_v));s=loss_ts_s;e=loss_ts_e;}
+#define LOSS_ACC(a,b,hi,mid,lo) {precise float va=(a),vb=(b),pr,pe;LOSS_PRODUCT(va,vb,pr,pe);precise float ss,ee,mm,me,m2,e2,hh,mi,tail;LOSS_TWO(hi,pr,ss,ee);LOSS_TWO(mid,pe,mm,me);LOSS_TWO(ee,mm,m2,e2);precise float ll=LOSS_ADD(LOSS_ADD(lo,me),e2);LOSS_TWO(ss,m2,hh,mi);LOSS_TWO(mi,ll,mm,tail);LOSS_TWO(hh,mm,hi,mi);LOSS_TWO(mi,tail,mid,lo);if(hi!=0.0){int exponent=((LOSS_BITS(hi)>>23)&255)-127;if((LOSS_BITS(hi)&8388607)==0 && ((hi>0.0 && mid<0.0)||(hi<0.0 && mid>0.0)))--exponent;int biased=exponent+75;precise float step=LOSS_FLOAT(biased>0?(biased<<23):(biased>=-22?(1<<((biased+22)&31)):0));if(step>0.0){precise float base=trunc(mid/step),res=LOSS_SUB(mid,LOSS_MUL(base,step)),z=LOSS_ADD(res/step,lo/step),fl=floor(z),fraction=LOSS_SUB(z,fl);bool odd=(int(base)&1)!=(int(fl)&1);precise float rounded=fl+(fraction>0.5 || (fraction==0.5 && odd)?1.0:0.0);mid=LOSS_MUL(base,step);lo=LOSS_MUL(rounded,step);}}}
+#define LOSS_STORE(hi,mid,lo,a,result) {precise float loss_scale_p,loss_scale_e;LOSS_PRODUCT(hi,a,loss_scale_p,loss_scale_e);result=LOSS_ADD(loss_scale_p,LOSS_ADD(loss_scale_e,LOSS_ADD(LOSS_MUL(mid,a),LOSS_MUL(lo,a))));}
+
+int n=args[3],w=args[4],h=args[5],c=args[6],op=args[2],pass=args[0];
+int ch=i%c,hw=w*h,ow=w/2>0?w/2:1,oh=h/2>0?h/2:1;
+if(pass==90 || pass==91) {
+ int count=op==1?c:(op==5?h:n),groups=(count+255)/256;
+ if(group>=(pass==90?groups:1))return;
+ precise float value=0.0;
+ if(pass==90){if(i<count)value=memory[4*n+i];}
+ else {for(int j=local;j<groups;j+=256)value+=memory[10*n+j];}
+ sums[local]=value;BARRIER;
+ for(int stride=128;stride>0;stride/=2){if(local<stride)sums[local]+=sums[local+stride];BARRIER;}
+ if(local==0){if(pass==90)memory[10*n+group]=sums[0];else memory[4*n]=sums[0]+(op==0?memory[11*n]:0.0);}
+ return;
+}
+if(op==0 && (pass==3 || pass==4)) {
+ int entries=args[15],stats=12*n+16*entries;
+ if(pass==3) {
+  if(i>=entries)return;
+  int meta=12*n+16*i,rw=int(memory[meta]),rh=int(memory[meta+1]),rc=int(memory[meta+2]),channel=int(memory[meta+15]);
+  precise float momentS0=0.0,momentS1=0.0,momentS2=0.0,momentO0=0.0,momentO1=0.0,momentO2=0.0,sa=0.0,oa=0.0;
+  for(int box=0;box<2;++box) {
+   int at=meta+7+4*box;precise float x0=memory[at]*float(rw),y0=memory[at+1]*float(rh),x1=memory[at+2]*float(rw),y1=memory[at+3]*float(rh);
+   precise float a=0.0,m0=0.0,m1=0.0,m2=0.0;
+   for(int yy=int(floor(y0));yy<int(ceil(y1));++yy)for(int xx=int(floor(x0));xx<int(ceil(x1));++xx) {
+    int idx=memory[meta+3]>0.0?channel*rw*rh+yy*rw+xx:(yy*rw+xx)*rc+channel;
+    if(memory[5*n+idx]==0.0)continue;
+    precise float xa=max(x0,float(xx)),xb=min(x1,float(xx+1)),ya=max(y0,float(yy)),yb=min(y1,float(yy+1));
+    precise float area=(xb-xa)*(yb-ya),d=memory[idx]-memory[n+idx];a+=area;
+    m0+=area*d;m1+=area*((xa+xb)-(x0+x1))/(x1-x0)*d;m2+=area*((ya+yb)-(y0+y1))/(y1-y0)*d;
+   }
+   if(a>0.0){m0/=a;m1/=a;m2/=a;}
+   if(box==0){sa=a;momentS0=m0;momentS1=m1;momentS2=m2;}else{oa=a;momentO0=m0;momentO1=m1;momentO2=m2;}
+  }
+  precise float d0=sa>0.0 && oa>0.0?momentS0-momentO0:0.0,d1=(momentS1-momentO1)*memory[meta+5],d2=(momentS2-momentO2)*memory[meta+6];
+  if(sa<=0.0 || oa<=0.0){d1=0.0;d2=0.0;}
+  int at=stats+10*i;memory[at]=d0;memory[at+1]=d1;memory[at+2]=d2;memory[at+3]=sa;memory[at+4]=oa;memory[at+5]=memory[meta+4]*(d0*d0+d1*d1+d2*d2);
+ } else {
+  if(i>=n)return;
+  precise float gradient=memory[3*n+i],rloss=0.0;
+  for(int entry=0;entry<entries;++entry) {
+   int meta=12*n+16*entry,at=stats+10*entry;
+   if(i==0)rloss+=memory[at+5];
+   int rw=int(memory[meta]),rh=int(memory[meta+1]),rc=int(memory[meta+2]),channel=int(memory[meta+15]);
+   if(i>=rw*rh*rc || memory[5*n+i]==0.0 || memory[at+3]<=0.0 || memory[at+4]<=0.0)continue;
+   int pidx=memory[meta+3]>0.0?i%(rw*rh):i/rc,ich=memory[meta+3]>0.0?i/(rw*rh):i%rc;
+   if(ich!=channel)continue;
+   int xx=pidx%rw,yy=pidx/rw;
+   for(int box=0;box<2;++box) {
+    int region=meta+7+4*box;precise float x0=memory[region]*float(rw),y0=memory[region+1]*float(rh),x1=memory[region+2]*float(rw),y1=memory[region+3]*float(rh);
+    precise float xa=max(x0,float(xx)),xb=min(x1,float(xx+1)),ya=max(y0,float(yy)),yb=min(y1,float(yy+1));
+    if(xb<=xa || yb<=ya)continue;
+    precise float feature=memory[at]+memory[at+1]*((xa+xb)-(x0+x1))/(x1-x0)+memory[at+2]*((ya+yb)-(y0+y1))/(y1-y0);
+    gradient+=(box==0?1.0:-1.0)*2.0*memory[meta+4]*(xb-xa)*(yb-ya)/memory[at+3+box]*feature;
+   }
+  }
+  memory[3*n+i]=gradient;if(i==0)memory[11*n]=rloss;
+ }
+ return;
+}
+
+if(op==0) {
+ if(i>=n)return;
+ precise float x=memory[i],y=memory[n+i],d=x-y,a=abs(d),weight=memory[2*n+i],loss=0.0,g=0.0;
+ precise float delta=F(0),eps=F(1),sigma=F(2),inv=1.0/float(n);
+ int kind=args[7];
+ if(args[8]==0) {
+  if(kind==1){loss=a;g=d>0.0?1.0:(d<0.0?-1.0:0.0);}
+  else if(kind==2){if(a<=delta){loss=0.5*d*d;g=d;}else{loss=delta*(a-0.5*delta);g=delta*(d>0.0?1.0:-1.0);}}
+  else if(kind==3){loss=sqrt(d*d+eps*eps);g=d/loss;}
+  else if(kind==4){loss=0.5*(d*d/(sigma*sigma)+log(sigma*sigma));g=d/(sigma*sigma);}
+  else if(kind==5){
+   precise float p=max(1e-7,min(0.9999999,x));
+   precise float lp=x>0.99999988?-1e-7:log(p),lq=x>0.99999988?log(1e-7):log(1.0-p);
+   loss=-y*lp-(1.0-y)*lq;
+   if(x>1e-7 && x<=0.99999988)g=(x-y)/(x*(1.0-x));
+  } else {loss=d*d;g=2.0*d;}
+ }
+ memory[3*n+i]=weight*inv*g;memory[4*n+i]=weight*inv*loss;return;
+}
+if(op==2 || op==3) {
+ if(i>=n)return;
+ if(op==2) {
+  if(i>=ow*oh*c)return;
+  int channel=i%c,x=(i/c)%ow,y=(i/c)/ow;
+  precise float value=0.0;int count=0;
+  for(int dy=0;dy<2;++dy)for(int dx=0;dx<2;++dx){int xx=x*2+dx,yy=y*2+dy;if(xx<w && yy<h){value+=memory[(yy*w+xx)*c+channel];++count;}}
+  memory[3*n+i]=value/float(count);
+ } else {
+  int x=(i/c)%w,y=(i/c)/w;
+  precise float value=0.0;
+  if(x/2<ow && y/2<oh){int nx=w-x/2*2>1?2:1,ny=h-y/2*2>1?2:1;value=memory[((y/2)*ow+x/2)*c+ch]/float(nx*ny);}
+  memory[3*n+i]=value;
+ }
+ return;
+}
+if(op==1) {
+ if(pass==0 || pass==1) {
+  int channel=group;if(channel>=c)return;
+  precise float sx=0.0,sy=0.0,sxy=0.0,mx=memory[9*n+8*channel],my=memory[9*n+8*channel+1];
+  for(int j=local;j<hw;j+=256){precise float x=memory[j*c+channel],y=memory[n+j*c+channel];if(pass==1){x-=mx;y-=my;}sx+=pass==0?x:x*x;sy+=pass==0?y:y*y;sxy+=x*y;}
+  sums[local]=sx;sums[256+local]=sy;sums[512+local]=sxy;BARRIER;
+  for(int stride=128;stride>0;stride/=2){if(local<stride){sums[local]+=sums[local+stride];sums[256+local]+=sums[256+local+stride];sums[512+local]+=sums[512+local+stride];}BARRIER;}
+  if(local==0) {
+   int at=9*n+8*channel;
+   if(pass==0){memory[at]=sums[0]/float(hw);memory[at+1]=sums[256]/float(hw);}
+   else {
+    precise float c1=F(3)*F(5),c2=F(4)*F(5);c1*=c1;c2*=c2;
+    precise float A=2.0*mx*my+c1,B=2.0*sums[512]/float(hw)+c2,C=mx*mx+my*my+c1,D=(sums[0]+sums[256])/float(hw)+c2;
+    precise float denom=C*D,ssim=denom!=0.0?A*B/(denom+1e-12):0.0;
+    memory[at+2]=A;memory[at+3]=B;memory[at+4]=C;memory[at+5]=D;memory[at+6]=ssim;
+    memory[4*n+channel]=(1.0-ssim)/float(c);
+   }
+  }
+ } else if(pass==2 && i<n) {
+  int at=9*n+8*ch;precise float mx=memory[at],my=memory[at+1],x=memory[i],y=memory[n+i];
+  precise float deriv=2.0*my/(memory[at+2]+1e-12)+2.0*(y-my)/(memory[at+3]+1e-12)-2.0*mx/(memory[at+4]+1e-12)-2.0*(x-mx)/(memory[at+5]+1e-12);
+  memory[3*n+i]=-memory[at+6]*deriv/float(hw*c);
+ }
+ return;
+}
+if(op==5) {
+ if(pass==0) {
+  int token=group;if(token>=h)return;
+  int label=int(memory[n+token]);
+  precise float maximum=-3.402823466e38;
+  for(int k=local;k<w;k+=256)maximum=max(maximum,memory[token*w+k]);
+  sums[local]=maximum;BARRIER;
+  for(int stride=128;stride>0;stride/=2){if(local<stride)sums[local]=max(sums[local],sums[local+stride]);BARRIER;}
+  maximum=sums[0];BARRIER;
+  precise float total=0.0;for(int k=local;k<w;k+=256)total+=exp(memory[token*w+k]-maximum);
+  sums[local]=total;BARRIER;
+  for(int stride=128;stride>0;stride/=2){if(local<stride)sums[local]+=sums[local+stride];BARRIER;}
+  total=sums[0];
+  bool valid=label>=0 && label<w;
+  for(int k=local;k<w;k+=256)memory[3*n+token*w+k]=valid?exp(memory[token*w+k]-maximum)/max(1e-30,total)-(k==label?1.0:0.0):0.0;
+  if(local==0){memory[4*n+token]=valid?(maximum-memory[token*w+label])+log(max(1e-30,total)):0.0;memory[5*n+token]=valid?1.0:0.0;}
+ } else if(pass==1) {
+  if(group>0)return;
+  precise float total=0.0;for(int k=local;k<h;k+=256)total+=memory[5*n+k];
+  sums[local]=total;BARRIER;
+  for(int stride=128;stride>0;stride/=2){if(local<stride)sums[local]+=sums[local+stride];BARRIER;}
+  if(local==0)memory[11*n+1]=sums[0]>0.0?1.0/sums[0]:0.0;
+ } else if(pass==2 && i<n){memory[3*n+i]*=memory[11*n+1];if(i<h)memory[4*n+i]*=memory[11*n+1];}
+ return;
+}
+if(op==4 && i<n) {
+ int x=(i/c)%w,y=(i/c)/w;
+ int cw=12*n,aw=cw+w*w,ct=aw+w,ah=ct+h*h;
+ precise float a=0.0,b=0.0,al=0.0,bl=0.0,at=0.0,bt=0.0;
+ if(pass==0){for(int j=0;j<w;++j){precise float co=memory[cw+j*w+x];LOSS_ACC(memory[(y*w+j)*c+ch],co,a,al,at);LOSS_ACC(memory[n+(y*w+j)*c+ch],co,b,bl,bt);}precise float pa,pb;LOSS_STORE(a,al,at,memory[aw+x],pa);LOSS_STORE(b,bl,bt,memory[aw+x],pb);memory[5*n+i]=pa;memory[6*n+i]=pb;}
+ else if(pass==1){for(int j=0;j<h;++j){precise float co=memory[ct+j*h+y];LOSS_ACC(memory[5*n+(j*w+x)*c+ch],co,a,al,at);LOSS_ACC(memory[6*n+(j*w+x)*c+ch],co,b,bl,bt);}precise float pa,pb;LOSS_STORE(a,al,at,memory[ah+y],pa);LOSS_STORE(b,bl,bt,memory[ah+y],pb);memory[7*n+i]=pa;memory[8*n+i]=pb;}
+ else if(pass==2){precise float d=memory[7*n+i]-memory[8*n+i];memory[9*n+i]=(d>0.0?1.0:(d<0.0?-1.0:0.0))/float(n);memory[4*n+i]=abs(d)/float(n);}
+ else if(pass==3){for(int j=0;j<h;++j)a+=memory[ah+j]*memory[9*n+(j*w+x)*c+ch]*memory[ct+y*h+j];memory[5*n+i]=a;}
+ else if(pass==4){for(int j=0;j<w;++j)a+=memory[aw+j]*memory[5*n+(y*w+j)*c+ch]*memory[cw+x*w+j];memory[3*n+i]=a;}
+}
+
+}

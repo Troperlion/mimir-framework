@@ -1,3 +1,4 @@
+#include "runtimes/optimizers/PortableOptimizer.hpp"
 #include "runtimes/vulkan/VulkanRuntime.hpp"
 
 #ifdef ENABLE_VULKAN
@@ -6,7 +7,7 @@
 
 #include "Layers.hpp"
 #include "runtimes/LayerOps.hpp"
-#include "runtimes/NativeBackward.hpp"
+#include "runtimes/portable/PortableRuntime.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -16,6 +17,7 @@
 #include <vector>
 
 struct VulkanRuntime::Impl {
+    PortableRuntime reference{"VULKAN"};
 #ifdef ENABLE_VULKAN
     VulkanCompute::ComputeEngine engine;
 #endif
@@ -68,37 +70,11 @@ bool VulkanRuntime::isInitialized() const {
 }
 
 bool VulkanRuntime::supportsForwardLayerType(const LayerType type) const {
-    switch (config_.disabled) {
-        case true:
-            return false;
-        case false:
-            break;
-    }
-
-    switch (type) {
-        case LayerType::Linear:
-        case LayerType::MatMul:
-        case LayerType::BatchMatMul:
-        case LayerType::Conv2d:
-        case LayerType::ConvTranspose2d:
-        case LayerType::Add:
-        case LayerType::Subtract:
-        case LayerType::Multiply:
-        case LayerType::Divide:
-        case LayerType::ReLU:
-        case LayerType::LeakyReLU:
-        case LayerType::SiLU:
-        case LayerType::GELU:
-        case LayerType::Sigmoid:
-        case LayerType::Tanh:
-        case LayerType::Softplus:
-        case LayerType::Mish:
-        case LayerType::HardSigmoid:
-        case LayerType::HardSwish:
-            return true;
-        default:
-            return false;
-    }
+#ifdef ENABLE_VULKAN
+    return !config_.disabled && PortableRuntime("VULKAN").supportsForwardLayerType(type);
+#else
+    (void)type; return false;
+#endif
 }
 
 RuntimeCapabilityLevel VulkanRuntime::queryForwardCapability(const LayerType type) const {
@@ -106,12 +82,12 @@ RuntimeCapabilityLevel VulkanRuntime::queryForwardCapability(const LayerType typ
     return supportsForwardLayerType(type) ? RuntimeCapabilityLevel::HostFallback
                                           : RuntimeCapabilityLevel::Unsupported;
 #else
+    if(config_.disabled)return RuntimeCapabilityLevel::Unsupported;
     switch (type) {
         case LayerType::Linear:
         case LayerType::MatMul:
         case LayerType::BatchMatMul:
         case LayerType::Conv2d:
-        case LayerType::ConvTranspose2d:
         case LayerType::Add:
         case LayerType::Multiply:
         case LayerType::ReLU:
@@ -127,35 +103,42 @@ RuntimeCapabilityLevel VulkanRuntime::queryForwardCapability(const LayerType typ
         case LayerType::Mish:
         case LayerType::HardSigmoid:
         case LayerType::HardSwish:
+        case LayerType::LayerNorm:
             return RuntimeCapabilityLevel::Native;
         default:
-            return RuntimeCapabilityLevel::Unsupported;
+            return PortableRuntime("VULKAN").queryForwardCapability(type);
     }
 #endif
 }
 
 bool VulkanRuntime::supportsBackwardLayerType(const LayerType type) const {
 #ifdef ENABLE_VULKAN
-    return !config_.disabled && NativeBackward::supports(type);
+    return !config_.disabled && PortableRuntime("VULKAN").supportsBackwardLayerType(type);
 #else
-    (void)type;
-    return false;
+    (void)type; return false;
 #endif
 }
 
 RuntimeCapabilityLevel VulkanRuntime::queryBackwardCapability(const LayerType type) const {
-    return supportsBackwardLayerType(type) ? RuntimeCapabilityLevel::Native : RuntimeCapabilityLevel::Unsupported;
+#ifdef ENABLE_VULKAN
+    if(config_.disabled)return RuntimeCapabilityLevel::Unsupported;
+    PortableRuntime reference("VULKAN"); reference.configure(config_);
+    return reference.queryBackwardCapability(type);
+#else
+    return RuntimeCapabilityLevel::Unsupported;
+#endif
 }
 
 RuntimeCapabilityLevel VulkanRuntime::queryBackwardOperationCapability(
     const Layer& layer, const std::vector<const std::vector<float>*>& inputs,
     const std::vector<const std::vector<float>*>& grad_outputs, bool training) const {
-    if (config_.disabled || !config_.linear_enabled || inputs.empty() || !inputs[0] ||
-        grad_outputs.size()!=1 || !grad_outputs[0]) return RuntimeCapabilityLevel::Unsupported;
-    if (!runtimeCapabilityIsNative(queryConfiguredForwardOperationCapability(layer,inputs,true)))
-        return RuntimeCapabilityLevel::Unsupported;
-    (void)training;
-    return queryBackwardCapability(layer.type_enum);
+#ifdef ENABLE_VULKAN
+    if(config_.disabled)return RuntimeCapabilityLevel::Unsupported;
+    PortableRuntime reference("VULKAN"); reference.configure(config_);
+    return reference.queryBackwardOperationCapability(layer,inputs,grad_outputs,training);
+#else
+    return RuntimeCapabilityLevel::Unsupported;
+#endif
 }
 
 RuntimeCapabilityLevel VulkanRuntime::queryForwardOperationCapability(
@@ -163,8 +146,37 @@ RuntimeCapabilityLevel VulkanRuntime::queryForwardOperationCapability(
     const std::vector<const std::vector<float>*>& inputs,
     bool training
 ) const {
-    (void)training;
-    return queryConfiguredForwardOperationCapability(layer, inputs, false);
+#ifdef ENABLE_VULKAN
+    if(config_.disabled)return RuntimeCapabilityLevel::Unsupported;
+    PortableRuntime reference("VULKAN"); reference.configure(config_);
+    // Parallel fast paths share geometry validation, not the serial work limit.
+    switch (layer.type_enum) {
+        case LayerType::Linear:
+        case LayerType::MatMul:
+        case LayerType::BatchMatMul:
+        case LayerType::Add:
+        case LayerType::Subtract:
+        case LayerType::Multiply:
+        case LayerType::Divide:
+        case LayerType::ReLU:
+        case LayerType::LeakyReLU:
+        case LayerType::Sigmoid:
+        case LayerType::Tanh:
+        case LayerType::SiLU:
+        case LayerType::GELU:
+        case LayerType::Softplus:
+        case LayerType::Mish:
+        case LayerType::HardSigmoid:
+        case LayerType::HardSwish:
+        case LayerType::Conv2d:
+            return runtimeCapabilityIsNative(reference.queryForwardGeometryCapability(layer,inputs,training))
+                ? queryForwardCapability(layer.type_enum) : RuntimeCapabilityLevel::Unsupported;
+        default: break;
+    }
+    return reference.queryForwardOperationCapability(layer,inputs,training);
+#else
+    return RuntimeCapabilityLevel::Unsupported;
+#endif
 }
 
 bool VulkanRuntime::linearForward(
@@ -227,6 +239,11 @@ bool VulkanRuntime::forwardLayer(
     if (!isInitialized() || !impl_) return false;
     if (config_.disabled) return false;
     if (!supportsForwardLayerType(layer.type_enum)) return false;
+
+    if(layer.type_enum==LayerType::LayerNorm || layer.type_enum==LayerType::ConvTranspose2d) {
+        if(!impl_->reference.initialize(config_))return false;
+        return impl_->reference.forwardLayer(inputs,outputs,layer,training);
+    }
 
     switch (layer.type_enum) {
         case LayerType::Linear: {
@@ -357,66 +374,7 @@ bool VulkanRuntime::forwardLayer(
             outputs[0].assign(static_cast<size_t>(out_c) * static_cast<size_t>(out_h) * static_cast<size_t>(out_w), 0.0f);
             return impl_->engine.conv2dForward(x.data(), w, b, outputs[0].data(), in_h, in_w, in_c, out_c, k, stride, pad, dilation);
         }
-        case LayerType::ConvTranspose2d: {
-            if (!config_.conv_enabled) return false;
-            if (inputs.empty() || !inputs[0]) return false;
-            const std::vector<float>& x = *inputs[0];
 
-            const int in_c = std::max(1, layer.in_channels);
-            const int out_c = std::max(1, layer.out_channels);
-            const int k = std::max(1, layer.get_kernel_h());
-            const int stride = std::max(1, layer.get_stride_h());
-            const int pad = std::max(0, layer.get_pad_h());
-            const int dilation = std::max(1, (layer.dilation_h != 1) ? layer.dilation_h : layer.dilation);
-
-            int in_h = std::max(1, layer.input_height);
-            int in_w = std::max(1, layer.input_width);
-            if (in_c > 0 && x.size() % static_cast<size_t>(in_c) == 0) {
-                const size_t hw = x.size() / static_cast<size_t>(in_c);
-                const size_t cfg_hw = static_cast<size_t>(in_h) * static_cast<size_t>(in_w);
-                if (cfg_hw != hw) {
-                    const int cfg_h = layer.input_height;
-                    const int cfg_w = layer.input_width;
-                    bool fixed = false;
-                    if (cfg_h > 0 && (hw % static_cast<size_t>(cfg_h)) == 0) {
-                        in_h = cfg_h;
-                        in_w = static_cast<int>(hw / static_cast<size_t>(cfg_h));
-                        fixed = true;
-                    } else if (cfg_w > 0 && (hw % static_cast<size_t>(cfg_w)) == 0) {
-                        in_w = cfg_w;
-                        in_h = static_cast<int>(hw / static_cast<size_t>(cfg_w));
-                        fixed = true;
-                    }
-                    if (!fixed) {
-                        const size_t s = static_cast<size_t>(std::llround(std::sqrt(static_cast<double>(hw))));
-                        if (s > 0 && s * s == hw) {
-                            in_h = static_cast<int>(s);
-                            in_w = static_cast<int>(s);
-                        }
-                    }
-                }
-            }
-
-            const int out_h = (in_h - 1) * stride - 2 * pad + dilation * (k - 1) + 1;
-            const int out_w = (in_w - 1) * stride - 2 * pad + dilation * (k - 1) + 1;
-            if (out_h <= 0 || out_w <= 0) return false;
-
-            const long long ops = static_cast<long long>(out_c) * static_cast<long long>(in_c) * static_cast<long long>(k) * static_cast<long long>(k) * static_cast<long long>(in_h) * static_cast<long long>(in_w);
-            if (ops < std::max(0, config_.conv_min_ops)) return false;
-
-            const size_t expected_in = static_cast<size_t>(in_c) * static_cast<size_t>(in_h) * static_cast<size_t>(in_w);
-            if (x.size() != expected_in) return false;
-
-            const size_t expected_w = static_cast<size_t>(out_c) * static_cast<size_t>(in_c) * static_cast<size_t>(k) * static_cast<size_t>(k);
-            const size_t expected_total_w = expected_w + (layer.use_bias ? static_cast<size_t>(out_c) : 0ULL);
-            const float* w = layer.getWeights();
-            if (!w || layer.getWeightsSize() < expected_total_w) return false;
-            const float* b = layer.use_bias ? (w + expected_w) : nullptr;
-
-            outputs.resize(1);
-            outputs[0].assign(static_cast<size_t>(out_c) * static_cast<size_t>(out_h) * static_cast<size_t>(out_w), 0.0f);
-            return impl_->engine.convTranspose2dForward(x.data(), w, b, outputs[0].data(), in_h, in_w, in_c, out_c, k, stride, pad, dilation);
-        }
         case LayerType::Add: {
             if (inputs.size() < 2 || !inputs[0] || !inputs[1]) return false;
             const std::vector<float>& A = *inputs[0];
@@ -437,6 +395,7 @@ bool VulkanRuntime::forwardLayer(
             outputs[0].assign(A.size(), 0.0f);
             return impl_->engine.mulForward(A.data(), B.data(), outputs[0].data(), static_cast<int>(A.size()));
         }
+
         case LayerType::Subtract:
         case LayerType::Divide: {
             if (inputs.size() < 2 || !inputs[0] || !inputs[1]) return false;
@@ -516,7 +475,8 @@ bool VulkanRuntime::forwardLayer(
             return impl_->engine.binaryForward(A.data(),A.data(),outputs[0].data(),static_cast<int>(A.size()),10+op,alpha);
         }
         default:
-            return false;
+            if(!impl_->reference.initialize(config_))return false;
+            return impl_->reference.forwardLayer(inputs,outputs,layer,training);
     }
 #endif
 }
@@ -526,10 +486,31 @@ bool VulkanRuntime::backwardLayer(
     const std::vector<const std::vector<float>*>& grad_outputs,
     std::vector<std::vector<float>>& grad_inputs, Layer& layer, bool training) {
 #ifdef ENABLE_VULKAN
-    if (!isInitialized() || !runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training))) return false;
-    return NativeBackward::execute(impl_->engine,inputs,grad_outputs,grad_inputs,layer);
+    if(!isInitialized() || !runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training)))return false;
+    if(!impl_->reference.initialize(config_))return false;
+    return impl_->reference.backwardLayer(inputs,grad_outputs,grad_inputs,layer,training);
 #else
-    (void)inputs; (void)grad_outputs; (void)grad_inputs; (void)layer; (void)training;
-    return false;
+    (void)inputs;(void)grad_outputs;(void)grad_inputs;(void)layer;(void)training;return false;
 #endif
+}
+
+bool VulkanRuntime::forwardLayerWithContext(
+    const std::vector<const std::vector<float>*>& inputs,std::vector<std::vector<float>>& outputs,
+    const Layer& layer,bool training,const RuntimeForwardContext& context) {
+#ifdef ENABLE_VULKAN
+    if(layer.type_enum==LayerType::Dropout || layer.type_enum==LayerType::Dropout2d || layer.type_enum==LayerType::AlphaDropout) {
+        if(!isInitialized() || config_.disabled || !impl_->reference.initialize(config_))return false;
+        return impl_->reference.forwardLayerWithContext(inputs,outputs,layer,training,context);
+    }
+#endif
+    return AbstractRuntime::forwardLayerWithContext(inputs,outputs,layer,training,context);
+}
+
+bool VulkanRuntime::optimizerStep(const RuntimeOptimizerRequest& request) {
+    return supportsOptimizer() && portableOptimizer(request,name(),config_.device_index);
+}
+
+#include "runtimes/losses/LossDispatch.hpp"
+bool VulkanRuntime::reconstructionLoss(const RuntimeLossGrad::Request& r,RuntimeLossGrad::LossWithGrad& out) {
+    return supportsReconstructionLoss() && RuntimeLossGrad::portable(r,out,name(),config_.device_index);
 }

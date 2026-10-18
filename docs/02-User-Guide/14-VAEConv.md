@@ -43,6 +43,7 @@ image HWC
   → [ResBlock et SelfAttention optionnels]
   → N convolutions stride 2
   → Conv2d 1×1 vers mu     (LC×LH×LW)
+  → branche logvar : Conv2d 3×3 → SiLU → normalisation encodeur
   → Conv2d 1×1 vers logvar (LC×LH×LW)
   → Reparameterize : z = mu + exp(0.5×logvar)×epsilon
   → Add(z, z_prior_bias) si use_encoder_prior=true
@@ -53,7 +54,7 @@ image HWC
   → Permute vers HWC
 ```
 
-La sortie principale `x` est un vecteur concaténé :
+Pendant l’entraînement, la sortie principale `x` est un vecteur concaténé :
 
 ```text
 reconstruction[image_dim] || mu[latent_dim] || logvar[latent_dim]
@@ -65,7 +66,37 @@ Si `text_cond=true`, deux projections sont ajoutées :
 ... || img_proj[proj_dim] || txt_proj[proj_dim]
 ```
 
+En inférence (`training=false`), le forward s’arrête à `vae_conv/recon` et retourne directement la reconstruction de taille `image_dim`. Les projections multimodales et `vae_conv/out_concat` ne sont ni exécutées ni matérialisées.
+
 Le latent opérationnel `z` sert au décodeur. Il n’est pas placé dans la zone `mu` de la sortie : la loss KL doit être calculée sur les paramètres de la distribution, pas sur un échantillon.
+
+La branche `logvar` possède son propre préconditionnement spatial à la résolution latente. La normalisation suit `enc_norm` (`GroupNorm`, `LayerNorm` ou aucune si `enc_norm=none`) avant la projection linéaire `1×1`. Cette topologie ajoute des paramètres et requiert donc un checkpoint compatible.
+
+### Contexte latent et détails sous-pixel
+
+Deux branches optionnelles complètent ce graphe, sans modifier les dimensions de `mu`, `logvar` et `z` :
+
+| Paramètre | Défaut du registre | Effet |
+| --- | --- | --- |
+| `latent_spatial_context` | `false` | Projections résiduelles et trois convolutions de dilatation 1, 2 et 4 à la résolution latente, avant les têtes statistiques et à l’entrée du décodeur. |
+| `latent_context_channels` | `32` | Largeur de ces features et de la projection des détails, indépendante de `base_channels` ; minimum 2. |
+| `latent_detail_path` | `false` | Regroupement des positions sous-pixel de l’image en canaux, puis projection et fusion avant `mu/logvar`. Le décodeur prédit depuis `z` un résidu par position sous-pixel, réarrangé vers l’image et ajouté avant `Tanh`. |
+
+Le chemin de détails ne fournit aucune image ni feature de l’encodeur directement au décodeur : tout passe par la distribution latente. Les coordonnées relatives des pixels d’un bloc sont conservées par `Reshape/Permute`, y compris pour les images rectangulaires RGB. Le contexte élargit le champ réceptif sans réduire la grille ; cette approche suit le principe des [convolutions dilatées pour agréger le contexte](https://arxiv.org/abs/1511.07122). Elle n’active pas la SelfAttention globale.
+
+Avec un petit `base_channels`, cette branche évite de comprimer tous les détails dans les seuls canaux de la voie principale du décodeur. Elle ajoute toutefois des paramètres et du calcul : `latent_context_channels` permet d’ajuster son coût. L’amélioration sur un dataset réel doit être évaluée après entraînement ; augmenter la capacité ne garantit pas à lui seul une meilleure reconstruction.
+
+`configs/vae_conv-config.json` active les deux branches avec une largeur de 32 pour les **nouveaux entraînements**. Les défauts du registre restent désactivés pour la compatibilité. En reprise, le script conserve les trois paramètres du checkpoint, ou les branches désactivées pour un checkpoint legacy ; une surcharge CLI incompatible est refusée. Le décodeur seul et l’import d’un VAE dans Lumen réutilisent ces paramètres.
+
+Pour entraîner la nouvelle topologie dans un dossier distinct :
+
+```bash
+./bin/mimir --conf configs/vae_conv-config.json --run train \
+  --override training.out_dir=checkpoint/vae_conv-latent-spatial \
+  --override training.resume=0
+```
+
+Les options CLI du script sont `--latent-spatial-context`, `--latent-detail-path` et `--latent-context-channels`. Elles acceptent aussi leurs noms avec underscores. Un ancien checkpoint peut être repris avec son architecture d’origine ; l’ajout de branches requiert un nouvel entraînement.
 
 ## 2. Réparamétrisation et mode déterministe
 

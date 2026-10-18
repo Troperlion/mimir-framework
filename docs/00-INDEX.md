@@ -111,6 +111,7 @@ cmake --build build -j"$(nproc)"
 - [Interfaces Viz : SFML, Qt, GTK, Web](02-User-Guide/17-Viz-Backends.md)
 - [Sérialisation](03-API-Reference/02-Serialization.md)
 - [Variables d'environnement](03-API-Reference/22-Environment-Variables.md)
+- [Bridge JavaScript](03-API-Reference/21-JavaScript-API.md)
 - [Correspondance Lua vers C++](03-API-Reference/20-Lua-API-Cpp-Mapping.md)
 
 ## Runtimes et matériel
@@ -126,6 +127,11 @@ Le routeur essaie les backends disponibles dans cet ordre : ROCm, CUDA,
 Vulkan, OpenCL, puis CPU. Le support déclaré d'une opération ne garantit pas
 qu'elle possède un kernel GPU spécialisé ; les pages runtime distinguent ces
 deux notions.
+
+CPU, Vulkan et OpenCL couvrent 72 types exécutables en forward et 73 en
+backward. [NMS](03-API-Reference/01-Layers.md#contrat-de-nms) possède un backward
+stop-gradient sur CPU, CUDA, Vulkan et OpenCL. Les kernels de référence GPU
+complètent la couverture ; ils ne garantissent pas une amélioration de vitesse.
 
 ## Aller plus loin
 

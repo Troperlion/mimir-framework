@@ -675,7 +675,9 @@ int main(int argc, char **argv)
                 } else if (opt == "--js") {
                     JSScripting js;
                     js.registerAPI();
-                    js.setArgs(script_path, script_args);
+                    auto js_args = script_args;
+                    if (!js_args.empty() && js_args.front() == "--") js_args.erase(js_args.begin());
+                    js.setArgs(script_path, js_args);
                     if (!js.loadScript(script_path)) {
                         std::cerr << "❌ Échec exécution JS: " << script_path << "\n";
                         return 1;
@@ -835,6 +837,49 @@ int main(int argc, char **argv)
             if (!task_desc.empty()) std::cerr << " — " << task_desc;
             std::cerr << "\n";
         }
+
+#ifdef MIMIR_ENABLE_SCRIPTING_JS
+        // JS config-driven entry uses the same globals and script argument contract.
+        const json* js_conf = nullptr;
+        if (task_conf->contains("js") && (*task_conf)["js"].is_object())
+            js_conf = &(*task_conf)["js"];
+        else if (task_conf->contains("run") && (*task_conf)["run"].is_object()
+                 && (*task_conf)["run"].contains("js") && (*task_conf)["run"]["js"].is_object())
+            js_conf = &(*task_conf)["run"]["js"];
+        if (js_conf) {
+            std::vector<json> entries;
+            if (js_conf->contains("scripts") && (*js_conf)["scripts"].is_array())
+                for (const auto& entry : (*js_conf)["scripts"]) entries.push_back(entry);
+            else if (js_conf->contains("script")) entries.push_back((*js_conf)["script"]);
+            if (entries.empty()) {
+                std::cerr << "--conf: expected js.script or js.scripts\n";
+                return 1;
+            }
+            try {
+                JSScripting js;
+                for (const auto& entry : entries) {
+                    const std::string path = entry.is_string() ? entry.get<std::string>() : entry.value("script", "");
+                    std::vector<std::string> args;
+                    if (entry.is_object() && entry.contains("args")) {
+                        if (!entry.at("args").is_array())
+                            throw std::runtime_error("js script args must be an array");
+                        for (const auto& arg : entry.at("args"))
+                            args.push_back(arg.is_string() ? arg.get<std::string>() : arg.dump());
+                    }
+                    js.setArgs(path, args);
+                    js.setSystemConfig(conf, fs::absolute(conf_path).string(),
+                                       fs::absolute(fs::path(conf_path)).parent_path().string());
+                    if (path.empty()) throw std::runtime_error("js script path is empty");
+                    if (!js.loadScript(path)) return 1;
+                }
+                JSContext::getInstance().resetRuntimeState();
+                return 0;
+            } catch (const std::exception& e) {
+                std::cerr << "--conf JS: " << e.what() << "\n";
+                return 1;
+            }
+        }
+#endif
 
         // ── Résolution du bloc lua dans la tâche active ─────────────────────────
         const json* lua_conf = nullptr;

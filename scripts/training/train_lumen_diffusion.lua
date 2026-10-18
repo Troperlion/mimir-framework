@@ -43,20 +43,33 @@ end
 
 local dataset_root = Args.get_str(opts, "dataset", "")
 if dataset_root == "" then
-  die("--dataset est requis (images avec captions .txt de même nom)")
+  die("--dataset est requis (images avec annotations .json ou captions .txt de même nom)")
 end
 
 local tokenizer_path = Args.get_str(opts, "tokenizer", tokenizer_cfg.path or
   "checkpoint/base_tokenizer/tokenizer.json")
 local require_tokenizer = Args.get_bool(opts, "require-tokenizer", false)
-local tokenizer_max_vocab = math.max(1, Args.get_int(opts, "max-vocab",
-  tokenizer_cfg.max_vocab or cfg.vocab_size or 32000))
+-- Capacity is derived from additions during hydration, never from a base/default cap.
+local tokenizer_bpe_merges = math.max(0, Args.get_int(opts,"tokenizer-bpe-merges",1000))
+if opts["max-vocab"] then logf("--max-vocab=%s ignoré : capacité issue de l'hydratation ou du checkpoint",tostring(opts["max-vocab"])) end
 local output_dir = Args.get_str(opts, "out", "checkpoints/lumen_diffusion")
 local resume_path = Args.get_str(opts, "resume", "")
 local prepare_tokenizer_only = Args.get_bool(opts, "prepare-tokenizer-only", false)
 if resume_path == "0" or resume_path == "false" or resume_path == "off" or
     resume_path == "none" then
   resume_path = ""
+end
+local checkpoint_vocab_size = nil
+if resume_path ~= "" then
+  resume_path = Checkpoint.resolve_dir(resume_path)
+  if not resume_path then die("--resume ne contient aucun checkpoint Lumen exploitable") end
+  local architecture, architecture_err=read_json(FS.join(resume_path,"model","architecture.json"))
+  local saved=type(architecture)=="table" and architecture.model_config
+  if type(saved)~="table" or saved.type~="lumen_diffusion" then
+    die("Checkpoint Lumen invalide : "..tostring(architecture_err or "model_config absent ou incompatible"))
+  end
+  checkpoint_vocab_size=tonumber(saved.vocab_size)
+  if not checkpoint_vocab_size or checkpoint_vocab_size<1 then die("vocab_size absent du checkpoint Lumen") end
 end
 local epochs = math.max(1, Args.get_int(opts, "epochs", training.epochs or 10))
 local learning_rate = Args.get_num(opts, "lr", training.learning_rate or 1e-4)
@@ -177,8 +190,15 @@ cfg.patch_size = Args.get_int(opts, "patch-size", cfg.patch_size or 4)
 cfg.hidden_size = Args.get_int(opts, "hidden-size", cfg.hidden_size or 384)
 cfg.depth = Args.get_int(opts, "depth", cfg.depth or 8)
 cfg.mlp_ratio = Args.get_num(opts, "mlp-ratio", cfg.mlp_ratio or 4.0)
-cfg.text_seq_len = Args.get_int(opts, "text-seq-len",
-  cfg.text_seq_len or tokenizer_cfg.max_sequence_length or 77)
+-- This is the reference positional table size; active length follows each prompt.
+local text_length = opts["text-seq-len"] or opts["txt-seq-len"] or "auto"
+if tostring(text_length):lower()=="auto" or tonumber(text_length)==0 then
+  cfg.text_seq_len = math.max(1,tonumber(cfg.text_seq_len) or 77)
+else
+  cfg.text_seq_len = tonumber(text_length)
+  if not cfg.text_seq_len or cfg.text_seq_len%1~=0 then die("--text-seq-len doit être auto ou un entier positif") end
+end
+cfg.dynamic_text_seq_len = Args.get_bool(opts,"dynamic-text-seq-len",cfg.dynamic_text_seq_len ~= false)
 cfg.text_layers = Args.get_int(opts, "text-layers", cfg.text_layers or 2)
 cfg.num_heads = Args.get_int(opts, "num-heads", cfg.num_heads or 8)
 cfg.diffusion_steps = Args.get_int(opts, "diffusion-steps", cfg.diffusion_steps or 1000)
@@ -221,7 +241,15 @@ cfg.epsilon = training.epsilon or 1e-8
 cfg.kl_beta = kl_beta
 cfg.kl_warmup_steps = kl_warmup_steps
 cfg.seed = seed
-cfg.vocab_size = tokenizer_max_vocab
+-- cfg.vocab_size is assigned after tokenizer hydration/loading.
+local bbox_loss_weight = Args.get_num(opts, "bbox-loss-weight", training.bbox_loss_weight or cfg.bbox_loss_weight or 1.0)
+if not is_finite(bbox_loss_weight) or bbox_loss_weight < 0 then die("--bbox-loss-weight doit être fini et >= 0") end
+cfg.bbox_loss_weight = bbox_loss_weight
+for role, default in pairs({primary=3.0, secondary=2.0, other=1.0}) do
+  local key = "relation_" .. role .. "_weight"
+  cfg[key] = Args.get_num(opts, "relation-" .. role .. "-weight", training[key] or cfg[key] or default)
+  if not is_finite(cfg[key]) or cfg[key] < 0 then die("--relation-" .. role .. "-weight doit être fini et >= 0") end
+end
 
 local function convert_image_channels(rgb)
   if cfg.image_c == 3 then return rgb end
@@ -267,20 +295,134 @@ local function get_image_item(index, phase)
   return nil
 end
 
-local tokenizer_source_path = tokenizer_path
-local resume_tokenizer_path = FS.join(resume_path, "tokenizer", "tokenizer.json")
-if resume_path ~= "" and FS.file_exists(resume_tokenizer_path) then
-  tokenizer_source_path = resume_tokenizer_path
+if resume_path ~= "" then
+  local resume_tokenizer_path=FS.join(resume_path,"tokenizer","tokenizer.json")
+  if not FS.file_exists(resume_tokenizer_path) then die("Tokenizer du checkpoint Lumen introuvable : "..resume_tokenizer_path) end
+  local ok_tokenizer,tokenizer_err=Mimir.Tokenizer.load(resume_tokenizer_path)
+  check(ok_tokenizer,tokenizer_err,"Tokenizer.load(checkpoint Lumen)")
+  logf("tokenizer de reprise conservé : %s vocab=%d capacité=%d",resume_tokenizer_path,Mimir.Tokenizer.vocab_size(),Mimir.Tokenizer.get_max_vocab())
+else
+  local ok_tokenizer,tokenizer_err=BaseTok.load_base({path=tokenizer_path,max_vocab=7,require=require_tokenizer})
+  check(ok_tokenizer,tokenizer_err,"Tokenizer.load_or_create")
 end
-local ok_tokenizer, tokenizer_err = BaseTok.load_base({
-  path = tokenizer_source_path,
-  max_vocab = tokenizer_max_vocab,
-  require = require_tokenizer,
-})
-check(ok_tokenizer, tokenizer_err, "Tokenizer.load_or_create")
-local ok_max_vocab, max_vocab_err = Mimir.Tokenizer.set_max_vocab(tokenizer_max_vocab)
-check(ok_max_vocab, max_vocab_err, "Tokenizer.set_max_vocab")
 
+local cache_path = Args.get_str(opts, "cache", dataset_root .. "/dataset_cache.json")
+local ok_dataset, dataset_count_or_error = Mimir.Dataset.load(
+  dataset_root, cfg.image_w, cfg.image_h, 2, true, cache_path, 10240, true)
+check(ok_dataset, dataset_count_or_error, "Dataset.load")
+local dataset_total = tonumber(dataset_count_or_error) or 0
+local dataset_count = dataset_total
+if max_items > 0 then dataset_count = math.min(dataset_count, max_items) end
+if dataset_count < 1 then
+  die("dataset vide; format attendu: <nom>.png|jpg accompagné de <nom>.json (annotations) ou <nom>.txt")
+end
+local validation_capacity = validation_holdout and
+  math.max(0, dataset_count - 1) or dataset_count
+local validation_count = math.min(validation_items, validation_capacity)
+local training_count = validation_holdout and
+  (dataset_count - validation_count) or dataset_count
+if validation_items > 0 and validation_count < validation_items then
+  logf(
+    "validation réduite à %d item(s) pour conserver un item d'entraînement",
+    validation_count)
+end
+logf(
+  "partition: train=%d validation=%d holdout=%s",
+  training_count, validation_count, tostring(validation_holdout))
+
+local function hydrate_tokenizer(reason)
+  local ensure_vocab = Mimir.Tokenizer.ensure_vocab_from_text
+  local tokenize_ensure = Mimir.Tokenizer.learn_bpe
+  if type(ensure_vocab) ~= "function" or type(tokenize_ensure) ~= "function" then
+    die("tokenizer: ensure_vocab_from_text et learn_bpe sont requis")
+  end
+  local vocab_before = math.floor(tonumber(Mimir.Tokenizer.vocab_size()) or 0)
+  local captions = 0
+  local corpus = {}
+  local errors = 0
+  for index = 1, dataset_total do
+    local item = Mimir.Dataset.get(index, false)
+    local text = type(item) == "table" and tostring(item.text or "") or ""
+    -- Use the exact native conditioning shared with training and validation.
+    if type(item) == "table" and type(item.annotation) == "table" then
+      local context, context_err = Mimir.Model.conditioning_prompt(text, item.annotation)
+      if not context then die("Contexte d’annotation invalide : " .. tostring(context_err)) end
+      text = context
+    end
+    if text ~= "" then
+      captions = captions + 1
+      -- At most one new token per byte: enough room for this caption's additions,
+      -- independently of the capacity serialized in the base tokenizer.
+      check(Mimir.Tokenizer.set_max_vocab(Mimir.Tokenizer.vocab_size()+#text),nil,"Tokenizer.grow_for_caption")
+      local ok_call, result = pcall(ensure_vocab, text)
+      if not ok_call or result == false then
+        die("Tokenizer.ensure_vocab_from_text a échoué : " .. tostring(result))
+      else
+        corpus[#corpus + 1] = text
+      end
+    end
+    release_dataset_item(index)
+  end
+  -- Each BPE merge adds at most one token. Reserve only the learning budget.
+  check(Mimir.Tokenizer.set_max_vocab(Mimir.Tokenizer.vocab_size()+tokenizer_bpe_merges),nil,"Tokenizer.grow_for_bpe")
+  local ok_bpe, bpe_err = tokenize_ensure(corpus,tokenizer_bpe_merges)
+  check(ok_bpe, bpe_err, "Tokenizer.learn_bpe")
+  local longest_context = 0
+  for _, context in ipairs(corpus) do
+    local tokens, token_err = Mimir.Tokenizer.tokenize(context)
+    if not tokens then die("Tokenisation du contexte : " .. tostring(token_err)) end
+    longest_context = math.max(longest_context, #tokens)
+  end
+  if not prepare_tokenizer_only and not cfg.dynamic_text_seq_len and longest_context > cfg.text_seq_len then
+    die(string.format("Contexte dataset trop long : %d tokens requis ; utilisez --text-seq-len %d (actuel : %d)", longest_context, longest_context, cfg.text_seq_len))
+  end
+  logf("contexte texte: mode=%s maximum_dataset=%d tokens reference_positions=%d",cfg.dynamic_text_seq_len and "dynamique par entrée" or "fixe",longest_context,cfg.text_seq_len)
+  local vocab_after = math.floor(tonumber(Mimir.Tokenizer.vocab_size()) or 0)
+  logf(
+    "tokenizer hydraté (%s): captions=%d/%d vocab=%d->%d max=%d erreurs=%d",
+    reason, captions, dataset_total, vocab_before, vocab_after,
+    Mimir.Tokenizer.get_max_vocab(), errors)
+end
+
+
+if resume_path=="" then hydrate_tokenizer("dataset") end
+local tokenizer_vocab_size = math.floor(tonumber(Mimir.Tokenizer.vocab_size()) or 0)
+if tokenizer_vocab_size < 7 then
+  die("tokenizer incomplet après hydratation: vocab=" .. tokenizer_vocab_size)
+end
+if resume_path=="" then
+  check(Mimir.Tokenizer.set_max_vocab(tokenizer_vocab_size),nil,"Tokenizer.freeze_vocab")
+  cfg.vocab_size=tokenizer_vocab_size
+else
+  if tokenizer_vocab_size>checkpoint_vocab_size then die("Tokenizer incompatible avec les embeddings du checkpoint Lumen") end
+  cfg.vocab_size=checkpoint_vocab_size
+end
+
+if not cfg.dynamic_text_seq_len and type(Mimir.Dataset.prepare_sequences) == "function" then
+  local ok_sequences, sequences_err =
+    Mimir.Dataset.prepare_sequences(cfg.text_seq_len or 77)
+  check(ok_sequences, sequences_err, "Dataset.prepare_sequences")
+end
+
+FS.mkdir_p(output_dir)
+if resume_path=="" then
+  local ok_source_save, source_save_err = Mimir.Tokenizer.save(tokenizer_path)
+  check(ok_source_save, source_save_err, "Tokenizer.save(source)")
+end
+local output_tokenizer_path = FS.join(output_dir, "tokenizer.json")
+if FS.normalize(output_tokenizer_path) ~= FS.normalize(tokenizer_path) then
+  local ok_output_save, output_save_err = Mimir.Tokenizer.save(output_tokenizer_path)
+  check(ok_output_save, output_save_err, "Tokenizer.save(output)")
+end
+logf(
+  "tokenizer construit et sérialisé avant modèle: vocab=%d path=%s",
+  tokenizer_vocab_size, output_tokenizer_path)
+if prepare_tokenizer_only then
+  logf("préparation tokenizer terminée; modèle non créé")
+  return
+end
+
+local indexed_image_w,indexed_image_h=cfg.image_w,cfg.image_h
 if not prepare_tokenizer_only then
   local ok_create, create_err = Mimir.Model.create("lumen_diffusion", cfg)
   check(ok_create, create_err, "Model.create")
@@ -291,6 +433,7 @@ if not prepare_tokenizer_only then
   for _, key in ipairs({
     "image_w", "image_h", "image_c", "latent_w", "latent_h", "latent_c",
     "patch_size", "vae_base_channels", "vae_stochastic_latent",
+    "vae_latent_spatial_context", "vae_latent_detail_path", "vae_latent_context_channels",
     "vae_resnet", "vae_attention", "vae_use_skip_connections",
     "vae_use_encoder_prior", "vae_enc_norm", "vae_dec_norm",
     "vae_decoder_upsample", "vae_enc_gn_groups", "vae_dec_gn_groups",
@@ -325,96 +468,13 @@ if cfg.image_c ~= 1 and cfg.image_c ~= 3 and cfg.image_c ~= 4 then
   die("le nombre de canaux image effectif doit valoir 1, 3 ou 4")
 end
 
-local cache_path = Args.get_str(opts, "cache", dataset_root .. "/dataset_cache.json")
-local ok_dataset, dataset_count_or_error = Mimir.Dataset.load(
-  dataset_root, cfg.image_w, cfg.image_h, 2, true, cache_path, 10240, true)
-check(ok_dataset, dataset_count_or_error, "Dataset.load")
-local dataset_total = tonumber(dataset_count_or_error) or 0
-local dataset_count = dataset_total
-if max_items > 0 then dataset_count = math.min(dataset_count, max_items) end
-if dataset_count < 1 then
-  die("dataset vide; format attendu: <nom>.png|jpg accompagné de <nom>.txt")
-end
-local validation_capacity = validation_holdout and
-  math.max(0, dataset_count - 1) or dataset_count
-local validation_count = math.min(validation_items, validation_capacity)
-local training_count = validation_holdout and
-  (dataset_count - validation_count) or dataset_count
-if validation_items > 0 and validation_count < validation_items then
-  logf(
-    "validation réduite à %d item(s) pour conserver un item d'entraînement",
-    validation_count)
-end
-logf(
-  "partition: train=%d validation=%d holdout=%s",
-  training_count, validation_count, tostring(validation_holdout))
 
-local function hydrate_tokenizer(reason)
-  local ensure_vocab = Mimir.Tokenizer.ensure_vocab_from_text
-  local tokenize_ensure = Mimir.Tokenizer.learn_bpe
-  if type(ensure_vocab) ~= "function" or type(tokenize_ensure) ~= "function" then
-    die("tokenizer: ensure_vocab_from_text et learn_bpe sont requis")
-  end
-  local vocab_before = math.floor(tonumber(Mimir.Tokenizer.vocab_size()) or 0)
-  local captions = 0
-  local corpus = {}
-  local errors = 0
-  for index = 1, dataset_total do
-    local item = Mimir.Dataset.get(index, false)
-    local text = type(item) == "table" and tostring(item.text or "") or ""
-    if text ~= "" then
-      captions = captions + 1
-      local ok_call, result = pcall(ensure_vocab, text)
-      if not ok_call or result == false then
-        errors = errors + 1
-      else
-        corpus[#corpus + 1] = text
-      end
-    end
-    release_dataset_item(index)
-  end
-  local ok_bpe, bpe_err = tokenize_ensure(corpus)
-  check(ok_bpe, bpe_err, "Tokenizer.learn_bpe")
-  local vocab_after = math.floor(tonumber(Mimir.Tokenizer.vocab_size()) or 0)
-  logf(
-    "tokenizer hydraté (%s): captions=%d/%d vocab=%d->%d max=%d erreurs=%d",
-    reason, captions, dataset_total, vocab_before, vocab_after,
-    tokenizer_max_vocab, errors)
-end
-
-
-hydrate_tokenizer("dataset")
-local tokenizer_vocab_size = math.floor(tonumber(Mimir.Tokenizer.vocab_size()) or 0)
-if tokenizer_vocab_size < 7 then
-  die("tokenizer incomplet après hydratation: vocab=" .. tokenizer_vocab_size)
-end
-if tokenizer_vocab_size > tokenizer_max_vocab then
-  die(string.format("tokenizer trop grand: vocab=%d max=%d",
-    tokenizer_vocab_size, tokenizer_max_vocab))
-end
-local ok_freeze, freeze_err = Mimir.Tokenizer.set_max_vocab(tokenizer_vocab_size)
-check(ok_freeze, freeze_err, "Tokenizer.freeze_vocab")
-
-if type(Mimir.Dataset.prepare_sequences) == "function" then
-  local ok_sequences, sequences_err =
-    Mimir.Dataset.prepare_sequences(cfg.text_seq_len or 77)
-  check(ok_sequences, sequences_err, "Dataset.prepare_sequences")
-end
-
-FS.mkdir_p(output_dir)
-local ok_source_save, source_save_err = Mimir.Tokenizer.save(tokenizer_path)
-check(ok_source_save, source_save_err, "Tokenizer.save(source)")
-local output_tokenizer_path = FS.join(output_dir, "tokenizer.json")
-if FS.normalize(output_tokenizer_path) ~= FS.normalize(tokenizer_path) then
-  local ok_output_save, output_save_err = Mimir.Tokenizer.save(output_tokenizer_path)
-  check(ok_output_save, output_save_err, "Tokenizer.save(output)")
-end
-logf(
-  "tokenizer construit et sérialisé avant modèle: vocab=%d path=%s",
-  tokenizer_vocab_size, output_tokenizer_path)
-if prepare_tokenizer_only then
-  logf("préparation tokenizer terminée; modèle non créé")
-  return
+-- The native VAE checkpoint can change effective image dimensions. Re-index
+-- with those dimensions before decoding images; vocabulary discovery used text only.
+if cfg.image_w~=indexed_image_w or cfg.image_h~=indexed_image_h then
+  local ok_reload,reloaded=Mimir.Dataset.load(dataset_root,cfg.image_w,cfg.image_h,2,true,cache_path,10240,true)
+  check(ok_reload,reloaded,"Dataset.load(dimensions VAE)")
+  if tonumber(reloaded)~=dataset_total then die("Dataset modifié pendant la préparation du tokenizer") end
 end
 
 local ok_allocate, allocate_err = Mimir.Model.allocate_params()
@@ -572,7 +632,9 @@ local function run_validation(reason)
     if item then
       local stats, validation_err = Mimir.Model.lumen_validate_step(
         convert_image_channels(item.image), tostring(item.text or ""),
-        math.tointeger(seed + dataset_index * 1000003))
+        math.tointeger(seed + dataset_index * 1000003), {
+          annotation = item.annotation,
+        })
       item = nil
       release_dataset_item(dataset_index)
       if type(stats) ~= "table" then
@@ -709,13 +771,15 @@ for epoch = next_epoch, next_epoch + epochs - 1 do
 
     global_step = global_step + 1
     local prompt = tostring(item.text or "")
-    if random_uniform() < cfg_dropout then prompt = "" end
+    local drop_conditioning = random_uniform() < cfg_dropout
     local warmup = warmup_steps > 0 and math.min(1.0, global_step / warmup_steps) or 1.0
     local step_lr = learning_rate * warmup * validation_lr_scale
     local step_seed = seed + global_step * 1000003
 
     local stats, step_err = Mimir.Model.lumen_train_step(
       convert_image_channels(item.image), prompt, step_seed, step_lr, optimizer, {
+        annotation = item.annotation,
+        drop_conditioning = drop_conditioning,
         epoch = epoch,
         total_epochs = epochs,
         batch = position,

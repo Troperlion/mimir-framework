@@ -50,8 +50,32 @@ int main() {
         if type(Mimir.Model.lumen_add_vae_calibration_image) ~= "function" then TEST_ERR = "Lumen calibration image missing" return end
         if type(Mimir.Model.lumen_finish_vae_calibration) ~= "function" then TEST_ERR = "Lumen calibration finish missing" return end
         if type(Mimir.Model.lumen_train_step) ~= "function" then TEST_ERR = "Lumen train step missing" return end
+        if type(Mimir.Benchmark) ~= "table" or type(Mimir.Benchmark.now) ~= "function" then
+            TEST_ERR = "Benchmark.now missing"
+            return
+        end
+        local benchmark_t0 = Mimir.Benchmark.now()
+        local benchmark_t1 = Mimir.Benchmark.now()
+        if type(benchmark_t0) ~= "number" or benchmark_t1 < benchmark_t0 then
+            TEST_ERR = "Benchmark.now is not monotonic"
+            return
+        end
         assert(type(Mimir.Viz.backend()) == "string")
         assert(type(Mimir.Viz.poll_events()) == "table")
+        assert(type(Mimir.Viz.set_detections) == "function")
+        assert(type(Mimir.Viz.show_detections) == "function")
+        assert(type(Mimir.Viz.set_detection_threshold) == "function")
+        assert(not pcall(Mimir.Viz.set_detections, {{x1=-0.1,y1=0.1,x2=0.5,y2=0.5}}))
+        assert(not pcall(Mimir.Viz.set_detections, {{x1=0.5,y1=0.1,x2=0.2,y2=0.5}}))
+        assert(not pcall(Mimir.Viz.show_detections, "yes"))
+        assert(not pcall(Mimir.Viz.set_detection_threshold, -0.1))
+        assert(not pcall(Mimir.Viz.set_detection_threshold, 1.1))
+        local threshold_ok, threshold_err = Mimir.Viz.set_detection_threshold(0.25)
+        assert(threshold_ok == false and type(threshold_err) == "string")
+        local detection_ok, detection_err = Mimir.Viz.set_detections({
+            {x1=0.1,y1=0.2,x2=0.7,y2=0.8,label="object",score=0.9,class_id=1}
+        }, "dataset")
+        assert(detection_ok == false and type(detection_err) == "string")
         local scene_ok, scene_err = Mimir.Viz.configure({controls={}})
         assert(scene_ok == false and type(scene_err) == "string")
         assert(not pcall(Mimir.Viz.poll_events, -1))
@@ -94,6 +118,52 @@ int main() {
 
         local ok = Mimir.Model.create("basic_mlp", cfg)
         if ok ~= true then TEST_ERR = "Model.create returned false" return end
+        -- Every canonical type has an exact, read-only inspection filter.
+        local available = Mimir.Layers.available()
+        assert(#available == 73)
+        local seen = {}
+        for _, name in ipairs(available) do
+            seen[name] = true
+            assert(type(Mimir.Layers[name]) == "function")
+            assert(type(Mimir.Layers[name:lower()]) == "function")
+            local snapshot = Mimir.Layers[name:lower()]()
+            local count = 0
+            for _, layer in ipairs(Mimir.Model.get_layers()) do
+                if layer.type == name then count = count + 1 end
+            end
+            assert(#snapshot == count, name .. " must filter by exact type")
+            local pairs_count = 0
+            for _, layer in pairs(snapshot) do
+                pairs_count = pairs_count + 1
+                assert(layer.type == name)
+                assert(not pcall(function() layer.name = "changed" end))
+                assert(not pcall(function() layer.inputs[1] = "changed" end))
+                local fields = 0
+                for key, value in pairs(layer) do fields = fields + 1 end
+                assert(fields > 0)
+            end
+            assert(pairs_count == count)
+            assert(not pcall(function() snapshot[1] = {} end))
+            assert(not pcall(function() setmetatable(snapshot, {}) end))
+        end
+        assert(seen.PatchEmbed and seen.Reparameterize)
+        assert(not pcall(function() available[1] = "changed" end))
+        local backend_ops = Mimir.Model.runtime_ops()
+        assert(#backend_ops == 6)
+        local levels = {Native=true, NativeOptimized=true, HostFallback=true, Unsupported=true}
+        for _, backend in ipairs(backend_ops) do
+            assert(type(backend.compiled) == "boolean")
+            assert(#backend.ops == #available)
+            for _, op in ipairs(backend.ops) do
+                assert(seen[op.type] and levels[op.forward] and levels[op.backward])
+                if not backend.compiled then
+                    assert(op.forward == "Unsupported" and op.backward == "Unsupported")
+                end
+                if backend.name == "CPU" and op.type == "Linear" then
+                    assert(backend.compiled and op.forward == "Native" and op.backward == "Native")
+                end
+            end
+        end
         local effective_cfg = Mimir.Model.get_config()
         if type(effective_cfg) ~= "table" or effective_cfg.type ~= "basic_mlp" then
             TEST_ERR = "Model.get_config returned an invalid effective config"

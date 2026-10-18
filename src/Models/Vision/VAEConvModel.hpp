@@ -12,7 +12,8 @@
 // - Couches principales: Conv2d / ConvTranspose2d / GroupNorm|LayerNorm /
 //   SiLU / résidus Add / UpsampleNearest / Reparameterize (+ adaptateurs de
 //   disposition Reshape/Permute pour l'I/O).
-// - Output packs: [recon(image_dim), mu(latent_dim), logvar(latent_dim)]
+// - Training output packs: [recon(image_dim), mu(latent_dim), logvar(latent_dim)]
+// - Inference output: recon(image_dim), without evaluating the final Concat.
 // - Latent is spatial: latent_dim = latent_h * latent_w * latent_c (CHW)
 
 class VAEConvModel : public Model {
@@ -27,6 +28,15 @@ public:
         int latent_c = 256;
 
         int base_channels = 64;
+
+        // Optional latent-only refinement. Defaults preserve existing checkpoints.
+        // Local/dilated residual convolutions mix features at constant LH x LW.
+        bool latent_spatial_context = false;
+        int latent_context_channels = 32;
+        // Pack image subpixel phases before mu/logvar; predict phase residuals
+        // exclusively from z in the decoder (no encoder-to-decoder bypass).
+        bool latent_detail_path = false;
+
 
         // Si false, le latent utilisé par le décodeur est déterministe (z = mu).
         // Si true, on active le bruit de réparameterisation (z = mu + std * eps).

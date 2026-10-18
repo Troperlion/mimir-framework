@@ -14,7 +14,8 @@ Ce chapitre formalise le contrat API systeme que tous les bridges de scripting d
 ## Etat des bindings
 
 - Lua est le bridge de reference et reste le seul contrat complet et stable aujourd'hui.
-- Les bindings JS, C# et Rust existent, mais ils sont encore incomplets.
+- JS expose désormais la surface des callbacks natifs de référence par des appels synchrones Node.js vers C++ ; voir [le contrat JS et ses limites](../03-API-Reference/21-JavaScript-API.md).
+- Les bindings C# et Rust restent incomplets.
 - La parite progresse par morceaux: certaines APIs sont disponibles, d'autres renvoient encore une erreur explicite ou une sortie partielle.
 - Toute documentation ou demo pour un bridge non-Lua doit le signaler clairement.
 
@@ -119,7 +120,7 @@ Exemple de commande (bridge Lua actuel) :
 
 Si un bridge ne passe pas cette matrice, il n'est pas pret pour un workflow metier stable.
 
-Aujourd'hui, seule la matrice Lua est complete. Les autres bridges doivent etre valides au cas par cas et annonces comme partiels.
+La matrice de contrat JS est couverte par `BridgeTest.API`, avec configuration également injectable par `--conf`. Les autres bridges restent à valider au cas par cas. Les limites de transport JS sont documentées dans sa référence API.
 
 ## 9. Regle d'evolution API
 

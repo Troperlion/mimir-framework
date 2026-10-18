@@ -44,6 +44,8 @@ void computeBatchNorm(std::vector<float>& data, const std::vector<float>& gamma,
 void computeLayerNorm(std::vector<float>& data, const std::vector<float>& gamma,
 					  const std::vector<float>& beta, int normalized_size,
 					  float eps = 1e-5f, bool use_hardware = true);
+bool prepareLayerNorm(const std::vector<float>& input, int normalized_size,
+					  float eps, std::vector<float>& normalized);
 void computeConvTranspose2D(const std::vector<float>& input, std::vector<float>& output,
 							const LayerParams& params, int in_h, int in_w, int in_c, int out_c,
 							bool use_hardware = true);

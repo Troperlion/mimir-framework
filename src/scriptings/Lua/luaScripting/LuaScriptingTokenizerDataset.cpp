@@ -1,5 +1,7 @@
+#include "runtimes/fpga/FpgaIo.hpp"
 #include "LuaScripting.hpp"
 #include "VizTextPayload.hpp"
+#include "training/TagAnnotation.hpp"
 #include "Models/Registry/ModelArchitectures.hpp"
 #include "Serialization/Serialization.hpp"
 #include "Serialization/DebugJsonDump.hpp"
@@ -392,6 +394,10 @@ int LuaScripting::lua_getDataset(lua_State* L) {
             lua_pushstring(L, item.image_file.c_str());
             lua_setfield(L, -2, "image_file");
         }
+        if (!item.mask_file.empty()) {
+            lua_pushstring(L, item.mask_file.c_str());
+            lua_setfield(L, -2, "mask_file");
+        }
         if (!item.audio_file.empty()) {
             lua_pushstring(L, item.audio_file.c_str());
             lua_setfield(L, -2, "audio_file");
@@ -413,12 +419,32 @@ int LuaScripting::lua_getDataset(lua_State* L) {
         }
         
         // Charger et ajouter le contenu texte si présent
-        if (!item.text_file.empty() && !item.text.has_value()) {
-            item.loadText();
+        if ((!item.text_file.empty() || !item.text_inline.empty()) && !item.text.has_value()) {
+            if (!item.loadText() && !item.annotation_file.empty()) {
+                throw std::runtime_error(item.annotation_error.empty() ? "Cannot load dataset annotation (RAM limit?)" : item.annotation_error);
+            }
         }
-        if (!item.text_file.empty() && item.text.has_value()) {
+        if (item.text.has_value()) {
             lua_pushstring(L, item.text.value().c_str());
             lua_setfield(L, -2, "text");
+        }
+
+        if (item.text.has_value()) {
+            const auto labels=TagAnnotation::labels(*item.text,item.annotation ? &*item.annotation : nullptr,false);
+            lua_newtable(L);
+            for(size_t i=0;i<labels.size();++i) {
+                lua_pushlstring(L,labels[i].data(),labels[i].size());
+                lua_rawseti(L,-2,static_cast<int>(i+1));
+            }
+            lua_setfield(L,-2,"label_candidates");
+        }
+        if (!item.annotation_file.empty()) {
+            lua_pushstring(L, item.annotation_file.c_str());
+            lua_setfield(L, -2, "annotation_file");
+            if (item.annotation) {
+                jsonToLuaTable(L, *item.annotation);
+                lua_setfield(L, -2, "annotation");
+            }
         }
 
         // Charger et retourner l'image en bytes RGB u8 (utile pour diffusion).
@@ -439,6 +465,52 @@ int LuaScripting::lua_getDataset(lua_State* L) {
             lua_setfield(L, -2, "height");
             lua_pushinteger(L, item.img_c > 0 ? item.img_c : 3);
             lua_setfield(L, -2, "channels");
+
+            if (load_image && item.img_loaded) {
+                const size_t frame_count = item.animationFrameCount();
+                lua_pushboolean(L, item.isAnimatedImage());
+                lua_setfield(L, -2, "is_animated");
+                lua_pushinteger(L, static_cast<lua_Integer>(frame_count));
+                lua_setfield(L, -2, "frame_count");
+                lua_pushinteger(L, item.animation_loop_count);
+                lua_setfield(L, -2, "loop_count");
+
+                if (item.isAnimatedImage()) {
+                    lua_newtable(L);
+                    for (size_t i = 0; i < item.animation_frame_delays_ms.size(); ++i) {
+                        lua_pushinteger(L, item.animation_frame_delays_ms[i]);
+                        lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
+                    }
+                    lua_setfield(L, -2, "frame_delays_ms");
+
+                    const size_t frame_size = static_cast<size_t>(item.w) *
+                                              static_cast<size_t>(item.h) *
+                                              static_cast<size_t>(item.img_c);
+                    lua_newtable(L);
+                    for (size_t frame = 0; frame < frame_count; ++frame) {
+                        lua_newtable(L);
+                        const size_t offset = frame * frame_size;
+                        for (size_t i = 0; i < frame_size; ++i) {
+                            lua_pushinteger(L, static_cast<lua_Integer>(item.animation_frames[offset + i]));
+                            lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
+                        }
+                        lua_rawseti(L, -2, static_cast<lua_Integer>(frame + 1));
+                    }
+                    lua_setfield(L, -2, "animation_frames");
+                }
+            }
+
+            if (!item.mask_file.empty()) {
+                if (load_image) item.loadMask(target_w, target_h);
+                if (load_image && item.mask_loaded) {
+                    lua_newtable(L);
+                    for (size_t i = 0; i < item.mask.size(); ++i) {
+                        lua_pushinteger(L, (lua_Integer)item.mask[i]);
+                        lua_rawseti(L, -2, (int)i + 1);
+                    }
+                    lua_setfield(L, -2, "mask");
+                }
+            }
         }
         
         return 1;
@@ -498,6 +570,7 @@ int LuaScripting::lua_readImageRGBU8(lua_State* L) {
 
         std::vector<uint8_t> dst((size_t)target_w * (size_t)target_h * 3);
         resizeBicubicRGB_SRGBLinear(src.data(), w_img, h_img, dst.data(), target_w, target_h);
+        Mimir::fpgaStageDataset(dst);
 
         lua_newtable(L);
 

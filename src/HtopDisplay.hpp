@@ -1,6 +1,8 @@
 #pragma once
 #include "SkipConnectionControl.hpp"
 #include "LiveModelConfig.hpp"
+#include "viz/TerminalModelGraph.hpp"
+#include "DebugJsonExportDialog.hpp"
 
 #include <iostream>
 #include <iomanip>
@@ -233,7 +235,7 @@ private:
         bool  is_val   = false;
     };
 
-    bool csv_enabled = true;
+    bool csv_enabled = false; // Automatic persistence belongs to AsyncMonitor.
     std::string csv_log_file = "checkpoints/htop_metrics.csv";
     std::vector<CsvRecord> csv_history;
 
@@ -416,6 +418,78 @@ public:
     }
     std::shared_ptr<LiveModelConfig> runtime_config_ = std::make_shared<LiveModelConfig>();
     RuntimeConfigEditor config_editor_;
+    DebugJsonExportDialog debug_json_dialog_;
+    Mimir::Viz::TerminalModelGraphView model_graph_view_;
+    bool modelGraphVisible() const { return model_graph_view_.visible; }
+    void modelGraphKey(char key) {
+        auto config=std::atomic_load(&runtime_config_);
+        auto& view=model_graph_view_;
+        if(!view.visible) { view.visible=true;view.follow=true; }
+        else if(key=='g' || key=='G' || key=='\033')view.visible=false;
+        else if(key=='r' || key=='R') { view.selected=0;view.pan_x=view.pan_y=0;view.follow=true; }
+        else if(key=='\t')modelGraphMove('B');
+        config->requestModelGraph(view.visible);
+    }
+    void modelGraphMove(char arrow) {
+        auto graph=std::atomic_load(&runtime_config_)->modelGraph();
+        const size_t count=graph?graph->at("nodes").size():0;
+        auto& view=model_graph_view_;
+        if(arrow=='A')view.move(-1,count);
+        else if(arrow=='B')view.move(1,count);
+        else if(arrow=='5' || arrow=='6')view.move((arrow=='5'?-1:1)*std::max(1,(height-13)/4),count);
+        else { view.pan_x+=arrow=='D'?-8:8;view.follow=false; }
+    }
+    void renderModelGraph() {
+        const auto config=std::atomic_load(&runtime_config_);
+        config->requestModelGraph(true);
+        if(width<32 || height<14) {
+            resetCursor();clearLine();
+            out()<<clipToWidth("Graphe: agrandir le terminal (G fermer)",std::max(1,width))<<std::flush;
+            return;
+        }
+        const auto snapshot=config->modelGraph();
+        const auto lines=model_graph_view_.lines(snapshot.get(),width,height);
+        for(int row=1;row<=height;++row) {
+            moveCursor(row,1);clearLine();
+            if(row<=static_cast<int>(lines.size()))
+                out()<<"| "<<clipToWidth(lines[row-1],std::max(1,width-4))<<" |";
+        }
+        out()<<std::flush;
+    }
+    bool debugJsonVisible() const { return debug_json_dialog_.visible; }
+    void debugJsonKey(char key) {
+        auto& form = debug_json_dialog_;
+        if (!form.visible) { form.open(); return; }
+        if (key == '\033') form.visible = false;
+        else if (key == '\t') form.move();
+        else if (key == '\r' || key == '\n') form.submit(*std::atomic_load(&runtime_config_));
+        else if (static_cast<unsigned char>(key) >= 128) {
+            auto& value = form.selected == 0 ? form.directory : form.filename;
+            if (form.replace) value.clear();
+            form.replace = false;
+            if (value.size() < 4096) value += key;
+        } else form.text(static_cast<unsigned char>(key));
+    }
+    void renderDebugJsonDialog() {
+        const int columns = std::max(1, width - 4);
+        auto line = [&](int row, const std::string& value) {
+            moveCursor(row, 1); clearLine();
+            const auto text = clipToWidth(value, columns);
+            out() << "| " << text << std::string(std::max(0, columns-static_cast<int>(text.size())), ' ') << " |";
+        };
+        auto& form = debug_json_dialog_;
+        line(1, std::string(columns, '='));
+        line(2, "EXPORT DEBUGJSON");
+        line(3, "Tab: champ suivant  Entree: exporter  Esc: annuler");
+        line(4, "L'entrainement continue pendant la saisie.");
+        line(5, std::string(form.selected == 0 ? "> Dossier : " : "  Dossier : ") + form.directory + (form.selected == 0 ? "_" : ""));
+        line(6, std::string(form.selected == 1 ? "> Fichier : " : "  Fichier : ") + form.filename + (form.selected == 1 ? "_" : ""));
+        line(7, form.message);
+        line(8, "La saisie remplace le champ selectionne. Choisir un nouveau fichier.");
+        line(9, std::string(columns, '='));
+        for (int row=10; row<=height; ++row) { moveCursor(row,1); clearLine(); }
+        out() << std::flush;
+    }
     void setSkipConnectionControl(std::shared_ptr<SkipConnectionControl> control) {
         std::atomic_store(&skip_control_, std::move(control));
     }
@@ -772,7 +846,9 @@ public:
             return;
 
         getTerminalSize();
+        if (debug_json_dialog_.visible) { renderDebugJsonDialog(); return; }
         if (config_editor_.visible) { renderConfiguration(); return; }
+        if (modelGraphVisible()) { renderModelGraph(); return; }
 
         // Retourner au début sans effacer l'écran entier (optimisation)
         resetCursor();
@@ -811,7 +887,9 @@ public:
                 "HTOP CONTROLS",
                 "H                 Close this help",
                 "C                 Open model configuration (Enter to edit/apply)",
+                "G                 Open model graph and active planner",
                 "V                 Open Viz",
+                "D                 Export DebugJSON and continue training",
                 "N                 Toggle validation on/off",
                 "S                 Toggle encoder-decoder skip connections",
                 "Tab / Up / Down   Select LR, warmups, KL beta or recon loss",
@@ -1093,7 +1171,14 @@ public:
                 out() << colorText("Viz: unavailable", 91);
                 break;
         }
-        out() << colorText("  |  [H] Help  [C] Config  |  Ctrl+C: safe stop", 90);
+        out() << colorText("  |  [H] Help  [C] Config  [G] Graph  [D] DebugJSON  |  Ctrl+C: safe stop", 90);
+
+        const auto debug_status = std::atomic_load(&runtime_config_)->debugJsonStatus();
+        if (!debug_status.empty()) {
+            moveCursor(row++, 2);
+            clearLine();
+            out() << colorText(debug_status, 96);
+        }
 
         // Effacer les lignes restantes pour éviter les artefacts
         for (int i = row; i < height; ++i)

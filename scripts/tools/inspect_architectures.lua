@@ -8,6 +8,7 @@
 -- Options:
 --   -a, --show-archs        Liste les architectures disponibles (+ dtypes)
 --   -l, --list <arch>       Sélectionne une architecture par son nom
+--   --extern-model <path>   Inspecte un fichier SafeTensors externe
 --   -e, --export <path>     Exporte l'architecture sélectionnée vers un checkpoint
 --   -p, --params            Affiche les paramètres de l'archi sélectionnée
 --   --layers                Affiche les layers de l'archi sélectionnée
@@ -17,6 +18,7 @@
 --   -d, --dtypes            Liste les dtypes pris en charge par le framework
 --   --optimizers            Liste les algorithmes d'optimisation disponibles
 --   --recon-losses          Liste les fonctions de reconstruction disponibles
+--   --all                   Tous les rapports (toutes architectures sans --list), sans export
 --   --json                  Export JSON complet du registre (toutes archs + params)
 --   -h, --help              Affiche cette aide
 
@@ -204,6 +206,7 @@ local function parse_flags(argv)
   local opts_long, pos = Args.parse(argv or {})
 
   local opts = {
+    all        = Args.has(opts_long, "all"),
     show_archs = Args.has(opts_long, "show-archs"),
     params     = Args.has(opts_long, "params"),
     dtypes     = Args.has(opts_long, "dtypes"),
@@ -218,6 +221,8 @@ local function parse_flags(argv)
     json_out   = Args.has(opts_long, "json"),
     arch       = Args.get_str(opts_long, "list", nil),
     export_path= Args.get_str(opts_long, "export", nil),
+    extern_model = Args.get_str(opts_long, "extern-model", nil),
+    extern_model_requested = opts_long["extern-model"] ~= nil,
   }
 
   -- Scan des formes courtes depuis les positionnels.
@@ -238,8 +243,15 @@ local function parse_flags(argv)
     end
   end
 
+  if opts.all then
+    opts.show_archs, opts.params, opts.layers, opts.stats = true, true, true, true
+    opts.ops, opts.runtime, opts.dtypes = true, true, true
+    opts.optimizers, opts.recon_losses = true, true
+  end
   return opts
 end
+
+local opts
 
 local function print_usage()
   ToolHelp.print("inspect_architectures")
@@ -264,14 +276,33 @@ local function join_sorted_set(map)
   return table.concat(keys, ", ")
 end
 
+local function effective_arch_config(arch, config)
+  if arch ~= "external_safetensors_base" or not opts.extern_model then return config end
+  local result = {}
+  for key, value in pairs(config or Mimir.Architectures.default_config(arch) or {}) do
+    result[key] = value
+  end
+  result.source_safetensors = opts.extern_model
+  return result
+end
+
 local function create_arch(arch, allocate_params)
-  local ok, err = Mimir.Model.create(arch)
+  local ok, err = Mimir.Model.create(arch, effective_arch_config(arch))
   if not ok then
     log(colorize("[ERROR] ", C.bold, C.red) .. "Impossible d'instancier '" .. arch .. "': " .. tostring(err))
     return false
   end
   if allocate_params then
     Mimir.Model.allocate_params()
+    if arch == "external_safetensors_base" and opts.extern_model then
+      local loaded, load_err = Mimir.Serialization.load(opts.extern_model, "safetensors", {
+        load_tokenizer = false, load_encoder = false, load_optimizer = false, strict_mode = true,
+      })
+      if not loaded then
+        log(colorize("[ERROR] ", C.bold, C.red) .. "Chargement des poids externes : " .. tostring(load_err))
+        return false
+      end
+    end
   end
   return true
 end
@@ -477,9 +508,11 @@ local function show_params(arch)
     log("  " .. colorize("description: ", C.bold) .. entry.description)
   end
   log("  " .. colorize("dtype par défaut: ", C.bold) .. colorize(arch_default_dtype(entry), C.green))
-  log("  " .. colorize("paramètres (config par défaut) :", C.bold))
-  if type(entry.config) == "table" then
-    print_config_table(entry.config)
+  local config = effective_arch_config(arch, entry.config)
+  log("  " .. colorize(opts.extern_model and arch == "external_safetensors_base"
+    and "paramètres (modèle externe) :" or "paramètres (config par défaut) :", C.bold))
+  if type(config) == "table" then
+    print_config_table(config)
   else
     log(colorize("\t(aucune config)", C.dim))
   end
@@ -487,9 +520,9 @@ local function show_params(arch)
 end
 
 -- Instancie l'architecture dans le contexte courant et retourne true/false.
-local function instantiate_arch(arch)
+local function instantiate_arch(arch, allocate_params)
   local ok, result = with_suppressed_framework_logs(function()
-    return create_arch(arch, true)
+    return create_arch(arch, allocate_params == true)
   end)
   if not ok then
     log(colorize("[ERROR] ", C.bold, C.red) .. "Échec interne pendant l'analyse de '" .. arch .. "': " .. tostring(result))
@@ -595,6 +628,7 @@ local function collect_runtime_info()
   end
 
   return {
+    ops = type(Mimir.Model.runtime_ops) == "function" and Mimir.Model.runtime_ops() or {},
     hardware_caps = caps,
     memory_guard = guard,
     allocator = allocator,
@@ -608,6 +642,29 @@ local function collect_runtime_info()
       serialization_save = type(Mimir.Serialization) == "table" and type(Mimir.Serialization.save) == "function",
     },
   }
+end
+
+local function show_runtime_ops()
+  local backends = Mimir.Model.runtime_ops()
+  local rows, columns, by_type = {}, {
+    { key = "type", title = "Op / Layer", max = 24, color = C.cyan },
+  }, {}
+  for _, backend in ipairs(backends) do
+    columns[#columns + 1] = {
+      key = backend.name, title = backend.name .. (backend.compiled and "" or " (non compilé)"), max = 35,
+    }
+    for _, op in ipairs(backend.ops) do
+      local row = by_type[op.type]
+      if not row then row = { type = op.type }; by_type[op.type] = row end
+      row[backend.name] = op.forward .. " / " .. op.backward
+    end
+  end
+  for _, name in ipairs(sorted_keys(by_type)) do rows[#rows + 1] = by_type[name] end
+  log("\n" .. colorize("* Ops par runtime — Forward / Backward", C.bold, C.blue))
+  log(make_table(columns, rows))
+  log("  NativeOptimized=natif optimisé ; Native=natif ; HostFallback=repli CPU ; Unsupported=indisponible.")
+  log("  Capacités déclarées par type : matériel, configuration et formes de tenseurs non testés.")
+  return backends
 end
 
 local function show_runtime()
@@ -659,16 +716,10 @@ local function show_runtime()
 end
 
 local function collect_layer_bindings()
-  local ops = {
-    { name = "conv2d", label = "Conv2D" },
-    { name = "linear", label = "Linear" },
-    { name = "maxpool2d", label = "MaxPool2D" },
-    { name = "avgpool2d", label = "AvgPool2D" },
-    { name = "activation", label = "Activation" },
-    { name = "batchnorm", label = "BatchNorm" },
-    { name = "layernorm", label = "LayerNorm" },
-    { name = "attention", label = "Attention" },
-  }
+  local ops = {}
+  for _, name in ipairs(Mimir.Layers.available()) do
+    ops[#ops + 1] = { name = name:lower(), label = name }
+  end
   local rows = {}
   for _, op in ipairs(ops) do
     local fn = type(Mimir.Layers) == "table" and Mimir.Layers[op.name] or nil
@@ -708,7 +759,7 @@ local function collect_graph_ops_summary()
   local ok_collect, collect_err = with_suppressed_framework_logs(function()
     for _, entry in ipairs(entries) do
       local arch = tostring(entry.name)
-      local cfg = type(entry.config) == "table" and entry.config or {}
+      local cfg = effective_arch_config(arch, type(entry.config) == "table" and entry.config or {})
       if arch == "external_safetensors_base"
         and (type(cfg.source_safetensors) ~= "string" or cfg.source_safetensors == "") then
         failures[#failures + 1] = arch
@@ -887,7 +938,7 @@ local function show_ops(opts)
     return false
   end
 
-  if opts and opts.ops_compact then
+  if opts and opts.ops_compact and not opts.all then
     local family_rows = summarize_op_families(summary)
     log(colorize("  Vue compacte par famille:", C.bold))
     log(make_table({
@@ -904,15 +955,23 @@ local function show_ops(opts)
       { key = "type", title = "Type", align = "left", color = C.cyan, max = 24 },
       { key = "count", title = "Occ.", align = "right", color = C.green, max = 8 },
       { key = "arch_count", title = "Archs", align = "right", color = C.yellow, max = 8 },
-      { key = "binding", title = "Binding Lua", align = "left", color = C.magenta, max = 22 },
+      { key = "binding", title = "Binding Lua", align = "left", color = C.magenta, max = 40 },
       { key = "sample", title = "Exemple", align = "left", color = nil, max = 46 },
     }, summary.rows))
   end
 
-  log(colorize("  Bindings low-level Mimir.Layers:", C.bold))
+  if opts.all then
+    log(colorize("  Résumé par famille:", C.bold))
+    log(make_table({
+      {key="family", title="Famille"}, {key="types", title="Types"},
+      {key="occ", title="Occ."}, {key="arch_count", title="Archs"},
+      {key="bound", title="Bindings"}, {key="samples", title="Exemples", max=46},
+    }, summarize_op_families(summary)))
+  end
+  log(colorize("  Filtres en lecture seule Mimir.Layers:", C.bold))
   log(make_table({
-    { key = "op", title = "Op", align = "left", color = C.cyan, max = 14 },
-    { key = "binding", title = "Binding", align = "left", color = C.yellow, max = 28 },
+    { key = "op", title = "Op", align = "left", color = C.cyan, max = 24 },
+    { key = "binding", title = "Binding", align = "left", color = C.yellow, max = 40 },
     { key = "status", title = "État", align = "left", color = C.green, max = 14 },
     { key = "detail", title = "Détail", align = "left", color = nil, max = 60 },
   }, summary.bindings))
@@ -1051,7 +1110,7 @@ local function export_architecture_checkpoint(arch, export_path)
     return false
   end
 
-  local ok_inst = instantiate_arch(arch)
+  local ok_inst = instantiate_arch(arch, true)
   if not ok_inst then return false end
 
   ensure_parent_dir(export_path, fmt_internal)
@@ -1133,8 +1192,7 @@ local function export_json()
     local total = 0
     local layer_list = {}
     local ok_inst = with_suppressed_framework_logs(function()
-      Mimir.Model.create(entry.name)
-      Mimir.Model.allocate_params()
+      assert(create_arch(entry.name, false), "architecture non instanciée")
       total = Mimir.Model.total_params()
       local layers = Mimir.Model.get_layers()
       if type(layers) == "table" then
@@ -1157,7 +1215,7 @@ local function export_json()
       origin       = entry.origin or "native",
       source_path  = entry.source_path,
       dtype        = arch_default_dtype(entry),
-      config       = entry.config,
+      config       = effective_arch_config(entry.name, entry.config),
       total_params = ok_inst and total or nil,
       layers       = ok_inst and layer_list or nil,
     }
@@ -1181,7 +1239,26 @@ local function export_json()
   return true
 end
 
-local opts = parse_flags(arg)
+opts = parse_flags(arg)
+
+if opts.extern_model_requested then
+  if not opts.extern_model or opts.extern_model == "" then
+    error("--extern-model requiert un chemin vers un fichier .safetensors")
+  end
+  if not FS.file_exists(opts.extern_model) then
+    error("Fichier SafeTensors introuvable ou illisible : " .. opts.extern_model)
+  end
+  if opts.arch and opts.arch ~= "external_safetensors_base" then
+    error("--extern-model utilise external_safetensors_base ; --list " .. opts.arch .. " est incompatible")
+  end
+  opts.arch = "external_safetensors_base"
+  if not opts.params and not opts.layers and not opts.stats and not opts.export_path and not opts.json_out then
+    opts.params, opts.layers, opts.stats = true, true, true
+  end
+  if not instantiate_arch(opts.arch) then
+    error("Impossible d'inspecter le fichier SafeTensors externe : " .. opts.extern_model)
+  end
+end
 
 if opts.help then
   print_usage()
@@ -1225,6 +1302,7 @@ end
 if opts.ops then
   show_ops(opts)
 end
+if opts.ops or opts.runtime then show_runtime_ops() end
 
 if opts.arch then
   if not opts.params and not opts.layers and not opts.stats and not opts.export_path then
@@ -1248,4 +1326,20 @@ if opts.arch then
   if opts.export_path then export_architecture_checkpoint(opts.arch, opts.export_path) end
 elseif opts.export_path then
   log(colorize("[ERROR] ", C.bold, C.red) .. "-e/--export requiert -l/--list <arch>")
+end
+
+-- --all without a selection reports every registered architecture.
+if opts.all and not opts.arch then
+  local entries = Mimir.Architectures.info()
+  for _, entry in ipairs(entries or {}) do
+    show_params(entry.name)
+    local cfg = entry.config or {}
+    if entry.name == "external_safetensors_base"
+      and (type(cfg.source_safetensors) ~= "string" or cfg.source_safetensors == "") then
+      log("  Layers / Stats indisponibles : source_safetensors non configuré.")
+    else
+      show_layers(entry.name)
+      show_stats(entry.name)
+    end
+  end
 end

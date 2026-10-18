@@ -34,7 +34,7 @@ Le runtime exécute une liste de layers. Chaque layer lit des tenseurs nommés e
 
 Cette page parle des layers du graphe modèle (ceux qui vivent dans `Model` et sont exécutés par `model.forward()` / `Mimir.Model.forward()`).
 
-Ne pas confondre avec le module Lua `Mimir.Layers` (ops standalone). Dans la version actuelle, ces ops sont des stubs. Voir `docs/03-API-Reference/18-Layers-Module.md`.
+Le module Lua `Mimir.Layers` inspecte les couches du modèle courant en lecture seule. Voir [Mimir.Layers](18-Layers-Module.md).
 
 ## Où sont les layers
 
@@ -174,7 +174,8 @@ Les `type` des configs sont normalisés via `LayerRegistry::normalize_type`.
 
 ### Contrat de `NMS`
 
-`NMS` est une opération de forward non différentiable. Elle reçoit :
+`NMS` possède un forward de sélection discrète et un backward explicite de
+stop-gradient. Elle reçoit :
 
 1. `boxes` : un vecteur aplati de `N * 4` coordonnées au format
    `x1, y1, x2, y2` ;
@@ -187,9 +188,26 @@ l'indice le plus petit est prioritaire. Les candidats non finis sont ignorés.
 Avec l'entrée `classes`, la suppression est intra-classe par défaut ; activez
 `nms_class_agnostic` pour supprimer aussi entre classes.
 
-Le calcul est disponible via le dispatch CPU. Les routes CUDA et ROCm qui ne
-possèdent pas de kernel NMS dédié utilisent ce même calcul de repli ; OpenCL et
-Vulkan laissent le routeur sélectionner le CPU.
+Le forward et le backward sont natifs sur CPU, CUDA, Vulkan et OpenCL quand
+le backend est compilé et disponible. ROCm conserve sa couverture actuelle ;
+le routeur peut sélectionner un autre backend, dont le CPU.
+
+Le backward reçoit un seul gradient amont, dont la longueur doit correspondre
+au nombre d'indices conservés. Il renvoie un tenseur de zéros de même taille que
+chaque entrée : `4 * N` pour les boîtes, `N` pour les scores et `N` pour les
+classes lorsqu'elles sont fournies. Les entrées vides sont acceptées ; une forme
+invalide ou un gradient amont de mauvaise longueur fait retourner `false`.
+
+Ces zéros définissent un **stop-gradient** : ils ne constituent pas une dérivée
+sur les frontières de sélection, ni une approximation différentiable de NMS.
+Une loss placée uniquement après ces indices ne fournit donc pas de gradient
+pour entraîner les boîtes ou les scores. Les losses de détection doivent porter
+sur les prédictions avant NMS.
+
+Le test `RuntimeTest.NMS` couvre le contrat CPU et le routage ; les tests
+`RuntimeTest.OPENCLNativeOps` et `RuntimeTest.VULKANNativeOps` comparent les
+gradients au CPU et vérifient la sélection effective du backend GPU.
+
 | `SelfAttention` | - | Self-attention. |
 | `MultiHeadAttention` | - | Multi-head attention. |
 | `CrossAttention` | - | Cross-attention. |

@@ -1,3 +1,4 @@
+#include "runtimes/optimizers/RocmOptimizer.hpp"
 #include "runtimes/rocm/RocmRuntime.hpp"
 
 #include "runtimes/LayerOps.hpp"
@@ -862,16 +863,17 @@ bool RocmRuntime::forwardLayer(
             const std::vector<float>& xn = *inputs[0];
             const int N = static_cast<int>(xn.size());
             if (N < config_.norm_min_elements) break;
-            if (!layer.affine) break;
 
             const int norm_sz = (layer.in_features > 0) ? layer.in_features : N;
             if (norm_sz <= 0 || N % norm_sz != 0) break;
             const int groups = N / norm_sz;
 
             const float* gw = layer.getWeights();
-            if (!gw || static_cast<int>(layer.getWeightsSize()) < norm_sz) break;
+            const size_t required_weights = static_cast<size_t>(norm_sz) *
+                (layer.use_bias ? 2ULL : 1ULL);
+            if (layer.affine && (!gw || layer.getWeightsSize() < required_weights)) break;
 
-            const float eps = (layer.eps > 0.0f) ? layer.eps : 1e-5f;
+            const float eps = std::max(layer.eps, 0.0f);
             std::vector<float> x_hat(static_cast<size_t>(N));
 
             switch (layer.type_enum) {
@@ -898,6 +900,11 @@ bool RocmRuntime::forwardLayer(
                     break;
                 default:
                     break;
+            }
+
+            if (!layer.affine) {
+                outputs = {std::move(x_hat)};
+                return true;
             }
 
             Impl::DeviceBuf d_xh, d_gamma, d_out;
@@ -1358,4 +1365,44 @@ bool RocmRuntime::backwardLayer(
     }
 
     return RuntimeLayerDispatch::cpu_backward_layer(inputs, grad_outputs, grad_inputs, layer, training);
+}
+
+bool RocmRuntime::supportsOptimizer() const {
+#if defined(ENABLE_ROCM) && __has_include(<hip/hiprtc.h>)
+    return isInitialized() && !config_.disabled;
+#else
+    return false;
+#endif
+}
+bool RocmRuntime::optimizerStep(const RuntimeOptimizerRequest& request) {
+#if defined(ENABLE_ROCM) && __has_include(<hip/hiprtc.h>)
+    return supportsOptimizer() && MimirRocmOptimizer::run(request,config_.device_index);
+#else
+    (void)request;return false;
+#endif
+}
+
+#include "runtimes/losses/LossDispatch.hpp"
+#include "runtimes/losses/LossShaderData.hpp"
+bool RocmRuntime::reconstructionLoss(const RuntimeLossGrad::Request& r,RuntimeLossGrad::LossWithGrad& out) {
+#if defined(ENABLE_ROCM) && __has_include(<hip/hiprtc.h>)
+    if(!supportsReconstructionLoss() || !RuntimeLossGrad::deviceSizeFits(r) || hipSetDevice(config_.device_index)!=hipSuccess)return false;
+    static thread_local std::map<int,std::unique_ptr<MimirRocmOptimizer::Compiler>> compilers;
+    auto& compiler=compilers[config_.device_index];
+    if(!compiler){auto candidate=std::make_unique<MimirRocmOptimizer::Compiler>();if(!candidate->initialize(MimirLossKernels::hip,"mimir_reconstruction"))return false;compiler=std::move(candidate);}
+    auto memory=RuntimeLossGrad::pack(r);auto args=RuntimeLossGrad::parameters(r);
+    MimirRocmOptimizer::Buffer data,params;
+    if(!data.alloc(memory.size()*4) || !params.alloc(args.size()*4) ||
+       hipMemcpy(data.ptr,memory.data(),memory.size()*4,hipMemcpyHostToDevice)!=hipSuccess ||
+       hipMemcpy(params.ptr,args.data(),args.size()*4,hipMemcpyHostToDevice)!=hipSuccess)return false;
+    for(int pass:RuntimeLossGrad::passes(args)) {
+        if(hipMemcpy(params.ptr,&pass,4,hipMemcpyHostToDevice)!=hipSuccess)return false;
+        void* parameters[]={&data.ptr,&params.ptr};
+        if(hipModuleLaunchKernel(compiler->kernel,pass==91?1:(args[1]+255)/256,1,1,256,1,1,0,nullptr,parameters,nullptr)!=hipSuccess || hipDeviceSynchronize()!=hipSuccess)return false;
+    }
+    if(hipMemcpy(memory.data(),data.ptr,memory.size()*4,hipMemcpyDeviceToHost)!=hipSuccess)return false;
+    return RuntimeLossGrad::unpack(r,memory,out);
+#else
+    (void)r;(void)out;return false;
+#endif
 }

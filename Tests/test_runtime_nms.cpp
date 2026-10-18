@@ -1,4 +1,6 @@
 #include "test_utils.hpp"
+#include "runtimes/cpu/CpuRuntime.hpp"
+#include "runtimes/RuntimeRouter.hpp"
 
 #include "LayerTypes.hpp"
 #include "Layers.hpp"
@@ -35,7 +37,7 @@ int main() {
     TASSERT_TRUE(
         RuntimeLayerDispatch::cpu_supports_forward_layer_type(LayerType::NMS));
     TASSERT_TRUE(
-        !RuntimeLayerDispatch::cpu_supports_backward_layer_type(LayerType::NMS));
+        RuntimeLayerDispatch::cpu_supports_backward_layer_type(LayerType::NMS));
 
     const std::vector<float> boxes = {
         0.0f, 0.0f, 10.0f, 10.0f,
@@ -113,6 +115,52 @@ int main() {
         Layer invalid = layer;
         invalid.nms_iou_threshold = 1.5f;
         TASSERT_TRUE(!run_nms(boxes, scores, nullptr, invalid, &kept));
+    }
+
+    // Explicit stop-gradient for hard NMS, with and without classes.
+    for (bool with_classes : {false, true}) {
+        const std::vector<float> classes = {0, 1, 0};
+        std::vector<const std::vector<float>*> inputs{&boxes, &scores};
+        if (with_classes) inputs.push_back(&classes);
+        std::vector<std::vector<float>> outputs, gradients;
+        TASSERT_TRUE(RuntimeLayerDispatch::cpu_forward_layer(inputs, outputs, layer, false));
+        std::vector<float> upstream(outputs[0].size(), .7f);
+        CpuRuntime cpu; RuntimeConfig config;
+        TASSERT_TRUE(cpu.initialize(config));
+        TASSERT_TRUE(runtimeCapabilityIsNative(cpu.queryBackwardCapability(LayerType::NMS)));
+        auto& router = RuntimeRouter::instance();
+        router.setActivators({}, {}, {}, {}, {});
+        router.setRuntimes(nullptr, nullptr, nullptr, nullptr, &cpu);
+        AbstractRuntime* selected = nullptr;
+        TASSERT_TRUE(router.dispatchBackwardLayer(inputs, {&upstream}, gradients, layer, true, &selected));
+        TASSERT_TRUE(selected == &cpu);
+        TASSERT_TRUE(gradients.size() == inputs.size());
+        for (size_t i = 0; i < inputs.size(); ++i) {
+            TASSERT_TRUE(gradients[i].size() == inputs[i]->size());
+            for (float value : gradients[i]) TASSERT_NEAR(value, 0.f, 0.f);
+        }
+        router.setRuntimes(nullptr, nullptr, nullptr, nullptr, nullptr);
+        // Reject even plausible-size gradients when the kept count differs.
+        upstream.resize(outputs[0].size() + 1);
+        TASSERT_TRUE(!cpu.backwardLayer(inputs, {&upstream}, gradients, layer, true));
+        Layer invalid = layer; invalid.nms_iou_threshold = 2.f;
+        upstream.resize(outputs[0].size());
+        TASSERT_TRUE(!cpu.backwardLayer(inputs, {&upstream}, gradients, invalid, true));
+        const std::vector<float> malformed{0, 1, 2};
+        TASSERT_TRUE(!cpu.backwardLayer({&malformed, &scores}, {&upstream}, gradients, layer, true));
+    }
+    {
+        CpuRuntime cpu; RuntimeConfig config; TASSERT_TRUE(cpu.initialize(config));
+        std::vector<float> empty;
+        std::vector<std::vector<float>> gradients;
+        TASSERT_TRUE(cpu.backwardLayer({&empty, &empty, &empty}, {&empty}, gradients, layer, true));
+        TASSERT_TRUE(gradients.size() == 3);
+        for (const auto& gradient : gradients) TASSERT_TRUE(gradient.empty());
+        Layer filtered = layer; filtered.nms_score_threshold = 2.f;
+        TASSERT_TRUE(cpu.backwardLayer({&boxes, &scores}, {&empty}, gradients, filtered, true));
+        TASSERT_TRUE(gradients.size() == 2 && gradients[0].size() == boxes.size() && gradients[1].size() == scores.size());
+        for (const auto& gradient : gradients) for (float value : gradient) TASSERT_NEAR(value, 0.f, 0.f);
+        TASSERT_TRUE(!cpu.backwardLayer({&boxes, &scores}, {}, gradients, layer, true));
     }
 
     return 0;
