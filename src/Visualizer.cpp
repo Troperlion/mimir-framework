@@ -1,3 +1,5 @@
+#include "viz/WorkbenchTheme.hpp"
+#include "viz/WorkbenchLayout.hpp"
 #include "Visualizer.hpp"
 #include "viz/DatasetBBoxBadge.hpp"
 #include "viz/FeatureProbe.hpp"
@@ -716,9 +718,16 @@ static vizgfx::Color color_for_tag(const std::string& tag) {
     return vizgfx::Color(140, 140, 150);
 }
 
+static int workbenchPreviewSize(const vizgfx::FloatRect& area) {
+    return std::max(32,std::min({200,int(area.size.x)-8,int(area.size.y)-36}));
+}
+
 static void position_sprite_centered_in_box(vizgfx::Sprite& sprite, float x, float y, float box_size) {
-    // sprite est déjà mis à l'échelle par createImageTexture().
     const auto lb = sprite.getLocalBounds();
+    if(lb.size.x>0.f && lb.size.y>0.f) {
+        const float fit=box_size/std::max(lb.size.x,lb.size.y);
+        sprite.setScale({fit,fit});
+    }
     const auto sc = sprite.getScale();
     const float dw = lb.size.x * sc.x;
     const float dh = lb.size.y * sc.y;
@@ -1404,16 +1413,21 @@ vizgfx::FloatRect Visualizer::panelRect(PanelId id) const {
     return make_rect(p.pos.x, p.pos.y, p.size.x, p.size.y);
 }
 
+float Visualizer::panelHeaderHeight(PanelId id) const {
+    const auto& p=panels_[static_cast<size_t>(id)];
+    return std::min(p.size.y,id==PanelId::Blocks ? mimir::viz::blockToolbarLayout(p.pos,p.size.x).height : kPanelTitleH);
+}
+
 vizgfx::FloatRect Visualizer::panelTitleRect(PanelId id) const {
     const auto& p = panels_[static_cast<size_t>(id)];
-    return make_rect(p.pos.x, p.pos.y, p.size.x, std::min(kPanelTitleH, p.size.y));
+    return make_rect(p.pos.x, p.pos.y, p.size.x, panelHeaderHeight(id));
 }
 
 vizgfx::FloatRect Visualizer::panelContentRect(PanelId id) const {
     const auto& p = panels_[static_cast<size_t>(id)];
-    const float top = p.pos.y + std::min(kPanelTitleH, p.size.y);
+    const float top = p.pos.y + panelHeaderHeight(id);
     const float inner_w = std::max(0.f, p.size.x - 2.f * kPanelPad);
-    const float inner_h = std::max(0.f, p.size.y - std::min(kPanelTitleH, p.size.y) - 2.f * kPanelPad);
+    const float inner_h = std::max(0.f, p.size.y - panelHeaderHeight(id) - 2.f * kPanelPad);
     return make_rect(p.pos.x + kPanelPad, top + kPanelPad, inner_w, inner_h);
 }
 
@@ -1554,8 +1568,8 @@ void Visualizer::initDefaultPanelsIfNeeded() {
     if (panels_initialized_) return;
     panels_initialized_ = true;
 
-    const float margin = 20.f;
-    const float right_w = 520.f;
+    const float margin = 6.f;
+    const float right_w = std::clamp(float(window_width) * .30f, 320.f, 520.f);
     const float min_left_w = 520.f;
 
     const float win_w = static_cast<float>(window_width);
@@ -1565,20 +1579,21 @@ void Visualizer::initDefaultPanelsIfNeeded() {
     const float right_x = margin + left_w + margin;
     const float right_safe_w = std::max(320.f, std::min(right_w, win_w - right_x - margin));
 
-    const float output_w = std::clamp(left_w * 0.30f, kPanelMinW, 320.f);
+    const float usable_h = std::max(420.f, win_h - 2.f * margin);
+    const float top_h = std::clamp(usable_h * .34f, 260.f, 320.f);
+    const float bottom_h = std::clamp(usable_h * .25f, 140.f, 250.f);
+    const float middle_h = std::max(140.f, usable_h - top_h - bottom_h - 2.f * margin);
+    const float output_w = std::clamp(left_w * .34f, kPanelMinW, 320.f);
     const float context_w = std::max(kPanelMinW, left_w - output_w - margin);
-    panels_[static_cast<size_t>(PanelId::Context)] = Panel{ vizgfx::Vector2f(margin, margin), vizgfx::Vector2f(context_w, 280.f), "Context", true, true };
-    panels_[static_cast<size_t>(PanelId::Blocks)] = Panel{ vizgfx::Vector2f(margin, margin + 300.f), vizgfx::Vector2f(left_w, 320.f), "Blocks / Layers", true, true };
-    panels_[static_cast<size_t>(PanelId::Generated)] = Panel{ vizgfx::Vector2f(margin, margin + 640.f), vizgfx::Vector2f(left_w, 280.f), "Generated", true, true };
-    panels_[static_cast<size_t>(PanelId::Output)] = Panel{ vizgfx::Vector2f(margin + context_w + margin, margin), vizgfx::Vector2f(output_w, 280.f), "Sortie", true, true };
-
-    panels_[static_cast<size_t>(PanelId::Training)] = Panel{ vizgfx::Vector2f(right_x, margin), vizgfx::Vector2f(right_safe_w, 70.f), "Training", true, true };
-    panels_[static_cast<size_t>(PanelId::Graph)] = Panel{ vizgfx::Vector2f(right_x, std::max(margin + 80.f, win_h - 240.f - margin)), vizgfx::Vector2f(right_safe_w, 240.f), "Loss", true, true };
-    {
-        const float metrics_y = margin + 90.f;
-        const float metrics_h = std::max(220.f, win_h - metrics_y - panels_[static_cast<size_t>(PanelId::Graph)].size.y - margin);
-        panels_[static_cast<size_t>(PanelId::Metrics)] = Panel{ vizgfx::Vector2f(right_x, metrics_y), vizgfx::Vector2f(right_safe_w, metrics_h), "Metrics", true, true };
-    }
+    panels_[static_cast<size_t>(PanelId::Context)] = Panel{{margin, margin}, {context_w, top_h}, "Contexte", true, true};
+    panels_[static_cast<size_t>(PanelId::Output)] = Panel{{margin + context_w + margin, margin}, {output_w, top_h}, "Sortie", true, true};
+    panels_[static_cast<size_t>(PanelId::Blocks)] = Panel{{margin, margin + top_h + margin}, {left_w, middle_h}, "Tenseurs / Layers", true, true};
+    panels_[static_cast<size_t>(PanelId::Generated)] = Panel{{margin, margin + top_h + middle_h + 2.f * margin}, {left_w, bottom_h}, "Images / Validation", true, true};
+    const float training_h=90.f;
+    const float graph_h=std::clamp(usable_h*.27f,160.f,260.f);
+    panels_[static_cast<size_t>(PanelId::Training)] = Panel{{right_x, margin}, {right_safe_w, training_h}, "Entraînement", true, true};
+    panels_[static_cast<size_t>(PanelId::Metrics)] = Panel{{right_x, margin + training_h + margin}, {right_safe_w, std::max(160.f, usable_h-training_h-graph_h-2.f*margin)}, "Propriétés / Métriques", true, true};
+    panels_[static_cast<size_t>(PanelId::Graph)] = Panel{{right_x, win_h-margin-graph_h}, {right_safe_w, graph_h}, "Courbes / Loss", true, true};
 
     clampPanelsToWindow();
 }
@@ -1589,19 +1604,17 @@ void Visualizer::drawPanelChrome(PanelId id) {
     const auto& p = panels_[static_cast<size_t>(id)];
     if (p.size.x <= 1.f || p.size.y <= 1.f) return;
 
-    const vizgfx::Color accent = panelAccent(id);
-
     vizgfx::RectangleShape bg(p.size);
     bg.setPosition(p.pos);
-    bg.setFillColor(vizgfx::Color(18, 18, 22, 170));
-    bg.setOutlineColor(with_alpha(accent, 180));
-    bg.setOutlineThickness(2);
+    bg.setFillColor(mimir::viz::theme::panel);
+    bg.setOutlineColor(mimir::viz::theme::border);
+    bg.setOutlineThickness(1);
     window->draw(bg);
 
-    const float th = std::min(kPanelTitleH, p.size.y);
+    const float th = panelHeaderHeight(id);
     vizgfx::RectangleShape title(vizgfx::Vector2f(p.size.x, th));
     title.setPosition(p.pos);
-    title.setFillColor(with_alpha(accent, 120));
+    title.setFillColor(mimir::viz::theme::header);
     window->draw(title);
 
     if (id == PanelId::Blocks) {
@@ -1652,30 +1665,20 @@ void Visualizer::drawPanelChrome(PanelId id) {
             const vizgfx::Color pal_fill = vizgfx::Color(72, 78, 110, 220);
             const vizgfx::Color pal_outline = vizgfx::Color(160, 172, 238, 235);
 
-            const float badge_h = std::max(14.f, th - 8.f);
-            const float mode_w = (badge == "HEATMAP") ? 84.f : 58.f;
-            const float smooth_w = 98.f;
-            const float pal_w = 100.f;
-            const float filt_act_w = 84.f;
-            const float filt_norm_w = 92.f;
-            const float tips_w = 98.f;
-            const float gap = 6.f;
-            const float total_w = mode_w + gap + smooth_w + gap + pal_w + gap + filt_act_w + gap + filt_norm_w + gap + tips_w;
-            const float base_x = p.pos.x + std::max(8.f, p.size.x - total_w - 28.f);
-            const float badge_y = p.pos.y + (th - badge_h) * 0.5f;
+            const auto layout=mimir::viz::blockToolbarLayout(p.pos,p.size.x);
+            const float badge_h=18.f;
+            const float mode_w=layout.controls[0].size.x,mode_x=layout.controls[0].position.x,mode_y=layout.controls[0].position.y;
+            const float smooth_w=layout.controls[1].size.x,smooth_x=layout.controls[1].position.x,smooth_y=layout.controls[1].position.y;
+            const float pal_w=layout.controls[2].size.x,pal_x=layout.controls[2].position.x,pal_y=layout.controls[2].position.y;
+            const float filt_act_w=layout.controls[3].size.x,act_x=layout.controls[3].position.x,act_y=layout.controls[3].position.y;
+            const float filt_norm_w=layout.controls[4].size.x,norm_x=layout.controls[4].position.x,norm_y=layout.controls[4].position.y;
+            const float tips_w=layout.controls[5].size.x,tips_x=layout.controls[5].position.x,tips_y=layout.controls[5].position.y;
 
-            const float mode_x = base_x;
-            const float smooth_x = base_x + mode_w + gap;
-            const float pal_x = smooth_x + smooth_w + gap;
-            const float act_x = pal_x + pal_w + gap;
-            const float norm_x = act_x + filt_act_w + gap;
-            const float tips_x = norm_x + filt_norm_w + gap;
-
-            last_blocks_mode_box_ = make_rect(mode_x, badge_y, mode_w, badge_h);
-            last_blocks_smooth_box_ = make_rect(smooth_x, badge_y, smooth_w, badge_h);
-            last_blocks_palette_box_ = make_rect(pal_x, badge_y, pal_w, badge_h);
+            last_blocks_mode_box_ = make_rect(mode_x, mode_y, mode_w, badge_h);
+            last_blocks_smooth_box_ = make_rect(smooth_x, smooth_y, smooth_w, badge_h);
+            last_blocks_palette_box_ = make_rect(pal_x, pal_y, pal_w, badge_h);
             vizgfx::RectangleShape b(vizgfx::Vector2f(mode_w, badge_h));
-            b.setPosition(vizgfx::Vector2f(mode_x, badge_y));
+            b.setPosition(vizgfx::Vector2f(mode_x, mode_y));
             b.setFillColor(badge_fill);
             b.setOutlineColor(badge_outline);
             b.setOutlineThickness(1.f);
@@ -1685,12 +1688,12 @@ void Visualizer::drawPanelChrome(PanelId id) {
             bt.setFont(font);
             bt.setCharacterSize(12);
             bt.setFillColor(vizgfx::Color(245, 245, 248));
-            bt.setPosition(vizgfx::Vector2f(mode_x + 7.f, badge_y - 1.f));
+            bt.setPosition(vizgfx::Vector2f(mode_x + 7.f, mode_y - 1.f));
             bt.setString(vizgfx::String::fromUtf8(badge.begin(), badge.end()));
             window->draw(bt);
 
             vizgfx::RectangleShape sb(vizgfx::Vector2f(smooth_w, badge_h));
-            sb.setPosition(vizgfx::Vector2f(smooth_x, badge_y));
+            sb.setPosition(vizgfx::Vector2f(smooth_x, smooth_y));
             sb.setFillColor(smooth_fill);
             sb.setOutlineColor(smooth_outline);
             sb.setOutlineThickness(1.f);
@@ -1700,12 +1703,12 @@ void Visualizer::drawPanelChrome(PanelId id) {
             st.setFont(font);
             st.setCharacterSize(12);
             st.setFillColor(vizgfx::Color(245, 245, 248));
-            st.setPosition(vizgfx::Vector2f(smooth_x + 6.f, badge_y - 1.f));
+            st.setPosition(vizgfx::Vector2f(smooth_x + 6.f, smooth_y - 1.f));
             st.setString(vizgfx::String::fromUtf8(smooth_badge.begin(), smooth_badge.end()));
             window->draw(st);
 
             vizgfx::RectangleShape pb(vizgfx::Vector2f(pal_w, badge_h));
-            pb.setPosition(vizgfx::Vector2f(pal_x, badge_y));
+            pb.setPosition(vizgfx::Vector2f(pal_x, pal_y));
             pb.setFillColor(pal_fill);
             pb.setOutlineColor(pal_outline);
             pb.setOutlineThickness(1.f);
@@ -1715,18 +1718,18 @@ void Visualizer::drawPanelChrome(PanelId id) {
             pt.setFont(font);
             pt.setCharacterSize(12);
             pt.setFillColor(vizgfx::Color(245, 245, 248));
-            pt.setPosition(vizgfx::Vector2f(pal_x + 6.f, badge_y - 1.f));
+            pt.setPosition(vizgfx::Vector2f(pal_x + 6.f, pal_y - 1.f));
             pt.setString(vizgfx::String::fromUtf8(pal_badge.begin(), pal_badge.end()));
             window->draw(pt);
 
-            auto draw_filter_badge = [&](float x, float w, const std::string& label, bool hidden,
+            auto draw_filter_badge = [&](float x, float y, float w, const std::string& label, bool hidden,
                                          std::optional<vizgfx::FloatRect>& out_rect) {
                 const vizgfx::Color fill = hidden ? vizgfx::Color(145, 84, 84, 220)
                                               : vizgfx::Color(70, 116, 86, 220);
                 const vizgfx::Color outline = hidden ? vizgfx::Color(240, 154, 154, 235)
                                                  : vizgfx::Color(154, 226, 186, 235);
                 vizgfx::RectangleShape fb(vizgfx::Vector2f(w, badge_h));
-                fb.setPosition(vizgfx::Vector2f(x, badge_y));
+                fb.setPosition(vizgfx::Vector2f(x, y));
                 fb.setFillColor(fill);
                 fb.setOutlineColor(outline);
                 fb.setOutlineThickness(1.f);
@@ -1736,18 +1739,18 @@ void Visualizer::drawPanelChrome(PanelId id) {
                 ft.setFont(font);
                 ft.setCharacterSize(12);
                 ft.setFillColor(vizgfx::Color(245, 245, 248));
-                ft.setPosition(vizgfx::Vector2f(x + 6.f, badge_y - 1.f));
+                ft.setPosition(vizgfx::Vector2f(x + 6.f, y - 1.f));
                 ft.setString(vizgfx::String::fromUtf8(label.begin(), label.end()));
                 window->draw(ft);
 
-                out_rect = make_rect(x, badge_y, w, badge_h);
+                out_rect = make_rect(x, y, w, badge_h);
             };
 
-            draw_filter_badge(act_x, filt_act_w,
+            draw_filter_badge(act_x, act_y, filt_act_w,
                               hide_activation_blocks ? "ACT OFF" : "ACT ON",
                               hide_activation_blocks,
                               last_blocks_hide_act_box_);
-            draw_filter_badge(norm_x, filt_norm_w,
+            draw_filter_badge(norm_x, norm_y, filt_norm_w,
                               hide_normalisation_blocks ? "NORM OFF" : "NORM ON",
                               hide_normalisation_blocks,
                               last_blocks_hide_norm_box_);
@@ -1761,7 +1764,7 @@ void Visualizer::drawPanelChrome(PanelId id) {
                     : vizgfx::Color(168, 168, 188, 235);
 
                 vizgfx::RectangleShape tb(vizgfx::Vector2f(tips_w, badge_h));
-                tb.setPosition(vizgfx::Vector2f(tips_x, badge_y));
+                tb.setPosition(vizgfx::Vector2f(tips_x, tips_y));
                 tb.setFillColor(tips_fill);
                 tb.setOutlineColor(tips_outline);
                 tb.setOutlineThickness(1.f);
@@ -1783,11 +1786,11 @@ void Visualizer::drawPanelChrome(PanelId id) {
                 tt.setFont(font);
                 tt.setCharacterSize(12);
                 tt.setFillColor(vizgfx::Color(245, 245, 248));
-                tt.setPosition(vizgfx::Vector2f(tips_x + 6.f, badge_y - 1.f));
+                tt.setPosition(vizgfx::Vector2f(tips_x + 6.f, tips_y - 1.f));
                 tt.setString(vizgfx::String::fromUtf8(tips_badge.begin(), tips_badge.end()));
                 window->draw(tt);
 
-                last_blocks_tips_limit_box_ = make_rect(tips_x, badge_y, tips_w, badge_h);
+                last_blocks_tips_limit_box_ = make_rect(tips_x, tips_y, tips_w, badge_h);
             }
         }
         if (id == PanelId::Context) {
@@ -1834,11 +1837,7 @@ void Visualizer::drawPanelChrome(PanelId id) {
 
         const float threshold = std::clamp(detection_score_threshold_, 0.0f, 1.0f);
         const float thumb_x = track_x + track_w * threshold;
-#ifdef MIMIR_VIZ_BACKEND_SFML
-        vizgfx::CircleShape thumb(6.0f);
-#else
         vizgfx::RectangleShape thumb(vizgfx::Vector2f(12.f, 12.f));
-#endif
         thumb.setPosition(vizgfx::Vector2f(thumb_x - 6.0f, track_y - 4.0f));
         thumb.setFillColor(vizgfx::Color(230, 250, 238, 255));
         thumb.setOutlineColor(detection_heatmap_color(threshold));
@@ -3207,7 +3206,7 @@ void Visualizer::update() {
 
     maybeLoadArchitecture();
 
-    window->clear(vizgfx::Color(30, 30, 35)); // Fond sombre
+    window->clear(mimir::viz::theme::background);
 
     renderBackground();
 
@@ -4838,9 +4837,9 @@ void Visualizer::renderBackground() {
 
 void Visualizer::renderContextImages() {
     // Affiche (si disponibles) l'image du dataset + la projection associée.
-    const int img_display_size = 200;
-    const int margin = 16;
     const auto area = panelContentRect(PanelId::Context);
+    const int img_display_size = workbenchPreviewSize(area);
+    const int margin = 16;
     const int start_x = static_cast<int>(area.position.x);
     const int label_h = 20;
     const int item_count = static_cast<int>(has_dataset_image) +
@@ -4990,7 +4989,7 @@ void Visualizer::renderContextImages() {
 
 void Visualizer::renderOutputImage() {
     const auto area = panelContentRect(PanelId::Output);
-    const int image_size = 200;
+    const int image_size = workbenchPreviewSize(area);
     const int label_height = 20;
     const int margin = 16;
     const float content_height = has_output_thumb_
@@ -5776,7 +5775,7 @@ void Visualizer::renderGeneratedImages() {
 
     const auto area = panelContentRect(PanelId::Generated);
 
-    const int img_display_size = script_scene_.value("image_size", 200);
+    const int img_display_size = script_scene_.value("image_size", workbenchPreviewSize(area));
     const int margin = 20;
     const int start_x = static_cast<int>(area.position.x);
     const int start_y = static_cast<int>(area.position.y -
@@ -6022,9 +6021,9 @@ void Visualizer::renderLossGraph() {
     // Fond du graphique
     vizgfx::RectangleShape graph_bg(vizgfx::Vector2f(static_cast<float>(graph_width), static_cast<float>(graph_height)));
     graph_bg.setPosition(vizgfx::Vector2f(static_cast<float>(graph_x), static_cast<float>(graph_y)));
-    graph_bg.setFillColor(vizgfx::Color(20, 20, 25, 220));
+    graph_bg.setFillColor(mimir::viz::theme::background);
     graph_bg.setOutlineColor(vizgfx::Color(100, 100, 120));
-    graph_bg.setOutlineThickness(2);
+    graph_bg.setOutlineThickness(1);
     window->draw(graph_bg);
 
     // Zone de plot (padding pour l'échelle)
@@ -6193,7 +6192,7 @@ void Visualizer::renderMetrics() {
                                    static_cast<float>(panel_w), command_height);
     vizgfx::RectangleShape command_card({static_cast<float>(panel_w), command_height});
     command_card.setPosition({static_cast<float>(metrics_x), command_y});
-    command_card.setFillColor(vizgfx::Color(22, 32, 43, 245));
+    command_card.setFillColor(mimir::viz::theme::header);
     command_card.setOutlineColor(vizgfx::Color(70, 125, 165, 220));
     command_card.setOutlineThickness(1.f);
     window->draw(command_card);
@@ -6346,7 +6345,7 @@ void Visualizer::renderMetrics() {
             vizgfx::RectangleShape row(vizgfx::Vector2f(static_cast<float>(panel_w), 21.f));
             row.setPosition(vizgfx::Vector2f(static_cast<float>(metrics_x),
                                          static_cast<float>(metrics_y + y_offset - 2)));
-            row.setFillColor(vizgfx::Color(28, 31, 39, 185));
+            row.setFillColor(vizgfx::Color(48, 48, 48));
             window->draw(row);
             vizgfx::RectangleShape mark(vizgfx::Vector2f(3.f, 21.f));
             mark.setPosition(row.getPosition());

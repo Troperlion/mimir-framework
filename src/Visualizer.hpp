@@ -622,6 +622,7 @@ private:
     void syncUIView();
     bool isPanelVisible(PanelId id) const;
     vizgfx::FloatRect panelRect(PanelId id) const;
+    float panelHeaderHeight(PanelId id) const;
     vizgfx::FloatRect panelTitleRect(PanelId id) const;
     vizgfx::FloatRect panelContentRect(PanelId id) const;
     vizgfx::FloatRect panelResizeHandleRect(PanelId id) const;

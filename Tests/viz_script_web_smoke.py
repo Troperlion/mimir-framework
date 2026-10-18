@@ -33,13 +33,13 @@ with (out/'script-ui.log').open('w') as log:
                 return response.read()
         def event(kind, x=0, y=0, value=0):
             request(f'/event?t={kind}&x={x}&y={y}&v={value}&m=0&d=0','POST')
-        (out/'controls.bmp').write_bytes(request('/frame'))
+        (out/'controls.json').write_bytes(request('/frame'))
         event(3,40,35)
         event(4,40,35)
         # Help must cover controls and suppress their activation.
         event(6,value=72)
         time.sleep(.2)
-        (out/'help.bmp').write_bytes(request('/frame'))
+        (out/'help.json').write_bytes(request('/frame'))
         event(3,40,35)
         event(4,40,35)
         time.sleep(.2)
@@ -49,7 +49,7 @@ with (out/'script-ui.log').open('w') as log:
         assert text.count('"type":"click"')==1, text
         for token in ['"type":"pointer_down"','"type":"pointer_up"','"type":"key"','SCRIPT_UI_RESULT 1 1']:
             assert token in text, text
-        assert (out/'controls.bmp').read_bytes() != (out/'help.bmp').read_bytes()
+        assert (out/'controls.json').read_bytes() != (out/'help.json').read_bytes()
         print('SCRIPT_WEB_OK: configure, click, raw events, help overlay, close')
     finally:
         if process.poll() is None:

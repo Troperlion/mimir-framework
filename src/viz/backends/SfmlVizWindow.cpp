@@ -8,7 +8,7 @@ public:
     SfmlVizWindow(vizgfx::Vector2u size, const std::string& title, unsigned fps_limit)
         : window_(std::make_unique<vizgfx::RenderWindow>(
               vizgfx::VideoMode(size), title,
-              vizgfx::Style::Titlebar | vizgfx::Style::Close)) {
+              vizgfx::Style::Default)) {
         window_->setFramerateLimit(fps_limit);
     }
     bool isOpen() const override { return window_->isOpen(); }

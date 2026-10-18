@@ -1,8 +1,11 @@
 #include "SoftwareGraphics.hpp"
+#include "Scene.hpp"
+#include "renderers/CairoScene.hpp"
 
 #include <cairo/cairo.h>
 #include <cmath>
 #include <cstring>
+#include <unordered_map>
 
 namespace mimir::viz::graphics {
 namespace {
@@ -47,6 +50,8 @@ struct FontData { std::filesystem::path path; };
 struct RenderTexture::Impl {
     Surface surface;
     Context context;
+    Scene scene={{"background", {0,0,0,255}}, {"commands", Scene::array()}, {"images", Scene::array()}};
+    std::unordered_map<uint64_t, size_t> assets;
 };
 
 bool FloatRect::contains(Vector2f p) const {
@@ -152,8 +157,23 @@ static void setup(cairo_t* cr,const View& v,Vector2u size) {
     cairo_rectangle(cr,x,y,w,h);cairo_clip(cr);cairo_translate(cr,x,y);
     cairo_scale(cr,w/std::max(1.f,r.size.x),h/std::max(1.f,r.size.y));cairo_translate(cr,-r.position.x,-r.position.y);
 }
-void RenderTexture::clear(Color c) { auto* cr=impl_->context.get();cairo_save(cr);cairo_reset_clip(cr);cairo_identity_matrix(cr);source(cr,c);cairo_paint(cr);cairo_restore(cr); }
+static Scene colorValue(Color c) { return {c.r,c.g,c.b,c.a}; }
+static Scene command(const char* kind, const View& v) {
+    const auto r=v.rectangle(), p=v.viewport();
+    return {{"kind",kind},{"view",{r.position.x,r.position.y,r.size.x,r.size.y,p.position.x,p.position.y,p.size.x,p.size.y}}};
+}
+std::string RenderTexture::scene() const { return impl_->scene.dump(); }
+void RenderTexture::clear(Color c) {
+    impl_->scene["background"]=colorValue(c);impl_->scene["commands"].clear();impl_->scene["images"].clear();impl_->assets.clear();
+    if(recordCommands_)return;
+    auto* cr=impl_->context.get();cairo_save(cr);cairo_reset_clip(cr);cairo_identity_matrix(cr);source(cr,c);cairo_paint(cr);cairo_restore(cr); }
 void RenderTexture::draw(const RectangleShape& s) {
+    if(recordCommands_) {
+        auto cmd=command("rect",view_);const auto pos=s.getPosition(),sz=s.getSize();
+        cmd["rect"]={pos.x,pos.y,sz.x,sz.y};cmd["fill"]=colorValue(s.fill());cmd["outline"]=colorValue(s.outline());cmd["thickness"]=s.thickness();
+        impl_->scene["commands"].push_back(std::move(cmd));
+        return;
+    }
     auto* cr=impl_->context.get();cairo_save(cr);setup(cr,view_,getSize());
     const auto p=s.getPosition(),z=s.getSize();cairo_rectangle(cr,p.x,p.y,z.x,z.y);source(cr,s.fill());cairo_fill(cr);
     if(s.thickness()!=0){const double t=std::abs(s.thickness());cairo_set_line_width(cr,t);cairo_rectangle(cr,p.x+t/2,p.y+t/2,std::max(0.f,z.x-float(t)),std::max(0.f,z.y-float(t)));source(cr,s.outline());cairo_stroke(cr);}cairo_restore(cr);
@@ -163,16 +183,43 @@ void RenderTexture::draw(const Sprite& s) {
     Surface src(cairo_image_surface_create(CAIRO_FORMAT_ARGB32,int(image.getSize().x),int(image.getSize().y)));
     auto* data=cairo_image_surface_get_data(src.get());const int stride=cairo_image_surface_get_stride(src.get());
     for(unsigned y=0;y<image.getSize().y;++y)for(unsigned x=0;x<image.getSize().x;++x){auto c=image.getPixel({x,y});auto* p=data+y*stride+x*4;p[0]=uint8_t(c.b*c.a/255);p[1]=uint8_t(c.g*c.a/255);p[2]=uint8_t(c.r*c.a/255);p[3]=c.a;}
-    cairo_surface_mark_dirty(src.get());auto* cr=impl_->context.get();cairo_save(cr);setup(cr,view_,getSize());
+    cairo_surface_mark_dirty(src.get());
+    if(recordCommands_) {
+        auto found=impl_->assets.find(s.texture().revision());size_t asset;
+        if(found==impl_->assets.end()) {
+            std::vector<uint8_t> png;
+            cairo_surface_write_to_png_stream(src.get(),+[](void* closure,const unsigned char* data,unsigned length){
+                auto& bytes=*static_cast<std::vector<uint8_t>*>(closure);bytes.insert(bytes.end(),data,data+length);return CAIRO_STATUS_SUCCESS;
+            },&png);
+            asset=impl_->scene["images"].size();impl_->assets[s.texture().revision()]=asset;
+            impl_->scene["images"].push_back(base64(png.data(),png.size()));
+        } else asset=found->second;
+        auto cmd=command("image",view_);auto pos=s.getPosition(),origin=s.getOrigin(),scale=s.getScale();
+        cmd["position"]={pos.x-origin.x*scale.x,pos.y-origin.y*scale.y};cmd["scale"]={scale.x,scale.y};
+        cmd["asset"]=asset;cmd["alpha"]=s.color().a/255.;cmd["smooth"]=s.texture().isSmooth();impl_->scene["commands"].push_back(std::move(cmd));
+        return;
+    }
+    auto* cr=impl_->context.get();cairo_save(cr);setup(cr,view_,getSize());
     const auto p=s.getPosition(),o=s.getOrigin(),sc=s.getScale();cairo_translate(cr,p.x-o.x*sc.x,p.y-o.y*sc.y);cairo_scale(cr,sc.x,sc.y);
     cairo_set_source_surface(cr,src.get(),0,0);cairo_pattern_set_filter(cairo_get_source(cr),s.texture().isSmooth()?CAIRO_FILTER_BILINEAR:CAIRO_FILTER_NEAREST);cairo_paint_with_alpha(cr,s.color().a/255.);cairo_restore(cr);
 }
 void RenderTexture::draw(const Text& t) {
+    if(recordCommands_) {
+        auto cmd=command("text",view_);auto pos=t.getPosition();cmd["position"]={pos.x,pos.y};cmd["text"]=utf8(t.string());
+        cmd["size"]=t.characterSize();cmd["bold"]=bool(t.style()&Text::Bold);cmd["fill"]=colorValue(t.fill());impl_->scene["commands"].push_back(std::move(cmd));
+        return;
+    }
     auto* cr=impl_->context.get();cairo_save(cr);setup(cr,view_,getSize());selectFont(cr,t);source(cr,t.fill_);
     const auto p=t.getPosition();cairo_move_to(cr,p.x,p.y+t.characterSize()*.82);const auto value=utf8(t.string());cairo_show_text(cr,value.c_str());cairo_restore(cr);
 }
 void RenderTexture::draw(const VertexArray& a) {
     if (a.vertices().size() < 2) return;
+    if(recordCommands_) {
+        auto cmd=command("line",view_);cmd["vertices"]=Scene::array();
+        for(const auto& v:a.vertices())cmd["vertices"].push_back({v.position.x,v.position.y,v.color.r,v.color.g,v.color.b,v.color.a});
+        impl_->scene["commands"].push_back(std::move(cmd));
+        return;
+    }
     auto* cr=impl_->context.get();cairo_save(cr);setup(cr,view_,getSize());
     cairo_set_line_width(cr,1);
     for(size_t i=1;i<a.vertices().size();++i) {
@@ -186,6 +233,11 @@ void RenderTexture::draw(const VertexArray& a) {
     cairo_restore(cr);
 }
 void RenderTexture::display() {
+    // Window drawing is command-only. Rasterize only for an explicit capture.
+    if(recordCommands_) {
+            auto* cr=impl_->context.get();cairo_save(cr);cairo_reset_clip(cr);cairo_identity_matrix(cr);
+            cairo_scene::render(cr,impl_->scene,getSize().x,getSize().y);cairo_restore(cr);
+    }
     cairo_surface_flush(impl_->surface.get());Image image(getSize(),Color::Transparent);const auto* src=cairo_image_surface_get_data(impl_->surface.get());const int stride=cairo_image_surface_get_stride(impl_->surface.get());
     for(unsigned y=0;y<getSize().y;++y)for(unsigned x=0;x<getSize().x;++x){
         const auto* p=src+y*stride+x*4;const uint8_t a=p[3];

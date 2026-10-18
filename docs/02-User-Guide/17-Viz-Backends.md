@@ -6,10 +6,10 @@ avec `MIMIR_VIZ_BACKEND` dans CMake, ou avec le menu de `./config.sh`.
 
 | Valeur | Interface | Dépendances graphiques |
 |---|---|---|
-| `SFML` (défaut) | Fenêtre SFML historique | SFML 3 |
-| `QT` | Widget Qt 6 | Qt 6 Widgets et Cairo |
-| `GTK` | DrawingArea GTK 3 | GTK 3, Cairo et pkg-config |
-| `WEB` | Canvas dans le navigateur local | Cairo, navigateur avec JavaScript |
+| `SFML` (défaut) | Fenêtre et primitives SFML | SFML 3 |
+| `QT` | QMainWindow, QToolBar et QPainter | Qt 6 Widgets et Cairo |
+| `GTK` | GtkWindow, GtkToolbar et Cairo | GTK 3, Cairo et pkg-config |
+| `WEB` | HTML/CSS et Canvas2D dans le navigateur local | Cairo, navigateur avec JavaScript |
 | `NONE` | Sans Viz graphique | Aucune |
 
 Les nouveaux hôtes QT/GTK/WEB sont implémentés pour Linux. SFML reste soumis aux
@@ -81,41 +81,61 @@ ne s’agit pas d’un service à publier sur Internet.
 Cliquer dans le canvas pour lui donner le focus. Les touches, saisies de texte,
 modificateurs, clics, glissements et molette sont transmis au gestionnaire
 `Visualizer` existant. Les raccourcis réservés par le navigateur peuvent interférer
-avec ceux de la Viz. Le bouton **Fermer la Viz** transmet la fermeture à Mímir ;
+avec ceux de la Viz. Le bouton **Fermer** transmet la fermeture à Mímir ;
 fermer simplement l’onglet laisse la Viz disponible pour une reconnexion. Plusieurs
 onglets partagent le même état et les mêmes contrôles.
 
 ## Rendu et limites
 
-SFML conserve sa `sf::RenderWindow` et son dessin historique. La scène commune
-emploie désormais des primitives neutres. Pour Qt, GTK et Web, un moteur CPU
-Cairo indépendant dessine les mêmes rectangles, textes, courbes, images, vues et
-clips ; aucune classe, en-tête ou bibliothèque SFML n’entre dans ces builds. Qt
-et GTK présentent ce framebuffer dans leur widget natif, et Web le transmet au
-canvas. Le redimensionnement se fait par les contrôles/raccourcis de la Viz,
-comme pour la fenêtre SFML historique. Les images Qt/GTK et le canvas conservent
-leurs dimensions logiques ; le DPI du bureau et le zoom du navigateur peuvent
-changer leur taille physique à l’écran.
+Les panneaux partagent un thème d'éditeur sombre inspiré de Blender : surfaces
+gris neutre, en-têtes compacts, séparateurs fins et accents de sélection. Les
+contrôles du panneau des tenseurs se répartissent sur plusieurs lignes quand le
+panneau devient étroit. Les aperçus s'adaptent à la surface disponible. Le
+placement initial répartit contexte, sortie, tenseurs et validation à gauche,
+entraînement, propriétés et courbes à droite. Les dispositions sauvegardées et
+le déplacement/redimensionnement des panneaux restent disponibles.
 
-Le backend WEB fonctionne sans serveur graphique, sans OpenGL et sans variable
-`DISPLAY`. Qt et GTK nécessitent naturellement une session graphique ; Xvfb peut
-être utilisé pour leurs tests automatisés. `NONE` reste le seul backend sans
-moteur de dessin ni serveur d’interface.
+Chaque backend dessine réellement les primitives avec sa technologie :
 
-La transmission implique une copie RGBA pour Qt/GTK et des images BMP pour le Web.
-Cela consomme davantage de mémoire et de bande passante que la fenêtre SFML directe.
-Les hôtes alternatifs limitent chaque framebuffer à 8192 pixels par côté et
-33 554 432 pixels au total. Les captures composites PNG restent produites par le
-code existant de `Visualizer`.
+- SFML utilise `sf::RenderWindow`, ses formes, textes et textures ;
+- Qt utilise un `QMainWindow`, une `QToolBar` et un widget qui dessine les
+  rectangles, textes, courbes et images avec `QPainter` ;
+- GTK utilise un `GtkWindow`, une `GtkToolbar` et un `GtkDrawingArea` dont le
+  signal `draw` dessine la scène avec Cairo ;
+- Web utilise une barre d'outils HTML/CSS et dessine la scène avec Canvas2D.
 
-Les unités de compilation sont séparées par interface :
+Qt/GTK/Web reçoivent les commandes de dessin et les textures PNG nécessaires,
+sans framebuffer complet de l'interface. Le processus Mímir enregistre la
+scène ; il ne rasterise cette interface que lors d'une capture explicite. Le protocole desktop reste interne à
+une même compilation. Le Web expose la scène JSON sur `/JETON/frame` et son
+module JavaScript sur `/JETON/renderer.js`. Les barres d'outils natives ouvrent
+l'aide, les propriétés et le graphe, demandent une capture et actualisent les
+textures via les mêmes actions que les raccourcis H/C/N/E/R.
 
-- `src/viz/backends/SfmlVizWindow.cpp` contient uniquement la fenêtre SFML ;
-- `src/viz/backends/QtVizWindow.cpp` sélectionne l'hôte Qt ;
-- `src/viz/backends/GtkVizWindow.cpp` sélectionne l'hôte GTK ;
-- `src/viz/backends/WebVizWindow.cpp` sélectionne l'hôte Web ;
-- `src/viz/SoftwareVizWindow.cpp` contient le transport framebuffer partagé par
-  Qt, GTK et Web, sans code SFML.
+Les builds Qt/GTK/Web n'utilisent pas SFML. Cairo reste utilisé dans le
+processus Mímir pour les textures hors écran et les captures PNG, et pour le
+rendu GTK. Qt/GTK nécessitent une session graphique ; Web fonctionne sans
+`DISPLAY`, sans serveur graphique ni OpenGL. `NONE` reste le backend sans
+moteur de dessin ni serveur d'interface.
+
+Les hôtes alternatifs limitent la surface logique à 8192 pixels par côté et
+33 554 432 pixels au total, et chaque scène transportée à 128 Mio. Les textures
+sont partagées entre leurs occurrences dans une même scène. Les captures PNG
+utilisent le chemin hors écran commun ; les métriques de police peuvent varier
+légèrement par rapport à l'affichage natif Qt ou au navigateur. Le DPI du
+bureau et le zoom du navigateur changent la taille physique à l'écran.
+
+Les modules de rendu sont séparés :
+
+- `src/viz/backends/SfmlVizWindow.cpp` : fenêtre et rendu SFML ;
+- `src/viz/backends/QtDesktop.cpp` et `src/viz/renderers/QtScene.hpp` : Qt ;
+- `src/viz/backends/GtkDesktop.cpp` et `src/viz/renderers/GtkScene.hpp` : GTK ;
+- `src/viz/backends/WebPage.hpp`, `src/viz/renderers/WebScene.hpp` et
+  `src/viz/WebHost.cpp` : interface, rendu et serveur Web ;
+- `src/viz/SoftwareVizWindow.cpp` : enregistrement et transport des scènes
+  pour Qt/GTK/Web, avec capture hors écran commune ;
+- `src/viz/renderers/CairoScene.hpp` : primitives Cairo partagées par le
+  signal GTK et les captures hors écran.
 
 `Visualizer.cpp` ne sélectionne plus lui-même une bibliothèque GUI. Il construit
 l'interface abstraite `VizWindow` via `createVizWindow()` ; CMake compile une
@@ -133,11 +153,34 @@ xvfb-run -a python3 Tests/viz_backend_smoke.py \
   --output /tmp/mimir-viz-qt-results
 ```
 
-Adapter le backend et le chemin pour `SFML`, `GTK` ou `WEB`. Le test requiert
-`python3-pil` et `xdotool` pour les fenêtres desktop, et `xvfb`/`xauth` pour
-`xvfb-run`. Il vérifie des pixels connus, les interactions, le redimensionnement
-et la fermeture ; pour WEB, il vérifie le protocole HTTP et les images BMP.
-Il ne lance pas de navigateur automatiquement.
+Pour WEB, le test ci-dessus vérifie les captures locales, la scène JSON, le
+protocole HTTP, les événements, le redimensionnement, les requêtes invalides et
+la fermeture. Il ne lance pas de navigateur.
+
+Pour vérifier les pixels effectivement rendus dans les fenêtres desktop, sans
+Pillow ni xdotool (bibliothèques X11 et XTest requises), utiliser une session X11 avec XTest (ou Xvfb) :
+
+```bash
+python3 Tests/viz_native_window_smoke.py \
+  --backend QT --executable /tmp/mimir-gui-qt/bin/mimir_viz_smoke
+```
+
+Adapter le backend et le chemin à la compilation locale. Ce test vérifie les
+primitives, textes, textures, clips, clics, touches, barre d'outils, dimensions
+après redimensionnement et fermeture. Le test historique desktop
+`viz_backend_smoke.py` reste disponible avec Pillow et xdotool ; `xvfb-run`
+requiert Xvfb et xauth.
+
+Un contrôle du rendu Web dans un vrai navigateur utilise Node 22 et Chrome :
+
+```bash
+node Tests/viz_web_canvas_smoke.mjs /tmp/mimir-gui-web/bin/mimir_viz_smoke
+```
+
+`CHROME` permet de choisir un autre exécutable Chromium compatible. Le test
+compare les pixels du Canvas2D et vérifie les textures, le clipping, les boutons
+HTML, la souris, le clavier, le redimensionnement et la fermeture. Il produit
+une capture `mimir-web-native.png` dans le dossier temporaire du système.
 
 Le fonctionnement des panneaux et du monitoring est décrit dans
 [Monitoring, htop et visualisation](../04-Architecture-Internals/04-Monitoring-Htop-Visualizer.md).

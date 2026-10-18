@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Check a Viz host under Xvfb; no training or dataset is needed."""
-import subprocess, os, time, urllib.request, urllib.error, re, struct
+import subprocess, os, time, urllib.request, urllib.error, re, struct, json
 from pathlib import Path
 import argparse
 parser = argparse.ArgumentParser(description='Graphical Viz integration checks; run under xvfb-run. Requires Pillow and xdotool for desktop hosts.')
@@ -36,7 +36,8 @@ for name, exe, host in [] if args.backend == 'WEB' else [(args.backend, args.exe
                 raise AssertionError(Path(str(out / ('viz-' + name + '.log'))).read_text())
         wid = run(['search', '--name', '^Mimir Viz backend smoke$']).splitlines()[-1]
         run(['windowfocus', '--sync', wid])
-        run(['mousemove', '--window', wid, '20', '30'])
+        toolbar_height = 34 if name in ('QT','GTK') else 0
+        run(['mousemove', '--window', wid, '20', str(30+toolbar_height)])
         run(['click', '1'])
         run(['click', '4'])
         run(['key', 'h'])
@@ -44,13 +45,13 @@ for name, exe, host in [] if args.backend == 'WEB' else [(args.backend, args.exe
         run(['key', 'r'])
         time.sleep(0.5)
         geom = run(['getwindowgeometry', '--shell', wid])
-        assert 'WIDTH=400' in geom and 'HEIGHT=280' in geom, geom
+        assert 'WIDTH=400' in geom and f'HEIGHT={280+toolbar_height}' in geom, geom
         from PIL import ImageGrab
         screen = ImageGrab.grab(xdisplay=E.get('DISPLAY'))
         screen.save(str(out / ('viz-' + name + '-host.png')))
         g = dict((line.split('=', 1) for line in geom.splitlines()))
         x, y = (int(g['X']), int(g['Y']))
-        assert screen.getpixel((x + 20, y + 30))[:3] == (231, 42, 63), (name, screen.getpixel((x + 20, y + 30)))
+        assert screen.getpixel((x + 20, y + 30 + toolbar_height))[:3] == (231, 42, 63), (name, screen.getpixel((x + 20, y + 30 + toolbar_height)))
         import ctypes
         X = ctypes.CDLL('libX11.so.6')
         X.XOpenDisplay.restype = ctypes.c_void_p
@@ -106,14 +107,16 @@ try:
     def req(path, method='GET'):
         return urllib.request.urlopen(urllib.request.Request(base + path, method=method), timeout=3)
     assert b'<canvas' in req('/').read()
-    bmp = req('/frame').read()
-    assert bmp[:2] == b'BM'
-    assert struct.unpack_from('<ii', bmp, 18) == (320, -240)
-    assert bmp[54 + (30 * 320 + 20) * 4:54 + (30 * 320 + 20) * 4 + 3] == bytes([63, 42, 231])
+    frame = json.load(req('/frame'))
+    assert (frame['width'],frame['height']) == (320,240)
+    scene=frame['scene']
+    assert scene['background'] == [17,34,51,255]
+    assert {'rect','image','line','text'} <= {cmd['kind'] for cmd in scene['commands']}
+    assert scene['images'] and 'Canvas2D' in req('/renderer.js').read().decode()
     for t, v in [(3, 0), (4, 0), (5, 0), (6, 72), (8, 104), (7, 72), (6, 82)]:
         assert req(f'/event?t={t}&x=20&y=30&v={v}&m=3&d=1', 'POST').status == 204
     time.sleep(0.4)
-    assert struct.unpack_from('<ii', req('/frame').read(), 18) == (400, -280)
+    assert (json.load(req('/frame'))['width'], json.load(req('/frame'))['height']) == (400,280)
     for path, status, method in [('/event?t=bad', 400, 'POST'), ('/event?t=6&x=999999999999999999999&y=0&v=1&m=0&d=0', 400, 'POST'), ('/event?t=1&x=0&y=0&v=0&m=0&d=0', 404, 'GET')]:
         try:
             req(path, method)

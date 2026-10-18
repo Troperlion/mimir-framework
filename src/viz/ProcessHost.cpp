@@ -45,7 +45,7 @@ public:
         if(error) { ::close(pair[0]); throw std::runtime_error("Cannot launch Viz host: " + std::string(strerror(error))); }
         fd_=pair[0];
         pollfd ready{fd_,POLLIN,0}; Event handshake;
-        if(::poll(&ready,1,10000)<=0 || !transfer(fd_,&handshake,sizeof(handshake),false) || handshake.type!=100) {
+        if(::poll(&ready,1,10000)<=0 || !transfer(fd_,&handshake,sizeof(handshake),false) || handshake.type!=sceneProtocolHandshake) {
             ::close(fd_); kill(pid_,SIGTERM); waitpid(pid_,nullptr,0);
             throw std::runtime_error("Viz desktop host did not initialize");
         }
@@ -55,8 +55,9 @@ public:
                 { std::unique_lock<std::mutex> lock(mutex_); wake_.wait(lock,[this]{return stopped_ || pending_;});
                   if(stopped_) return;
                   f=std::move(frame_); pending_=false; }
-                FrameHeader h{f.width,f.height,f.cursor};
-                if(!transfer(fd_,&h,sizeof(h),true) || !transfer(fd_,f.rgba.data(),f.rgba.size(),true)) { stopped_=true; return; }
+                FrameHeader h{f.width,f.height,f.cursor,uint32_t(f.scene.size())};
+                if(f.scene.size()>maxSceneBytes) { stopped_=true; return; }
+                if(!transfer(fd_,&h,sizeof(h),true) || !transfer(fd_,f.scene.data(),f.scene.size(),true)) { stopped_=true; return; }
             }
         });
     }

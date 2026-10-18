@@ -10,6 +10,7 @@ SoftwareVizWindow::SoftwareVizWindow(vizgfx::Vector2u size,
                                      unsigned fps_limit) {
     if (!validSize(size.x, size.y)) throw std::runtime_error("Invalid Viz dimensions");
     texture_ = std::make_unique<vizgfx::RenderTexture>(size);
+    texture_->recordCommands(true);
     host_ = makeHost(title);
     setFramerateLimit(fps_limit);
 }
@@ -109,16 +110,13 @@ std::optional<vizgfx::Event> SoftwareVizWindow::pollEvent() {
 
 void SoftwareVizWindow::clear(const vizgfx::Color& color) { texture_->clear(color); }
 void SoftwareVizWindow::display() {
-    texture_->display();
     if (host_) {
-        const auto image = texture_->getTexture().copyToImage();
-        const auto size = image.getSize();
+        const auto size = texture_->getSize();
         Frame frame;
         frame.width = size.x;
         frame.height = size.y;
         frame.cursor = cursor_;
-        frame.rgba.assign(image.getPixelsPtr(),
-                          image.getPixelsPtr() + size_t(size.x) * size.y * 4);
+        frame.scene = texture_->scene();
         host_->present(std::move(frame));
     }
     if (limit_) {
@@ -129,6 +127,7 @@ void SoftwareVizWindow::display() {
 }
 
 vizgfx::Image SoftwareVizWindow::captureImage() const {
+    texture_->display();
     return texture_->getTexture().copyToImage();
 }
 

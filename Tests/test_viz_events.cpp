@@ -55,6 +55,20 @@ struct VisualizerEventTestAccess {
         v.panels_[size_t(P::Context)].size={420,280};
         auto redraw=[&] {v.syncUIView();v.drawPanelChrome(P::Blocks);v.drawPanelChrome(P::Context);v.drawPanelChrome(P::Output);v.renderMetrics();};
         redraw();
+        const auto blocks_size=v.panels_[size_t(P::Blocks)].size;
+        for(float width:{220.f,400.f,760.f}) {
+            v.panels_[size_t(P::Blocks)].size.x=width;redraw();
+            const std::optional<vizgfx::FloatRect>* controls[]={&v.last_blocks_mode_box_,&v.last_blocks_smooth_box_,&v.last_blocks_palette_box_,&v.last_blocks_hide_act_box_,&v.last_blocks_hide_norm_box_,&v.last_blocks_tips_limit_box_};
+            const auto header=v.panelTitleRect(P::Blocks),content=v.panelContentRect(P::Blocks);
+            for(size_t i=0;i<6;++i) {
+                TASSERT_TRUE(controls[i]->has_value());const auto r=**controls[i];
+                TASSERT_TRUE(header.contains(r.position));
+                TASSERT_TRUE(header.contains({r.position.x+r.size.x-.1f,r.position.y+r.size.y-.1f}));
+                TASSERT_TRUE(r.position.y+r.size.y<content.position.y);
+                for(size_t j=i+1;j<6;++j)TASSERT_TRUE(!r.findIntersection(**controls[j]).has_value());
+            }
+        }
+        v.panels_[size_t(P::Blocks)].size=blocks_size;redraw();
         auto check_commands=[&] {
             TASSERT_TRUE(v.last_commands_rect_.has_value());
             const std::optional<vizgfx::FloatRect>* buttons[]={&v.last_debug_json_button_rect_,&v.last_pause_button_rect_,&v.last_stop_button_rect_,

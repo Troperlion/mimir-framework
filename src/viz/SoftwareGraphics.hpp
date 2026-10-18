@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -67,16 +68,19 @@ public:
 class Texture {
     Image image_;
     bool smooth_=false;
+    inline static std::atomic<uint64_t> nextRevision_{0};
+    uint64_t revision_=++nextRevision_;
 public:
     Texture() = default;
     explicit Texture(Vector2u size) : image_(size) {}
-    bool loadFromImage(const Image& image) { image_=image;return image.getSize().x && image.getSize().y; }
-    bool loadFromFile(const std::filesystem::path& file) { return image_.loadFromFile(file); }
+    bool loadFromImage(const Image& image) { image_=image;revision_=++nextRevision_;return image.getSize().x && image.getSize().y; }
+    bool loadFromFile(const std::filesystem::path& file) { revision_=++nextRevision_;return image_.loadFromFile(file); }
     void setSmooth(bool smooth) { smooth_=smooth; }
     bool isSmooth() const { return smooth_; }
     Vector2u getSize() const { return image_.getSize(); }
     Image copyToImage() const { return image_; }
     const Image& image() const { return image_; }
+    uint64_t revision() const { return revision_; }
     static unsigned getMaximumSize() { return 32768; }
 };
 
@@ -187,6 +191,7 @@ class RenderTexture {
     std::unique_ptr<Impl> impl_;
     Texture texture_;
     View view_;
+    bool recordCommands_=false;
 public:
     explicit RenderTexture(Vector2u size);
     ~RenderTexture();
@@ -204,6 +209,8 @@ public:
     void draw(const Text& text);
     void draw(const VertexArray& vertices);
     void display();
+    std::string scene() const;
+    void recordCommands(bool enabled) { recordCommands_=enabled; }
     const Texture& getTexture() const { return texture_; }
 };
 using RenderTarget = RenderTexture;
