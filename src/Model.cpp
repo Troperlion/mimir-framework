@@ -4254,6 +4254,7 @@ Gradients Model::backwardPass(const std::vector<float> &loss_gradient) {
         for (size_t i = 0; i < dst.size(); ++i) dst[i] += src[i];
     };
     std::unordered_map<std::string, std::vector<float>> grad_store;
+    grad_store.reserve(layers.size() + 2);
     grad_store["x"] = loss_gradient;
     for (size_t index = layers.size(); index-- > 0;) {
         Layer& layer = layers[index];
@@ -4287,7 +4288,7 @@ Gradients Model::backwardPass(const std::vector<float> &loss_gradient) {
         } else {
             auto it = grad_store.find(output);
             if (it == grad_store.end()) continue;
-            owned_grad_outputs.push_back(it->second);
+            owned_grad_outputs.push_back(std::move(it->second));
         }
         consumed_outputs.push_back(output);
         // Consume this tensor version before accumulating into its producers.
@@ -4304,8 +4305,21 @@ Gradients Model::backwardPass(const std::vector<float> &loss_gradient) {
             // Shape-only backward kernels do not read these values. Never read
             // TensorStore here: later layers may have overwritten its contents.
             shape_only_inputs.reserve(sizes.size());
-            for (size_t size : sizes) shape_only_inputs.emplace_back(size, 0.0f);
-            for (const auto& value : shape_only_inputs) inputs.push_back(&value);
+            inputs.reserve(sizes.size());
+            for (size_t size : sizes) {
+                const std::vector<float>* shape = nullptr;
+                for (const auto& value : owned_grad_outputs)
+                    if (value.size() == size) { shape = &value; break; }
+                if (!shape) {
+                    for (const auto& value : shape_only_inputs)
+                        if (value.size() == size) { shape = &value; break; }
+                }
+                if (!shape) {
+                    shape_only_inputs.emplace_back(size, 0.0f);
+                    shape = &shape_only_inputs.back();
+                }
+                inputs.push_back(shape);
+            }
         }
         for (const auto& value : owned_grad_outputs) grad_outputs.push_back(&value);
         RuntimeBackwardContext context;
@@ -4328,7 +4342,11 @@ Gradients Model::backwardPass(const std::vector<float> &loss_gradient) {
             accumulate_grad(owner->grad_weights, layer.grad_weights);
             layer.grad_weights.clear();
         }
-        for (size_t i = 0; i < grad_inputs.size(); ++i) accumulate_grad(grad_store[input_names[i]], grad_inputs[i]);
+        for (size_t i = 0; i < grad_inputs.size(); ++i) {
+            auto& destination = grad_store[input_names[i]];
+            if (destination.empty()) destination = std::move(grad_inputs[i]);
+            else accumulate_grad(destination, grad_inputs[i]);
+        }
     }
 
     // Exposer le gradient d'entrée si présent (architecture utilisant "__input__")
@@ -4336,7 +4354,7 @@ Gradients Model::backwardPass(const std::vector<float> &loss_gradient) {
     last_input_gradient_.clear();
     auto it_in = grad_store.find("__input__");
     if (it_in != grad_store.end()) {
-        last_input_gradient_ = it_in->second;
+        last_input_gradient_ = std::move(it_in->second);
         has_last_input_gradient_ = true;
     }
 

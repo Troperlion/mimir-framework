@@ -5,6 +5,7 @@ Run after source changes, before distributing either notebook. Only explicit
 build/source directories are included; datasets, checkpoints, secrets, build
 outputs and notebook files are excluded. No CPU or runtime source is changed.
 """
+import ast
 import base64
 import gzip
 import hashlib
@@ -153,6 +154,15 @@ def main():
                 cell['outputs'] = []
                 cell['execution_count'] = None
                 updated += 1
+            elif cell['cell_type'] == 'code' and 'MICRO_SUITE_SOURCE = ' in source:
+                node = next(n for n in ast.parse(source).body if isinstance(n, ast.Assign)
+                            and isinstance(n.targets[0], ast.Name) and n.targets[0].id == 'MICRO_SUITE_SOURCE')
+                lines = source.splitlines(True)
+                helper = (ROOT / 'scripts/benchmarks/colab_micro_suite.py').read_text()
+                lines[node.lineno - 1:node.end_lineno] = ['MICRO_SUITE_SOURCE = ' + repr(helper) + '\n']
+                cell['source'] = ''.join(lines).splitlines(True)
+                cell['outputs'] = []
+                cell['execution_count'] = None
             elif cell['cell_type'] == 'markdown':
                 source = source.replace('Un checkout existant est conservé. La branche distante doit contenir les changements runtime à tester.',
                     'Par défaut, les sources actuelles sont embarquées dans ce notebook et vérifiées par SHA256. Elles sont extraites dans un dossier dédié ; un checkout existant est conservé. `SOURCE_MODE="checkout"` permet de choisir explicitement la branche distante.')

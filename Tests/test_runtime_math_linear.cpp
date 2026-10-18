@@ -61,6 +61,34 @@ static std::vector<float> run_linear_cpu(
     return m.forwardPassNamed(fin, iin, /*training=*/false);
 }
 
+// Reuse one runtime across growing/shrinking batches and in-place parameter
+// mutations. A scratch cache must never become a stale parameter cache.
+template <class Runtime>
+static void check_linear_workspace(Runtime& runtime) {
+    for (int batch : {1, 7, 3, 7}) {
+        for (int in : {3, 65}) {
+            const int out = 5;
+            std::vector<float> x(size_t(batch) * in), weights(size_t(out) * in), bias(out), y(size_t(batch) * out);
+            for (int iteration = 0; iteration < 3; ++iteration) {
+                for (size_t i = 0; i < x.size(); ++i) x[i] = float(int(i % 13) - 6 + iteration) / 13;
+                for (size_t i = 0; i < weights.size(); ++i) weights[i] = float(int(i % 17) - 8 - iteration) / 17;
+                for (int o = 0; o < out; ++o) bias[o] = float(o + iteration) / 11;
+                const float* b = iteration == 1 ? nullptr : bias.data();
+                CHECK(runtime.linearForward(x.data(), weights.data(), b, y.data(), batch, in, out));
+                for (int row = 0; row < batch; ++row) {
+                    for (int o = 0; o < out; ++o) {
+                        float expected = 0;
+                        for (int i = 0; i < in; ++i)
+                            expected += x[size_t(row) * in + i] * weights[size_t(o) * in + i];
+                        if (b) expected += b[o];
+                        CHECK(std::abs(y[size_t(row) * out + o] - expected) < 1e-4f);
+                    }
+                }
+            }
+        }
+    }
+}
+
 int main() {
     // =========================================================================
     // 1. W = [[1,2],[3,4]], x = [1,0], sans biais
@@ -143,6 +171,7 @@ int main() {
         if (!rt.initialize(cfg)) {
             std::cout << "SKIP: no CUDA device\n";
         } else {
+            check_linear_workspace(rt);
             const float W[4] = {1.f, 2.f,  3.f, 4.f};
             const float x[2] = {1.f, 0.f};
             float y[2]       = {0.f, 0.f};
@@ -218,6 +247,7 @@ int main() {
         if (!rt.initialize(cfg)) {
             std::cout << "SKIP: no ROCm device\n";
         } else {
+            check_linear_workspace(rt);
             const float W[4] = {1.f, 2.f,  3.f, 4.f};
             const float x[2] = {1.f, 0.f};
             float y[2]       = {0.f, 0.f};
@@ -241,6 +271,7 @@ int main() {
         if (!rt.initialize(cfg)) {
             std::cout << "SKIP: no Vulkan compute device\n";
         } else {
+            check_linear_workspace(rt);
             const float W[4] = {1.f, 2.f,  3.f, 4.f};
             const float x[2] = {1.f, 0.f};
             float y[2]       = {0.f, 0.f};

@@ -16,6 +16,8 @@
 #include "../ops_sequence_constant.hpp"
 #include "LayerOpsExt.hpp"
 #include "ConvolutionKernels.hpp"
+#include "MatMulKernels.hpp"
+#include "FlatJoinKernels.hpp"
 
 namespace RuntimeLayerDispatch {
 
@@ -675,15 +677,8 @@ inline bool cpu_forward_layer(
             // ====================================================================
             case LayerType::Concat: {
                 if (inputs.size() < 2) return false;
-                std::vector<std::vector<float>> in_vec;
-                in_vec.reserve(inputs.size());
-                for (const auto* p : inputs) {
-                    if (!p) return false;
-                    in_vec.push_back(*p);
-                }
                 outputs.resize(1);
-                outputs[0] = LayerOps::concat_forward(in_vec, layer.concat_axis);
-                return true;
+                return RuntimeFlatJoin::forward(inputs, outputs[0], false);
             }
 
             case LayerType::Split: {
@@ -706,15 +701,8 @@ inline bool cpu_forward_layer(
 
             case LayerType::Stack: {
                 if (inputs.size() < 2) return false;
-                std::vector<std::vector<float>> in_vec;
-                in_vec.reserve(inputs.size());
-                for (const auto* p : inputs) {
-                    if (!p) return false;
-                    in_vec.push_back(*p);
-                }
                 outputs.resize(1);
-                outputs[0] = LayerOpsExt::stack_forward(in_vec, layer.stack_axis);
-                return true;
+                return RuntimeFlatJoin::forward(inputs, outputs[0], true);
             }
 
             case LayerType::MatMul: {
@@ -738,28 +726,15 @@ inline bool cpu_forward_layer(
                 const int N = layer.embed_dim;
                 const std::vector<float>& A = *inputs[0];
                 const std::vector<float>& Bm = *inputs[1];
-                if (static_cast<int>(A.size()) != B * M * K) return false;
-                if (static_cast<int>(Bm.size()) != B * K * N) return false;
+                if (A.size() != static_cast<size_t>(B) * M * K) return false;
+                if (Bm.size() != static_cast<size_t>(B) * K * N) return false;
 
                 outputs.resize(1);
                 outputs[0].assign(static_cast<size_t>(B) * static_cast<size_t>(M) * static_cast<size_t>(N), 0.0f);
 
-                #pragma omp parallel for schedule(static) if(static_cast<long long>(B) * M * N * K > 262144)
-                for (int b = 0; b < B; ++b) {
-                    const float* Ap = &A[static_cast<size_t>(b) * static_cast<size_t>(M) * static_cast<size_t>(K)];
-                    const float* Bp = &Bm[static_cast<size_t>(b) * static_cast<size_t>(K) * static_cast<size_t>(N)];
-                    float* Cp = &outputs[0][static_cast<size_t>(b) * static_cast<size_t>(M) * static_cast<size_t>(N)];
-                    for (int i = 0; i < M; ++i) {
-                        for (int j = 0; j < N; ++j) {
-                            float sum = 0.0f;
-                            for (int k = 0; k < K; ++k) {
-                                sum += Ap[static_cast<size_t>(i) * static_cast<size_t>(K) + static_cast<size_t>(k)] *
-                                       Bp[static_cast<size_t>(k) * static_cast<size_t>(N) + static_cast<size_t>(j)];
-                            }
-                            Cp[static_cast<size_t>(i) * static_cast<size_t>(N) + static_cast<size_t>(j)] = sum;
-                        }
-                    }
-                }
+                RuntimeMatMul::forwardBatched(A.data(), Bm.data(), outputs[0].data(),
+                    static_cast<size_t>(B), static_cast<size_t>(M),
+                    static_cast<size_t>(K), static_cast<size_t>(N));
                 return true;
             }
 
@@ -1373,30 +1348,45 @@ inline bool cpu_backward_layer(
                 grad_inputs.resize(1);
                 grad_inputs[0].assign(x_elems, 0.0f);
 
+                // Tile the contiguous feature dimension. The old b/i/o and
+                // o/i/b loops read a different cache line for almost every
+                // multiply. Each lane still reduces in the original o/b order.
+                constexpr int tile = 64;
+                const long long work = static_cast<long long>(batch) * in_f * out_f;
+                #pragma omp parallel for schedule(static) if(work > 262144)
                 for (int b = 0; b < batch; ++b) {
-                    const size_t xb = static_cast<size_t>(b) * static_cast<size_t>(in_f);
-                    const size_t gob = static_cast<size_t>(b) * static_cast<size_t>(out_f);
-                    for (int i = 0; i < in_f; ++i) {
-                        float sum = 0.0f;
+                    const float* row_go = go.data() + static_cast<size_t>(b) * out_f;
+                    float* row_gx = grad_inputs[0].data() + static_cast<size_t>(b) * in_f;
+                    for (int base = 0; base < in_f; base += tile) {
+                        alignas(64) float sums[tile] = {};
+                        const int count = std::min(tile, in_f - base);
                         for (int o = 0; o < out_f; ++o) {
-                            sum += go[gob + static_cast<size_t>(o)] * w[static_cast<size_t>(o) * static_cast<size_t>(in_f) + static_cast<size_t>(i)];
+                            const float g = row_go[o];
+                            const float* row_w = w + static_cast<size_t>(o) * in_f + base;
+                            #pragma omp simd
+                            for (int i = 0; i < count; ++i) sums[i] += g * row_w[i];
                         }
-                        grad_inputs[0][xb + static_cast<size_t>(i)] = sum;
+                        std::copy_n(sums, count, row_gx + base);
                     }
                 }
 
                 if (layer.grad_weights.size() != layer.getWeightsSize()) {
                     layer.grad_weights.assign(layer.getWeightsSize(), 0.0f);
                 }
+                #pragma omp parallel for schedule(static) if(work > 262144)
                 for (int o = 0; o < out_f; ++o) {
-                    for (int i = 0; i < in_f; ++i) {
-                        float acc = 0.0f;
+                    float* row_gw = layer.grad_weights.data() + static_cast<size_t>(o) * in_f;
+                    for (int base = 0; base < in_f; base += tile) {
+                        alignas(64) float sums[tile] = {};
+                        const int count = std::min(tile, in_f - base);
                         for (int b = 0; b < batch; ++b) {
-                            const size_t xb = static_cast<size_t>(b) * static_cast<size_t>(in_f) + static_cast<size_t>(i);
-                            const size_t gob = static_cast<size_t>(b) * static_cast<size_t>(out_f) + static_cast<size_t>(o);
-                            acc += go[gob] * x[xb];
+                            const float g = go[static_cast<size_t>(b) * out_f + o];
+                            const float* row_x = x.data() + static_cast<size_t>(b) * in_f + base;
+                            #pragma omp simd
+                            for (int i = 0; i < count; ++i) sums[i] += g * row_x[i];
                         }
-                        layer.grad_weights[static_cast<size_t>(o) * static_cast<size_t>(in_f) + static_cast<size_t>(i)] += acc;
+                        #pragma omp simd
+                        for (int i = 0; i < count; ++i) row_gw[base + i] += sums[i];
                     }
                 }
 
@@ -1556,7 +1546,8 @@ inline bool cpu_backward_layer(
                 return true;
             }
 
-            case LayerType::MatMul: {
+            case LayerType::MatMul:
+            case LayerType::BatchMatMul: {
                 if (inputs.size() < 2 || !inputs[1]) return false;
                 const std::vector<float>& A = *inputs[0];
                 const std::vector<float>& B = *inputs[1];
@@ -1585,81 +1576,9 @@ inline bool cpu_backward_layer(
                     const size_t b0 = static_cast<size_t>(bi) * b_batch;
                     const size_t c0 = static_cast<size_t>(bi) * c_batch;
 
-                    for (int i = 0; i < M; ++i) {
-                        for (int k = 0; k < K; ++k) {
-                            float sum = 0.0f;
-                            for (int j = 0; j < N; ++j) {
-                                sum += go[c0 + static_cast<size_t>(i) * static_cast<size_t>(N) + static_cast<size_t>(j)]
-                                    * B[b0 + static_cast<size_t>(k) * static_cast<size_t>(N) + static_cast<size_t>(j)];
-                            }
-                            grad_inputs[0][a0 + static_cast<size_t>(i) * static_cast<size_t>(K) + static_cast<size_t>(k)] = sum;
-                        }
-                    }
-
-                    for (int k = 0; k < K; ++k) {
-                        for (int j = 0; j < N; ++j) {
-                            float sum = 0.0f;
-                            for (int i = 0; i < M; ++i) {
-                                sum += A[a0 + static_cast<size_t>(i) * static_cast<size_t>(K) + static_cast<size_t>(k)]
-                                    * go[c0 + static_cast<size_t>(i) * static_cast<size_t>(N) + static_cast<size_t>(j)];
-                            }
-                            grad_inputs[1][b0 + static_cast<size_t>(k) * static_cast<size_t>(N) + static_cast<size_t>(j)] = sum;
-                        }
-                    }
-                }
-                return true;
-            }
-
-            case LayerType::BatchMatMul: {
-                if (inputs.size() < 2 || !inputs[1]) return false;
-                const std::vector<float>& A = *inputs[0];
-                const std::vector<float>& B = *inputs[1];
-                const std::vector<float>& go = *grad_outputs[0];
-
-                const int batches = layer.seq_len;
-                const int M = layer.in_features;
-                const int K = layer.out_features;
-                const int N = layer.embed_dim;
-                if (batches <= 0 || M <= 0 || K <= 0 || N <= 0) return false;
-
-                const size_t a_batch = static_cast<size_t>(M) * static_cast<size_t>(K);
-                const size_t b_batch = static_cast<size_t>(K) * static_cast<size_t>(N);
-                const size_t c_batch = static_cast<size_t>(M) * static_cast<size_t>(N);
-                const size_t a_elems = static_cast<size_t>(batches) * a_batch;
-                const size_t b_elems = static_cast<size_t>(batches) * b_batch;
-                const size_t c_elems = static_cast<size_t>(batches) * c_batch;
-                if (A.size() != a_elems || B.size() != b_elems || go.size() != c_elems) return false;
-
-                grad_inputs.resize(2);
-                grad_inputs[0].assign(a_elems, 0.0f);
-                grad_inputs[1].assign(b_elems, 0.0f);
-
-                for (int bi = 0; bi < batches; ++bi) {
-                    const size_t a0 = static_cast<size_t>(bi) * a_batch;
-                    const size_t b0 = static_cast<size_t>(bi) * b_batch;
-                    const size_t c0 = static_cast<size_t>(bi) * c_batch;
-
-                    for (int i = 0; i < M; ++i) {
-                        for (int k = 0; k < K; ++k) {
-                            float sum = 0.0f;
-                            for (int j = 0; j < N; ++j) {
-                                sum += go[c0 + static_cast<size_t>(i) * static_cast<size_t>(N) + static_cast<size_t>(j)]
-                                    * B[b0 + static_cast<size_t>(k) * static_cast<size_t>(N) + static_cast<size_t>(j)];
-                            }
-                            grad_inputs[0][a0 + static_cast<size_t>(i) * static_cast<size_t>(K) + static_cast<size_t>(k)] = sum;
-                        }
-                    }
-
-                    for (int k = 0; k < K; ++k) {
-                        for (int j = 0; j < N; ++j) {
-                            float sum = 0.0f;
-                            for (int i = 0; i < M; ++i) {
-                                sum += A[a0 + static_cast<size_t>(i) * static_cast<size_t>(K) + static_cast<size_t>(k)]
-                                    * go[c0 + static_cast<size_t>(i) * static_cast<size_t>(N) + static_cast<size_t>(j)];
-                            }
-                            grad_inputs[1][b0 + static_cast<size_t>(k) * static_cast<size_t>(N) + static_cast<size_t>(j)] = sum;
-                        }
-                    }
+                    RuntimeMatMul::backward(A.data() + a0, B.data() + b0,
+                        go.data() + c0, grad_inputs[0].data() + a0,
+                        grad_inputs[1].data() + b0, M, K, N);
                 }
                 return true;
             }

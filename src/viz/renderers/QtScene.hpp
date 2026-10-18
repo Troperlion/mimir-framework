@@ -3,16 +3,39 @@
 #include <QPainter>
 #include <QImage>
 #include <QByteArray>
+#include <unordered_map>
 
 namespace mimir::viz::qt {
 inline QColor color(const Scene& v) { return QColor(v[0].get<int>(),v[1].get<int>(),v[2].get<int>(),v[3].get<int>()); }
-inline void render(QPainter& painter, const Scene& scene, unsigned width, unsigned height) {
-    painter.fillRect(QRectF(0,0,width,height),color(scene.at("background")));
-    std::vector<QImage> images;
-    for(const auto& encoded:scene.at("images")) {
-        auto bytes=unbase64(encoded.get<std::string>());
-        images.push_back(QImage::fromData(bytes.data(),int(bytes.size()),"PNG"));
+// Retain only assets used by the latest frame; reused textures and expose events
+// do not need another PNG decode. QImage copies share their pixel storage.
+class ImageCache {
+    std::unordered_map<std::string,QImage> images_;
+public:
+    std::vector<QImage> load(const Scene& assets) {
+        std::unordered_map<std::string,QImage> next;
+        std::vector<QImage> result;
+        result.reserve(assets.size());
+        for(const auto& asset:assets) {
+            const auto& encoded=asset.get_ref<const std::string&>();
+            auto found=images_.find(encoded);
+            QImage image;
+            if(found!=images_.end()) image=found->second;
+            else {
+                const auto bytes=unbase64(encoded);
+                image=QImage::fromData(bytes.data(),int(bytes.size()),"PNG");
+            }
+            next.emplace(encoded,image);
+            result.push_back(image);
+        }
+        images_=std::move(next);
+        return result;
     }
+};
+inline void render(QPainter& painter, const Scene& scene, unsigned width, unsigned height, ImageCache* cache=nullptr) {
+    painter.fillRect(QRectF(0,0,width,height),color(scene.at("background")));
+    ImageCache temporary;
+    const auto images=(cache?cache:&temporary)->load(scene.at("images"));
     painter.setRenderHint(QPainter::TextAntialiasing);
     for(const auto& cmd:scene.at("commands")) {
         painter.save();const auto& v=cmd.at("view");

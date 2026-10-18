@@ -3,23 +3,45 @@
 #include <cairo/cairo.h>
 #include <cstring>
 #include <cmath>
+#include <memory>
+#include <unordered_map>
 
 namespace mimir::viz::cairo_scene {
 inline void color(cairo_t* cr,const Scene& v) {cairo_set_source_rgba(cr,v[0].get<double>()/255.,v[1].get<double>()/255.,v[2].get<double>()/255.,v[3].get<double>()/255.);}
-inline void render(cairo_t* cr,const Scene& scene,unsigned width,unsigned height) {
+class ImageCache {
+    using Image = std::shared_ptr<cairo_surface_t>;
+    std::unordered_map<std::string,Image> images_;
+public:
+    std::vector<Image> load(const Scene& assets) {
+        std::unordered_map<std::string,Image> next;
+        std::vector<Image> result;
+        result.reserve(assets.size());
+        for(const auto& asset:assets) {
+            const auto& encoded=asset.get_ref<const std::string&>();
+            auto found=images_.find(encoded);
+            Image image;
+            if(found!=images_.end()) image=found->second;
+            else {
+                const auto bytes=unbase64(encoded);
+                struct Reader {const std::vector<uint8_t>& bytes;size_t offset=0;} reader{bytes};
+                image=Image(cairo_image_surface_create_from_png_stream(+[](void* closure,unsigned char* data,unsigned length){
+                    auto& source=*static_cast<Reader*>(closure);
+                    if(length>source.bytes.size()-source.offset)return CAIRO_STATUS_READ_ERROR;
+                    std::memcpy(data,source.bytes.data()+source.offset,length);source.offset+=length;return CAIRO_STATUS_SUCCESS;
+                },&reader),cairo_surface_destroy);
+            }
+            next.emplace(encoded,image);
+            result.push_back(image);
+        }
+        images_=std::move(next);
+        return result;
+    }
+};
+inline void render(cairo_t* cr,const Scene& scene,unsigned width,unsigned height,ImageCache* cache=nullptr) {
     cairo_save(cr);cairo_set_operator(cr,CAIRO_OPERATOR_SOURCE);
     color(cr,scene.at("background"));cairo_paint(cr);cairo_restore(cr);
-    std::vector<cairo_surface_t*> images;
-    for(const auto& encoded:scene.at("images")) {
-        const auto bytes=unbase64(encoded.get<std::string>());
-        struct Reader {const std::vector<uint8_t>& bytes;size_t offset=0;} reader{bytes};
-        auto* surface=cairo_image_surface_create_from_png_stream(+[](void* closure,unsigned char* data,unsigned length){
-            auto& source=*static_cast<Reader*>(closure);
-            if(length>source.bytes.size()-source.offset)return CAIRO_STATUS_READ_ERROR;
-            std::memcpy(data,source.bytes.data()+source.offset,length);source.offset+=length;return CAIRO_STATUS_SUCCESS;
-        },&reader);
-        images.push_back(surface);
-    }
+    ImageCache temporary;
+    const auto images=(cache?cache:&temporary)->load(scene.at("images"));
     for(const auto& cmd:scene.at("commands")) {
         cairo_save(cr);const auto& v=cmd.at("view");
         const double x=v[4].get<double>()*width,y=v[5].get<double>()*height,w=v[6].get<double>()*width,h=v[7].get<double>()*height;
@@ -40,13 +62,12 @@ inline void render(cairo_t* cr,const Scene& scene,unsigned width,unsigned height
                 cairo_move_to(cr,a[0].get<double>(),a[1].get<double>());cairo_line_to(cr,b[0].get<double>(),b[1].get<double>());
                 cairo_set_source_rgba(cr,b[2].get<double>()/255.,b[3].get<double>()/255.,b[4].get<double>()/255.,b[5].get<double>()/255.);cairo_stroke(cr);}
         } else if(kind=="image") {
-            const auto asset=cmd.at("asset").get<size_t>();if(asset<images.size() && cairo_surface_status(images[asset])==CAIRO_STATUS_SUCCESS) {
+            const auto asset=cmd.at("asset").get<size_t>();if(asset<images.size() && cairo_surface_status(images[asset].get())==CAIRO_STATUS_SUCCESS) {
                 const auto& p=cmd.at("position");const auto& s=cmd.at("scale");cairo_translate(cr,p[0].get<double>(),p[1].get<double>());cairo_scale(cr,s[0].get<double>(),s[1].get<double>());
-                cairo_set_source_surface(cr,images[asset],0,0);cairo_pattern_set_filter(cairo_get_source(cr),cmd.at("smooth").get<bool>()?CAIRO_FILTER_BILINEAR:CAIRO_FILTER_NEAREST);cairo_paint_with_alpha(cr,cmd.at("alpha").get<double>());
+                cairo_set_source_surface(cr,images[asset].get(),0,0);cairo_pattern_set_filter(cairo_get_source(cr),cmd.at("smooth").get<bool>()?CAIRO_FILTER_BILINEAR:CAIRO_FILTER_NEAREST);cairo_paint_with_alpha(cr,cmd.at("alpha").get<double>());
             }
         }
         cairo_restore(cr);
     }
-    for(auto* image:images)cairo_surface_destroy(image);
 }
 }

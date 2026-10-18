@@ -41,5 +41,35 @@ int main() {
         split.backwardPass({5,7});
         TASSERT_TRUE(split.getLastInputGradient()==std::vector<float>({0,0,5,7}));
     }
+    // Shape-only inputs can borrow dy, including branches and repeated backward.
+    {
+        Model branches;
+        for (int i=0;i<2;++i) {
+            branches.push("identity"+std::to_string(i),"Identity",0);
+            auto& l=branches.getMutableLayers().back();
+            l.inputs={"__input__"};l.output="t"+std::to_string(i);
+        }
+        branches.push("add","Add",0);
+        auto& add=branches.getMutableLayers().back();add.inputs={"t0","t1"};add.output="x";
+        branches.allocateParams();
+        branches.forwardPass(std::vector<float>{1,2,3,4},true);
+        for (int repeat=0;repeat<3;++repeat) {
+            branches.backwardPass({2,3,5,7});
+            TASSERT_TRUE(branches.getLastInputGradient()==std::vector<float>({4,6,10,14}));
+        }
+    }
+    // Broadcast input sizes differ from dy: the size-only fallback is still required.
+    {
+        Model broadcast;
+        broadcast.push("split","Split",0);
+        broadcast.push("add","Add",0);
+        auto& ls=broadcast.getMutableLayers();
+        ls[0].inputs={"__input__"};ls[0].output="parts";ls[0].split_sizes={2,2};
+        ls[1].inputs={"__input__","parts_0"};ls[1].output="x";
+        broadcast.allocateParams();
+        broadcast.forwardPass(std::vector<float>{1,2,3,4},true);
+        broadcast.backwardPass({1,2,3,4});
+        TASSERT_TRUE(broadcast.getLastInputGradient()==std::vector<float>({5,8,3,4}));
+    }
     return 0;
 }

@@ -52,6 +52,7 @@ struct RenderTexture::Impl {
     Context context;
     Scene scene={{"background", {0,0,0,255}}, {"commands", Scene::array()}, {"images", Scene::array()}};
     std::unordered_map<uint64_t, size_t> assets;
+    std::unordered_map<uint64_t, std::string> encodedAssets, previousAssets;
 };
 
 bool FloatRect::contains(Vector2f p) const {
@@ -164,6 +165,10 @@ static Scene command(const char* kind, const View& v) {
 }
 std::string RenderTexture::scene() const { return impl_->scene.dump(); }
 void RenderTexture::clear(Color c) {
+    // Two generations keep textures reused in consecutive frames while releasing
+    // revisions that disappeared. Never retain a growing training history.
+    impl_->previousAssets=std::move(impl_->encodedAssets);
+    impl_->encodedAssets.clear();
     impl_->scene["background"]=colorValue(c);impl_->scene["commands"].clear();impl_->scene["images"].clear();impl_->assets.clear();
     if(recordCommands_)return;
     auto* cr=impl_->context.get();cairo_save(cr);cairo_reset_clip(cr);cairo_identity_matrix(cr);source(cr,c);cairo_paint(cr);cairo_restore(cr); }
@@ -180,25 +185,37 @@ void RenderTexture::draw(const RectangleShape& s) {
 }
 void RenderTexture::draw(const Sprite& s) {
     const auto& image=s.texture().image();if(!image.getSize().x)return;
-    Surface src(cairo_image_surface_create(CAIRO_FORMAT_ARGB32,int(image.getSize().x),int(image.getSize().y)));
-    auto* data=cairo_image_surface_get_data(src.get());const int stride=cairo_image_surface_get_stride(src.get());
-    for(unsigned y=0;y<image.getSize().y;++y)for(unsigned x=0;x<image.getSize().x;++x){auto c=image.getPixel({x,y});auto* p=data+y*stride+x*4;p[0]=uint8_t(c.b*c.a/255);p[1]=uint8_t(c.g*c.a/255);p[2]=uint8_t(c.r*c.a/255);p[3]=c.a;}
-    cairo_surface_mark_dirty(src.get());
     if(recordCommands_) {
         auto found=impl_->assets.find(s.texture().revision());size_t asset;
         if(found==impl_->assets.end()) {
-            std::vector<uint8_t> png;
-            cairo_surface_write_to_png_stream(src.get(),+[](void* closure,const unsigned char* data,unsigned length){
-                auto& bytes=*static_cast<std::vector<uint8_t>*>(closure);bytes.insert(bytes.end(),data,data+length);return CAIRO_STATUS_SUCCESS;
-            },&png);
-            asset=impl_->scene["images"].size();impl_->assets[s.texture().revision()]=asset;
-            impl_->scene["images"].push_back(base64(png.data(),png.size()));
+            const auto revision=s.texture().revision();
+            auto cached=impl_->previousAssets.find(revision);
+            std::string encoded;
+            if(cached!=impl_->previousAssets.end()) encoded=std::move(cached->second);
+            else {
+                Surface src(cairo_image_surface_create(CAIRO_FORMAT_ARGB32,int(image.getSize().x),int(image.getSize().y)));
+                auto* data=cairo_image_surface_get_data(src.get());const int stride=cairo_image_surface_get_stride(src.get());
+                for(unsigned y=0;y<image.getSize().y;++y)for(unsigned x=0;x<image.getSize().x;++x){auto c=image.getPixel({x,y});auto* p=data+y*stride+x*4;p[0]=uint8_t(c.b*c.a/255);p[1]=uint8_t(c.g*c.a/255);p[2]=uint8_t(c.r*c.a/255);p[3]=c.a;}
+                cairo_surface_mark_dirty(src.get());
+                std::vector<uint8_t> png;
+                cairo_surface_write_to_png_stream(src.get(),+[](void* closure,const unsigned char* data,unsigned length){
+                    auto& bytes=*static_cast<std::vector<uint8_t>*>(closure);bytes.insert(bytes.end(),data,data+length);return CAIRO_STATUS_SUCCESS;
+                },&png);
+                encoded=base64(png.data(),png.size());
+            }
+            asset=impl_->scene["images"].size();impl_->assets[revision]=asset;
+            impl_->encodedAssets.emplace(revision,encoded);
+            impl_->scene["images"].push_back(std::move(encoded));
         } else asset=found->second;
         auto cmd=command("image",view_);auto pos=s.getPosition(),origin=s.getOrigin(),scale=s.getScale();
         cmd["position"]={pos.x-origin.x*scale.x,pos.y-origin.y*scale.y};cmd["scale"]={scale.x,scale.y};
         cmd["asset"]=asset;cmd["alpha"]=s.color().a/255.;cmd["smooth"]=s.texture().isSmooth();impl_->scene["commands"].push_back(std::move(cmd));
         return;
     }
+    Surface src(cairo_image_surface_create(CAIRO_FORMAT_ARGB32,int(image.getSize().x),int(image.getSize().y)));
+    auto* data=cairo_image_surface_get_data(src.get());const int stride=cairo_image_surface_get_stride(src.get());
+    for(unsigned y=0;y<image.getSize().y;++y)for(unsigned x=0;x<image.getSize().x;++x){auto c=image.getPixel({x,y});auto* p=data+y*stride+x*4;p[0]=uint8_t(c.b*c.a/255);p[1]=uint8_t(c.g*c.a/255);p[2]=uint8_t(c.r*c.a/255);p[3]=c.a;}
+    cairo_surface_mark_dirty(src.get());
     auto* cr=impl_->context.get();cairo_save(cr);setup(cr,view_,getSize());
     const auto p=s.getPosition(),o=s.getOrigin(),sc=s.getScale();cairo_translate(cr,p.x-o.x*sc.x,p.y-o.y*sc.y);cairo_scale(cr,sc.x,sc.y);
     cairo_set_source_surface(cr,src.get(),0,0);cairo_pattern_set_filter(cairo_get_source(cr),s.texture().isSmooth()?CAIRO_FILTER_BILINEAR:CAIRO_FILTER_NEAREST);cairo_paint_with_alpha(cr,s.color().a/255.);cairo_restore(cr);

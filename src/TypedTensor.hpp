@@ -135,6 +135,7 @@ public:
     }
 
     std::vector<float> toFloat32() const {
+        if (dtype_ == DType::F32) return values<float>();
         std::vector<float> result(numel_);
         for (size_t index = 0; index < numel_; ++index)
             result[index] = static_cast<float>(get(index));
@@ -143,6 +144,22 @@ public:
 
     static TypedTensor fromFloat32(const std::vector<float>& values,
                                    const std::vector<int>& shape, DType dtype) {
+        if (dtype == DType::F32) {
+            // Construct the owned F32 vector directly: allocating a zero-filled
+            // tensor first would touch every byte twice before any computation.
+            TypedTensor result;
+            result.shape_ = shape;
+            result.dtype_ = dtype;
+            result.numel_ = 1;
+            for (int dimension : shape) {
+                if (dimension < 0) throw std::invalid_argument("TypedTensor: negative dimension");
+                result.numel_ *= static_cast<size_t>(dimension);
+            }
+            if (result.numel_ != values.size())
+                throw std::invalid_argument("TypedTensor::fromFloat32: shape mismatch");
+            result.storage_ = values;
+            return result;
+        }
         TypedTensor result(shape, dtype);
         if (result.numel() != values.size())
             throw std::invalid_argument("TypedTensor::fromFloat32: shape mismatch");

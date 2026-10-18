@@ -1,4 +1,5 @@
 #include "viz/WorkbenchTheme.hpp"
+#include "viz/UiPrimitives.hpp"
 #include "viz/WorkbenchLayout.hpp"
 #include "Visualizer.hpp"
 #include "viz/DatasetBBoxBadge.hpp"
@@ -1471,7 +1472,7 @@ void Visualizer::drawPanelScrollbar(PanelId id) {
 
     vizgfx::RectangleShape thumb(vizgfx::Vector2f(track_w, thumb_h));
     thumb.setPosition(vizgfx::Vector2f(tx, thumb_y));
-    thumb.setFillColor(with_alpha(panelAccent(id), 230));
+    thumb.setFillColor(panel_scroll_thumb_rects_[index].contains(picker_mouse_) ? vizgfx::Color(126,151,178) : vizgfx::Color(83,98,119));
     window->draw(thumb);
 }
 
@@ -1646,24 +1647,24 @@ void Visualizer::drawPanelChrome(PanelId id) {
             const std::string badge = real_mode ? "REEL" : "HEATMAP";
 
             const vizgfx::Color badge_fill = real_mode
-                ? vizgfx::Color(46, 122, 86, 220)
-                : vizgfx::Color(126, 78, 42, 220);
+                ? vizgfx::Color(47, 71, 88)
+                : vizgfx::Color(64, 58, 48);
             const vizgfx::Color badge_outline = real_mode
-                ? vizgfx::Color(126, 220, 170, 235)
-                : vizgfx::Color(234, 182, 120, 235);
+                ? vizgfx::Color(87, 122, 147)
+                : vizgfx::Color(130, 111, 84);
 
             const bool smooth_on = smooth_layer_block_previews_;
             const std::string smooth_badge = smooth_on ? "LISSAGE ON" : "LISSAGE OFF";
             const vizgfx::Color smooth_fill = smooth_on
-                ? vizgfx::Color(54, 104, 152, 220)
-                : vizgfx::Color(92, 92, 102, 220);
+                ? vizgfx::Color(47, 71, 88)
+                : vizgfx::Color(49, 56, 67);
             const vizgfx::Color smooth_outline = smooth_on
-                ? vizgfx::Color(140, 206, 255, 235)
-                : vizgfx::Color(156, 156, 170, 235);
+                ? vizgfx::Color(87, 122, 147)
+                : vizgfx::Color(77, 85, 98);
 
             const std::string pal_badge = std::string("PAL ") + heatmap_palette_name(static_cast<int>(heatmap_palette_));
-            const vizgfx::Color pal_fill = vizgfx::Color(72, 78, 110, 220);
-            const vizgfx::Color pal_outline = vizgfx::Color(160, 172, 238, 235);
+            const vizgfx::Color pal_fill = vizgfx::Color(54, 59, 76);
+            const vizgfx::Color pal_outline = vizgfx::Color(90, 98, 126);
 
             const auto layout=mimir::viz::blockToolbarLayout(p.pos,p.size.x);
             const float badge_h=18.f;
@@ -1724,10 +1725,10 @@ void Visualizer::drawPanelChrome(PanelId id) {
 
             auto draw_filter_badge = [&](float x, float y, float w, const std::string& label, bool hidden,
                                          std::optional<vizgfx::FloatRect>& out_rect) {
-                const vizgfx::Color fill = hidden ? vizgfx::Color(145, 84, 84, 220)
-                                              : vizgfx::Color(70, 116, 86, 220);
-                const vizgfx::Color outline = hidden ? vizgfx::Color(240, 154, 154, 235)
-                                                 : vizgfx::Color(154, 226, 186, 235);
+                const vizgfx::Color fill = hidden ? vizgfx::Color(49, 56, 67)
+                                              : vizgfx::Color(47, 71, 88);
+                const vizgfx::Color outline = hidden ? vizgfx::Color(77, 85, 98)
+                                                 : vizgfx::Color(87, 122, 147);
                 vizgfx::RectangleShape fb(vizgfx::Vector2f(w, badge_h));
                 fb.setPosition(vizgfx::Vector2f(x, y));
                 fb.setFillColor(fill);
@@ -1799,7 +1800,7 @@ void Visualizer::drawPanelChrome(PanelId id) {
             const float badge_x = p.pos.x + std::max(8.f, p.size.x - badge_w - 28.f);
             const float badge_y = p.pos.y + (th - badge_h) * 0.5f;
             const vizgfx::Color fill = show_detection_overlay_
-                ? vizgfx::Color(42, 124, 86, 225) : vizgfx::Color(92, 92, 102, 220);
+                ? vizgfx::Color(42, 124, 86, 225) : vizgfx::Color(49, 56, 67);
             vizgfx::RectangleShape badge_shape(vizgfx::Vector2f(badge_w, badge_h));
             badge_shape.setPosition(vizgfx::Vector2f(badge_x, badge_y));
             badge_shape.setFillColor(fill);
@@ -1869,24 +1870,16 @@ void Visualizer::drawPanelChrome(PanelId id) {
         window->draw(h);
     }
 
-    // Bouton close [X]
+    // Discreet close action; destructive color appears only on hover.
     {
-        const auto r = panelCloseButtonRect(id);
-        vizgfx::RectangleShape b(vizgfx::Vector2f(r.size.x, r.size.y));
-        b.setPosition(vizgfx::Vector2f(r.position.x, r.position.y));
-        b.setFillColor(vizgfx::Color(90, 40, 40, 220));
-        b.setOutlineColor(vizgfx::Color(180, 80, 80, 230));
-        b.setOutlineThickness(1);
-        window->draw(b);
-
-        if (font_loaded) {
-            vizgfx::Text t(font);
-            t.setFont(font);
-            t.setCharacterSize(14);
-            t.setFillColor(vizgfx::Color(245, 240, 240));
-            t.setPosition(vizgfx::Vector2f(r.position.x + 4.f, r.position.y - 2.f));
-            t.setString("X");
-            window->draw(t);
+        const auto r=panelCloseButtonRect(id);
+        const bool hovered=r.contains(picker_mouse_);
+        mimir::viz::ui::roundedRect(*window,r,hovered?vizgfx::Color(121,56,64):mimir::viz::theme::header,3);
+        vizgfx::VertexArray cross(vizgfx::PrimitiveType::LineStrip,2);
+        for(int direction:{-1,1}) {
+            const auto center=vizgfx::Vector2f(r.position.x+r.size.x*.5f,r.position.y+r.size.y*.5f);
+            cross[0]={{center.x-3,center.y-3*direction},vizgfx::Color(170,182,199)};
+            cross[1]={{center.x+3,center.y+3*direction},vizgfx::Color(170,182,199)};window->draw(cross);
         }
     }
 }
@@ -1994,7 +1987,7 @@ void Visualizer::renderScriptControls() {
         box.setFillColor(vizgfx::Color(37, 65, 83));
         box.setOutlineColor(vizgfx::Color(80, 180, 200));
         box.setOutlineThickness(1.f);
-        window->draw(box);
+        mimir::viz::ui::buttonSurface(*window,{{x,y},box.getSize()},mimir::viz::theme::control,vizgfx::FloatRect({x,y},box.getSize()).contains(picker_mouse_));
         vizgfx::Text t(font);
         t.setCharacterSize(14);
         t.setPosition({x + 10.f, y + 8.f});
@@ -6193,50 +6186,71 @@ void Visualizer::renderMetrics() {
     vizgfx::RectangleShape command_card({static_cast<float>(panel_w), command_height});
     command_card.setPosition({static_cast<float>(metrics_x), command_y});
     command_card.setFillColor(mimir::viz::theme::header);
-    command_card.setOutlineColor(vizgfx::Color(70, 125, 165, 220));
+    command_card.setOutlineColor(vizgfx::Color(59, 68, 82));
     command_card.setOutlineThickness(1.f);
     window->draw(command_card);
     if (font_loaded) {
         vizgfx::Text title(font); title.setCharacterSize(14); title.setStyle(vizgfx::Text::Bold);
         title.setPosition({static_cast<float>(metrics_x)+8.f, command_y+5.f});
-        title.setFillColor(vizgfx::Color(125, 210, 245)); title.setString("Commandes"); window->draw(title);
+        title.setFillColor(mimir::viz::theme::text); title.setString("Pilotage"); window->draw(title);
     }
     auto drawCommand = [&](int index, const std::string& label, vizgfx::Color color,
                            std::optional<vizgfx::FloatRect>& hitbox) {
         const bool primary = index == 0;
         const float bw = primary ? command_width :
             (command_width - (command_cols-1)*command_gap) / command_cols;
-        const float bh = primary ? 40.f : 32.f;
+        const float bh = primary ? 48.f : 34.f;
         const int grid_index = std::max(0,index-1);
         const float bx = static_cast<float>(metrics_x)+8.f +
             (primary ? 0.f : (grid_index%command_cols)*(bw+command_gap));
         const float by = command_y+28.f +
-            (primary ? 0.f : 48.f+(grid_index/command_cols)*40.f);
+            (primary ? 0.f : 56.f+(grid_index/command_cols)*40.f);
         hitbox = make_rect(bx,by,bw,bh);
-        vizgfx::RectangleShape button({bw,bh}); button.setPosition({bx,by});
-        button.setFillColor(color); button.setOutlineColor(vizgfx::Color(160,210,225,190));
-        button.setOutlineThickness(primary ? 2.f : 1.f); window->draw(button);
+        const bool hovered=hitbox->contains(picker_mouse_) && !show_help_overlay_ && !zoom_active_ && !config_editor_.visible;
+        const auto fill=primary?color:(index==1?vizgfx::Color(78,43,49):mimir::viz::theme::control);
+        mimir::viz::ui::buttonSurface(*window,*hitbox,fill,hovered);
+        const float text_x=bx+(primary?40.f:12.f);
+        if(!primary && index>=2 && index<=5)
+            mimir::viz::ui::roundedRect(*window,{{bx+3.f,by+8.f},{3.f,bh-16.f}},color,1.f);
+        if(primary) {
+            const bool paused=std::atomic_load(&training_paused_)->load();
+            if(paused) {
+                for(int i=0;i<10;++i) {
+                    vizgfx::RectangleShape stroke({1.f,float(18-2*std::abs(i-1))});
+                    stroke.setPosition({bx+15.f+i,by+15.f+std::abs(i-1)});stroke.setFillColor(vizgfx::Color::White);window->draw(stroke);
+                }
+            } else {
+                for(float dx:{15.f,23.f}) {
+                    vizgfx::RectangleShape bar({4.f,16.f});bar.setPosition({bx+dx,by+16.f});bar.setFillColor(vizgfx::Color::White);window->draw(bar);
+                }
+            }
+        }
         if (font_loaded) {
-            vizgfx::Text text(font); text.setCharacterSize(primary && bw>=220.f ? 18 : 12);
-            text.setStyle(vizgfx::Text::Bold); text.setFillColor(vizgfx::Color::White);
-            text.setPosition({bx+7.f,by+(primary ? 7.f : 6.f)});
-            text.setString(vizgfx::String::fromUtf8(label.begin(),label.end())); window->draw(text);
+            vizgfx::Text text(font);unsigned text_size=primary?14:12;text.setCharacterSize(text_size);
+            text.setStyle(vizgfx::Text::Bold);text.setFillColor(mimir::viz::theme::text);
+            text.setString(vizgfx::String::fromUtf8(label.begin(),label.end()));
+            while(text.getLocalBounds().size.x>bw-(text_x-bx)-10.f && text_size>10)text.setCharacterSize(--text_size);
+            text.setPosition({text_x,by+(primary?7.f:9.f)});window->draw(text);
+            if(primary) {
+                text.setCharacterSize(10);text.setStyle(vizgfx::Text::Regular);text.setFillColor(vizgfx::Color(198,218,239));
+                const std::string hint=std::atomic_load(&training_paused_)->load()?"Entraînement en pause":"Entraînement en cours";text.setString(vizgfx::String::fromUtf8(hint.begin(),hint.end()));text.setPosition({text_x,by+27.f});window->draw(text);
+            }
         }
     };
     const bool paused = std::atomic_load(&training_paused_)->load();
-    drawCommand(0, paused ? "PLAY / Reprendre" : "PAUSE training",
+    drawCommand(0, paused ? "Reprendre" : "Mettre en pause",
                 paused ? vizgfx::Color(35,145,95) : vizgfx::Color(40,110,170), last_pause_button_rect_);
-    drawCommand(1, stop_training_requested_.load() ? "STOP demande" : "STOP training",
+    drawCommand(1, stop_training_requested_.load() ? "Arrêt demandé" : "Arrêter",
                 vizgfx::Color(155,55,55), last_stop_button_rect_);
     const bool validation_on = validation_enabled_.load();
-    drawCommand(2, validation_on ? "VALIDATION ON" : "VALIDATION OFF",
+    drawCommand(2, validation_on ? "Validation : oui" : "Validation : non",
                 validation_on ? vizgfx::Color(35,115,75) : vizgfx::Color(65,75,85), last_validation_button_rect_);
     const auto skips = std::atomic_load(&skip_control_);
     const bool skips_on = skips->available.load() && skips->enabled.load();
-    drawCommand(3, !skips->available.load() ? "SKIPS N/A" : (skips_on ? "SKIPS ON" : "SKIPS OFF"),
+    drawCommand(3, !skips->available.load() ? "Skip : indisponible" : (skips_on ? "Skip : oui" : "Skip : non"),
                 skips_on ? vizgfx::Color(35,115,75) : vizgfx::Color(65,75,85), last_skip_button_rect_);
 
-    drawCommand(7, "DebugJSON [D]", vizgfx::Color(65,95,155), last_debug_json_button_rect_);
+    drawCommand(7, "Exporter JSON [D]", vizgfx::Color(65,95,155), last_debug_json_button_rect_);
     if (font_loaded) {
         const auto status = std::atomic_load(&runtime_config_)->debugJsonStatus();
         vizgfx::Text text(font); text.setCharacterSize(11);
@@ -6251,8 +6265,9 @@ void Visualizer::renderMetrics() {
     auto drawMetricBox = [&](int y_offset, vizgfx::Color color) {
         vizgfx::RectangleShape box(vizgfx::Vector2f(static_cast<float>(panel_w), 20));
         box.setPosition(vizgfx::Vector2f(metrics_x, metrics_y + y_offset));
-        box.setFillColor(color);
+        box.setFillColor(vizgfx::Color(38,43,52));
         window->draw(box);
+        vizgfx::RectangleShape marker({3.f,20.f});marker.setPosition(box.getPosition());marker.setFillColor(color);window->draw(marker);
     };
 
     // Epoch (bleu)
@@ -6555,11 +6570,11 @@ void Visualizer::renderMetrics() {
             }
         };
 
-        drawCommand(4, live_on_rt ? "LIVE" : "NATIVE",
+        drawCommand(4, live_on_rt ? "Réglages : manuels" : "Réglages : auto",
                     live_on_rt ? vizgfx::Color(35,115,75) : vizgfx::Color(65,75,85), last_live_overrides_box_);
-        drawCommand(5, live_ui_kl_enabled_ ? "KL ON" : "KL OFF",
+        drawCommand(5, live_ui_kl_enabled_ ? "KL : oui" : "KL : non",
                     live_ui_kl_enabled_ ? vizgfx::Color(35,115,75) : vizgfx::Color(65,75,85), last_live_kl_enable_box_);
-        drawCommand(6, std::string("Recon: ")+recon_loss_name(live_ui_recon_loss_index_),
+        drawCommand(6, std::string("Perte : ")+recon_loss_name(live_ui_recon_loss_index_),
                     vizgfx::Color(80,70,125), last_live_recon_loss_box_);
         drawSection(line_height*4+6, "Reglages", vizgfx::Color(150,190,235));
 

@@ -29,6 +29,8 @@ int main(int argc, char** argv) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
     int frames = 0;
     while (viz.isOpen() && std::chrono::steady_clock::now() < deadline) {
+        viz.processEvents();
+        if(!viz.isOpen()) break;
         viz.update();
         ++frames;
         if (frames == 1) std::cout << "SCENE_READY\n" << std::flush;

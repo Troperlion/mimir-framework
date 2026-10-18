@@ -124,11 +124,11 @@ inline void bf16_to_fp32(float* dst, const uint16_t* src, size_t count) {
 
 // Matmul optimisé avec FMA complètement saturé
 // Pipeline: 3 accumulateurs indépendants pour saturer les 2 ports FMA
-inline void matmul_fma_saturated(float* MIMIR_RESTRICT C,
+template <bool Accumulate>
+inline void matmul_fma_saturated_impl(float* MIMIR_RESTRICT C,
                                   const float* MIMIR_RESTRICT A,
                                   const float* MIMIR_RESTRICT B,
                                   size_t M, size_t N, size_t K) {
-    std::memset(C, 0, M * N * sizeof(float));
 
     const size_t vecN8 = N & ~static_cast<size_t>(7);
     const size_t vecN24 = (N / 24) * 24;
@@ -153,8 +153,11 @@ inline void matmul_fma_saturated(float* MIMIR_RESTRICT C,
                 acc2 = _mm256_fmadd_ps(a_broadcast, b2, acc2);
             }
 
+            if constexpr (Accumulate) acc0 = _mm256_add_ps(_mm256_loadu_ps(&C[i * N + j]), acc0);
             _mm256_storeu_ps(&C[i * N + j], acc0);
+            if constexpr (Accumulate) acc1 = _mm256_add_ps(_mm256_loadu_ps(&C[i * N + j + 8]), acc1);
             _mm256_storeu_ps(&C[i * N + j + 8], acc1);
+            if constexpr (Accumulate) acc2 = _mm256_add_ps(_mm256_loadu_ps(&C[i * N + j + 16]), acc2);
             _mm256_storeu_ps(&C[i * N + j + 16], acc2);
         }
 
@@ -166,6 +169,7 @@ inline void matmul_fma_saturated(float* MIMIR_RESTRICT C,
                 __m256 b = _mm256_loadu_ps(&B[k * N + j]);
                 acc = _mm256_fmadd_ps(a_broadcast, b, acc);
             }
+            if constexpr (Accumulate) acc = _mm256_add_ps(_mm256_loadu_ps(&C[i * N + j]), acc);
             _mm256_storeu_ps(&C[i * N + j], acc);
         }
 
@@ -175,9 +179,24 @@ inline void matmul_fma_saturated(float* MIMIR_RESTRICT C,
             for (size_t k = 0; k < K; ++k) {
                 acc += A[i * K + k] * B[k * N + j];
             }
-            C[i * N + j] = acc;
+            if constexpr (Accumulate) C[i * N + j] += acc;
+            else C[i * N + j] = acc;
         }
     }
+}
+
+inline void matmul_fma_saturated(float* MIMIR_RESTRICT C,
+                                  const float* MIMIR_RESTRICT A,
+                                  const float* MIMIR_RESTRICT B,
+                                  size_t M, size_t N, size_t K) {
+    matmul_fma_saturated_impl<false>(C,A,B,M,N,K);
+}
+
+inline void matmul_add_fma_saturated(float* MIMIR_RESTRICT C,
+                                      const float* MIMIR_RESTRICT A,
+                                      const float* MIMIR_RESTRICT B,
+                                      size_t M, size_t N, size_t K) {
+    matmul_fma_saturated_impl<true>(C,A,B,M,N,K);
 }
 
 // Convolution 2D avec FMA saturé

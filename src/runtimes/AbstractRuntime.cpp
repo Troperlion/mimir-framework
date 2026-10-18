@@ -1,3 +1,4 @@
+#include "runtimes/FiniteCheck.hpp"
 #include "runtimes/optimizers/OptimizerDispatch.hpp"
 #include "runtimes/AbstractRuntime.hpp"
 
@@ -14,9 +15,7 @@
 namespace {
 static bool tensors_are_finite(const std::vector<std::vector<float>>& tensors) {
     for (const auto& tensor : tensors) {
-        for (const float value : tensor) {
-            if (!std::isfinite(value)) return false;
-        }
+        if (!Mimir::RuntimeChecks::allFinite(tensor.data(), tensor.size())) return false;
     }
     return true;
 }

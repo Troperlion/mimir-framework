@@ -91,7 +91,7 @@ public:
     
     BufferHandle(BufferHandle&& other) noexcept
         : data_(other.data_), size_bytes_(other.size_bytes_),
-          tag_(other.tag_), guard_(other.guard_) {
+          tag_(std::move(other.tag_)), guard_(other.guard_) {
         other.data_ = nullptr;
         other.guard_ = nullptr;
     }
@@ -107,7 +107,7 @@ public:
             
             data_ = other.data_;
             size_bytes_ = other.size_bytes_;
-            tag_ = other.tag_;
+            tag_ = std::move(other.tag_);
             guard_ = other.guard_;
             
             other.data_ = nullptr;
@@ -146,7 +146,7 @@ public:
     TensorHandle& operator=(const TensorHandle&) = delete;
     
     TensorHandle(TensorHandle&& other) noexcept
-        : data_(std::move(other.data_)), descriptor_(other.descriptor_), guard_(other.guard_) {
+        : data_(std::move(other.data_)), descriptor_(std::move(other.descriptor_)), guard_(other.guard_) {
         other.guard_ = nullptr;
     }
     
@@ -155,7 +155,7 @@ public:
             if (guard_ && !data_.empty()) guard_->releaseAllocation(descriptor_.size_bytes);
             
             data_ = std::move(other.data_);
-            descriptor_ = other.descriptor_;
+            descriptor_ = std::move(other.descriptor_);
             guard_ = other.guard_;
             
             other.guard_ = nullptr;
@@ -194,7 +194,7 @@ public:
     RawTensorHandle& operator=(const RawTensorHandle&) = delete;
 
     RawTensorHandle(RawTensorHandle&& other) noexcept
-        : data_(std::move(other.data_)), descriptor_(other.descriptor_), guard_(other.guard_) {
+        : data_(std::move(other.data_)), descriptor_(std::move(other.descriptor_)), guard_(other.guard_) {
         other.guard_ = nullptr;
     }
 
@@ -202,7 +202,7 @@ public:
         if (this != &other) {
             if (guard_ && descriptor_.size_bytes) guard_->releaseAllocation(descriptor_.size_bytes);
             data_ = std::move(other.data_);
-            descriptor_ = other.descriptor_;
+            descriptor_ = std::move(other.descriptor_);
             guard_ = other.guard_;
             other.guard_ = nullptr;
         }
@@ -325,6 +325,17 @@ public:
     
     // Allocation d'un buffer brut (pour calculs temporaires)
     BufferHandle allocate_buffer(size_t bytes, const std::string& tag = "") {
+        return allocate_buffer_impl(bytes, tag, true);
+    }
+
+    // Kernels using this entry point overwrite all live elements before reading.
+    // Keep the zero-initialized public allocation path unchanged.
+    BufferHandle allocate_buffer_uninitialized(size_t bytes, const std::string& tag = "") {
+        return allocate_buffer_impl(bytes, tag, false);
+    }
+
+private:
+    BufferHandle allocate_buffer_impl(size_t bytes, const std::string& tag, bool zero) {
         // Cap local optionnel (sans toucher à la limite MemoryGuard)
         if (max_ram_bytes_ > 0 && (memory_guard_.getCurrentBytes() + bytes) > max_ram_bytes_) {
             throw std::runtime_error(
@@ -345,16 +356,24 @@ public:
             );
         }
         
-        // Allouer via new[] (ou aligned_alloc pour SIMD)
-        float* ptr = new float[bytes / sizeof(float)];
-        std::memset(ptr, 0, bytes);
-        
-        total_allocated_bytes_ += bytes;
-        num_allocations_++;
-        
-        return BufferHandle(ptr, bytes, tag, &memory_guard_);
+        try {
+            // Byte-sized requests also need enough float storage for their tail.
+            auto storage = std::unique_ptr<float[]>(
+                new float[bytes / sizeof(float) + (bytes % sizeof(float) != 0)]);
+            if (zero) std::memset(storage.get(), 0, bytes);
+            BufferHandle result(storage.get(), bytes, tag, &memory_guard_);
+            storage.release();
+            total_allocated_bytes_ += bytes;
+            num_allocations_++;
+            return result;
+        } catch (...) {
+            // Covers both allocation and copying the handle's diagnostic tag.
+            memory_guard_.releaseAllocation(bytes);
+            throw;
+        }
     }
     
+public:
     // Pool de buffers réutilisables (scratchpad)
     // Pour éviter alloc/free répétitifs dans les boucles
     BufferHandle get_scratchpad(size_t min_bytes, const std::string& tag = "scratchpad") {
@@ -371,6 +390,16 @@ public:
         return allocate_buffer(min_bytes, tag);
     }
     
+    BufferHandle get_scratchpad_uninitialized(size_t min_bytes, const std::string& tag = "scratchpad") {
+        auto it = scratchpad_pool_.find(tag);
+        if (it != scratchpad_pool_.end() && it->second.size_bytes() >= min_bytes) {
+            auto buffer = std::move(it->second);
+            scratchpad_pool_.erase(it);
+            return buffer;
+        }
+        return allocate_buffer_uninitialized(min_bytes, tag);
+    }
+
     // Retourner buffer au pool pour réutilisation
     void return_scratchpad(BufferHandle&& buffer) {
         std::string tag = buffer.tag();

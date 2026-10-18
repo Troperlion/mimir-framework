@@ -33,7 +33,6 @@ inline void matmul_avx2(float* C, const float* A, const float* B,
 // A: [M x K], B: [N x K], C: [M x N]
 inline void matmul_transpose_avx2(float* C, const float* A, const float* B,
                                    size_t M, size_t N, size_t K) {
-    std::memset(C, 0, M * N * sizeof(float));
     
     #pragma omp parallel for if(M * N * K > 262144) schedule(static)
     for (size_t i = 0; i < M; ++i) {

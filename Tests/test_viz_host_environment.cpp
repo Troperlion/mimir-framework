@@ -23,14 +23,16 @@ int main() {
             require(std::string(std::getenv("LD_LIBRARY_PATH")) == "/opt/mimir/native", "Native path lost");
             require(!std::getenv("GTK_PATH"), "Snap GTK modules inherited");
             require(!std::getenv("GIO_MODULE_DIR"), "Snap GIO cache inherited");
+            require(!std::getenv("GSETTINGS_SCHEMA_DIR"), "Snap GSettings schemas inherited");
             require(std::string(std::getenv("DISPLAY")) == ":987", "Display changed");
-            mimir::viz::Event ready{100};
+            mimir::viz::Event ready{mimir::viz::sceneProtocolHandshake};
             require(mimir::viz::transfer(STDOUT_FILENO, &ready, sizeof(ready), true), "Handshake failed");
             mimir::viz::FrameHeader header;
             require(mimir::viz::transfer(STDIN_FILENO, &header, sizeof(header), false), "No frame");
             require(header.width == 2 && header.height == 2, "Frame size changed");
-            unsigned char pixels[16];
-            require(mimir::viz::transfer(STDIN_FILENO, pixels, sizeof(pixels), false), "No pixels");
+            std::string scene(header.sceneBytes, '\0');
+            require(mimir::viz::transfer(STDIN_FILENO, scene.data(), scene.size(), false), "No scene");
+            require(scene == "{}", "Scene changed");
             mimir::viz::Event close{mimir::viz::Close};
             require(mimir::viz::transfer(STDOUT_FILENO, &close, sizeof(close), true), "Close failed");
             return 0;
@@ -42,6 +44,7 @@ int main() {
             "LD_AUDIT=/snap/code/1/audit.so",
             "GTK_PATH=/snap/code/264/usr/lib/gtk-3.0",
             "GIO_MODULE_DIR=/home/user/snap/code/common/.cache/gio-modules",
+            "GSETTINGS_SCHEMA_DIR=/home/user/snap/code/264/.local/share/glib-2.0/schemas",
             "QT_PLUGIN_PATH=/opt/qt/plugins:/var/lib/snapd/snap/code/264/plugins",
             "XDG_DATA_DIRS=/snap/code/264/usr/share:/usr/share:/usr/local/share",
             "XDG_DATA_HOME=/home/user/snap/code/264/.local/share",
@@ -60,7 +63,7 @@ int main() {
         require(values.at("LD_PRELOAD") == "/opt/native/profiler.so", "Custom preload lost");
         require(values.at("QT_PLUGIN_PATH") == "/opt/qt/plugins", "Qt filtering failed");
         require(values.at("XDG_DATA_DIRS") == "/usr/share:/usr/local/share", "Data paths lost");
-        for (const auto* name : {"GTK_PATH", "GIO_MODULE_DIR", "LD_AUDIT", "XDG_DATA_HOME"})
+        for (const auto* name : {"GTK_PATH", "GIO_MODULE_DIR", "LD_AUDIT", "XDG_DATA_HOME", "GSETTINGS_SCHEMA_DIR"})
             require(values.count(name) == 0, "Snap-only setting retained");
         require(values.at("WAYLAND_DISPLAY") == "wayland-0", "Wayland changed");
         require(values.at("XAUTHORITY") == "/tmp/auth", "X authority changed");
@@ -80,9 +83,10 @@ int main() {
         setenv("LD_LIBRARY_PATH", "/snap/core20/current/lib/x86_64-linux-gnu:/opt/mimir/native", 1);
         setenv("GTK_PATH", "/snap/code/264/usr/lib/gtk-3.0", 1);
         setenv("GIO_MODULE_DIR", "/home/user/snap/code/common/.cache/gio-modules", 1);
+        setenv("GSETTINGS_SCHEMA_DIR", "/home/user/snap/code/264/.local/share/glib-2.0/schemas", 1);
         setenv("DISPLAY", ":987", 1);
         auto host = mimir::viz::makeHost("environment regression");
-        mimir::viz::Frame frame{2, 2, 0, std::vector<uint8_t>(16, 255)};
+        mimir::viz::Frame frame{2, 2, 0, "{}"};
         host->present(std::move(frame));
         bool closed = false;
         for (int i = 0; i < 100 && !closed; ++i) {

@@ -105,6 +105,21 @@ with log_path.open('w') as log:
             flush(display);time.sleep(.1)
             button(display,1,True,0);button(display,1,False,0)
             flush(display);time.sleep(.2)
+        # Toolbar activation, then a canvas click, must leave keyboard input on
+        # the scene. Tab/Shift-Tab belong to Viz navigation, not toolkit focus.
+        warp(display,0,wid,0,0,0,0,20,30+header)
+        flush(display);time.sleep(.1)
+        button(display,1,True,0);button(display,1,False,0)
+        for name in ['Tab','Return','BackSpace','F1']:
+            code=keycode(display,keysym(name.encode()))
+            key(display,code,True,0);key(display,code,False,0)
+        control=keycode(display,keysym(b'Control_L'))
+        shift=keycode(display,keysym(b'Shift_L'))
+        left=keycode(display,keysym(b'Left'))
+        key(display,control,True,0);key(display,shift,True,0)
+        key(display,left,True,0);key(display,left,False,0)
+        key(display,shift,False,0);key(display,control,False,0)
+        flush(display);time.sleep(.2)
         class Data(C.Union):
             _fields_ = [('l', C.c_long * 5), ('b', C.c_char * 20)]
         class Client(C.Structure):
@@ -122,6 +137,8 @@ with log_path.open('w') as log:
         assert process.wait(timeout=5) == 0, log_path.read_text()
         text = log_path.read_text()
         for expected in ['PIXELS_OK', 'DOWN 20 30', 'UP 20 30', 'WHEEL 1', 'TEXT 104', 'CLOSE']:
+            assert expected in text, (expected, text)
+        for expected in ['KEY 60 0 0', 'KEY 58 0 0', 'KEY 59 0 0', 'KEY 85 0 0', 'KEY 71 1 1', 'TEXT 8']:
             assert expected in text, (expected, text)
         if header:
             assert text.count('KEY 7 ') >= 2, ('Native toolbar not connected', text)

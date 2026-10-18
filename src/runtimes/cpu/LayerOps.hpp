@@ -1294,10 +1294,10 @@ inline std::vector<float> self_attention_forward(
     if (embed_dim % num_heads != 0) {
         throw std::runtime_error("SelfAttention: embed_dim must be divisible by num_heads");
     }
-    
+
     int head_dim = embed_dim / num_heads;
     int qkv_dim = embed_dim * 3;  // Q, K, V concatenated
-    
+
     // Input shape: [seq_len, embed_dim]
     if (input.size() != static_cast<size_t>(seq_len * embed_dim)) {
         throw std::runtime_error("SelfAttention: input size mismatch");
@@ -1308,7 +1308,7 @@ inline std::vector<float> self_attention_forward(
     if (!out_bias.empty() && out_bias.size() != static_cast<size_t>(embed_dim)) {
         throw std::runtime_error("SelfAttention: out_bias size mismatch");
     }
-    
+
     // 1. Linear projection to Q, K, V.
     // Layout attendu pour qkv_weight: [3*embed_dim, embed_dim] (Q, K, V empilés verticalement).
     std::vector<float> qkv(seq_len * qkv_dim);
@@ -1325,20 +1325,8 @@ inline std::vector<float> self_attention_forward(
             qkv_row[n] = sum;
         }
     }
-    
-    // 2. Split into Q, K, V
-    std::vector<float> Q(seq_len * embed_dim);
-    std::vector<float> K(seq_len * embed_dim);
-    std::vector<float> V(seq_len * embed_dim);
-    
-    for (int m = 0; m < seq_len; ++m) {
-        const int base = m * qkv_dim;
-        const int out = m * embed_dim;
-        std::memcpy(&Q[static_cast<size_t>(out)], &qkv[static_cast<size_t>(base)], static_cast<size_t>(embed_dim) * sizeof(float));
-        std::memcpy(&K[static_cast<size_t>(out)], &qkv[static_cast<size_t>(base + embed_dim)], static_cast<size_t>(embed_dim) * sizeof(float));
-        std::memcpy(&V[static_cast<size_t>(out)], &qkv[static_cast<size_t>(base + 2 * embed_dim)], static_cast<size_t>(embed_dim) * sizeof(float));
-    }
-    
+
+    // Read head slices directly from the combined projection below.
     // 3-5. Multi-head attention (GEMM-based):
     // scores = Q_h @ K_h^T, softmax(scores), context = scores @ V_h
     std::vector<float> attended(seq_len * embed_dim, 0.0f);
@@ -1353,16 +1341,18 @@ inline std::vector<float> self_attention_forward(
     Qh.resize(static_cast<size_t>(seq_len) * static_cast<size_t>(head_dim));
     Vh.resize(static_cast<size_t>(seq_len) * static_cast<size_t>(head_dim));
     KhT.resize(static_cast<size_t>(head_dim) * static_cast<size_t>(seq_len));
-    scores.resize(static_cast<size_t>(seq_len) * static_cast<size_t>(seq_len));
-    context.resize(static_cast<size_t>(seq_len) * static_cast<size_t>(head_dim));
+    constexpr int query_tile = 128;
+    const int tile_rows = std::min(query_tile, seq_len);
+    scores.resize(static_cast<size_t>(tile_rows) * static_cast<size_t>(seq_len));
+    context.resize(static_cast<size_t>(tile_rows) * static_cast<size_t>(head_dim));
 
     for (int h = 0; h < num_heads; ++h) {
         const int head_off = h * head_dim;
 
         // Pack Q_h and V_h to contiguous [seq_len x head_dim]
         for (int i = 0; i < seq_len; ++i) {
-            const float* qsrc = &Q[static_cast<size_t>(i) * static_cast<size_t>(embed_dim) + static_cast<size_t>(head_off)];
-            const float* vsrc = &V[static_cast<size_t>(i) * static_cast<size_t>(embed_dim) + static_cast<size_t>(head_off)];
+            const float* qsrc = &qkv[static_cast<size_t>(i) * static_cast<size_t>(qkv_dim) + static_cast<size_t>(head_off)];
+            const float* vsrc = &qkv[static_cast<size_t>(i) * static_cast<size_t>(qkv_dim) + 2ULL * embed_dim + static_cast<size_t>(head_off)];
             float* qdst = &Qh[static_cast<size_t>(i) * static_cast<size_t>(head_dim)];
             float* vdst = &Vh[static_cast<size_t>(i) * static_cast<size_t>(head_dim)];
             std::memcpy(qdst, qsrc, static_cast<size_t>(head_dim) * sizeof(float));
@@ -1371,71 +1361,75 @@ inline std::vector<float> self_attention_forward(
 
         // Build K_h^T as [head_dim x seq_len] for GEMM
         for (int j = 0; j < seq_len; ++j) {
-            const float* ksrc = &K[static_cast<size_t>(j) * static_cast<size_t>(embed_dim) + static_cast<size_t>(head_off)];
+            const float* ksrc = &qkv[static_cast<size_t>(j) * static_cast<size_t>(qkv_dim) + static_cast<size_t>(embed_dim) + static_cast<size_t>(head_off)];
             for (int k = 0; k < head_dim; ++k) {
                 KhT[static_cast<size_t>(k) * static_cast<size_t>(seq_len) + static_cast<size_t>(j)] = ksrc[k];
             }
         }
 
-        // scores = Q_h @ K_h^T  => [seq_len x seq_len]
-        HardwareOpt::matmul_fma_saturated(scores.data(), Qh.data(), KhT.data(),
-                                          static_cast<size_t>(seq_len),
-                                          static_cast<size_t>(seq_len),
-                                          static_cast<size_t>(head_dim));
+        // Bound score storage independently of the number of query tokens.
+        for (int query_begin = 0; query_begin < seq_len; query_begin += query_tile) {
+            const int rows = std::min(query_tile, seq_len - query_begin);
+            // scores for the current query tile.
+            HardwareOpt::matmul_fma_saturated(scores.data(), Qh.data() + static_cast<size_t>(query_begin) * head_dim, KhT.data(),
+                                              static_cast<size_t>(rows),
+                                              static_cast<size_t>(seq_len),
+                                              static_cast<size_t>(head_dim));
 
-        // Scale
-        const size_t scores_n = static_cast<size_t>(seq_len) * static_cast<size_t>(seq_len);
-        #pragma omp simd
-        for (size_t idx = 0; idx < scores_n; ++idx) {
-            scores[idx] *= scale;
-        }
+            // Scale
+            const size_t scores_n = static_cast<size_t>(rows) * static_cast<size_t>(seq_len);
+            #pragma omp simd
+            for (size_t idx = 0; idx < scores_n; ++idx) {
+                scores[idx] *= scale;
+            }
 
-        // Causal mask (in-place)
-        if (causal) {
-            for (int i = 0; i < seq_len; ++i) {
-                float* row = &scores[static_cast<size_t>(i) * static_cast<size_t>(seq_len)];
-                for (int j = i + 1; j < seq_len; ++j) {
-                    row[j] = -1e9f;
+            // Causal mask (in-place)
+            if (causal) {
+                for (int i = 0; i < rows; ++i) {
+                    float* row = &scores[static_cast<size_t>(i) * static_cast<size_t>(seq_len)];
+                    for (int j = query_begin + i + 1; j < seq_len; ++j) {
+                        row[j] = -1e9f;
+                    }
                 }
             }
-        }
 
-        // Softmax per row (in-place)
-        #pragma omp parallel for schedule(static) if(static_cast<long long>(seq_len) * seq_len > 262144)
-        for (int i = 0; i < seq_len; ++i) {
-            float* row = &scores[static_cast<size_t>(i) * static_cast<size_t>(seq_len)];
-            float max_val = row[0];
-            for (int j = 1; j < seq_len; ++j) {
-                if (row[j] > max_val) max_val = row[j];
+            // Softmax per row (in-place)
+            #pragma omp parallel for schedule(static) if(static_cast<long long>(seq_len) * seq_len > 262144)
+            for (int i = 0; i < rows; ++i) {
+                float* row = &scores[static_cast<size_t>(i) * static_cast<size_t>(seq_len)];
+                float max_val = row[0];
+                for (int j = 1; j < seq_len; ++j) {
+                    if (row[j] > max_val) max_val = row[j];
+                }
+
+                float sum = 0.0f;
+                for (int j = 0; j < seq_len; ++j) {
+                    const float e = std::exp(row[j] - max_val);
+                    row[j] = e;
+                    sum += e;
+                }
+                const float inv_sum = 1.0f / (sum + 1e-9f);
+                #pragma omp simd
+                for (int j = 0; j < seq_len; ++j) {
+                    row[j] *= inv_sum;
+                }
             }
 
-            float sum = 0.0f;
-            for (int j = 0; j < seq_len; ++j) {
-                const float e = std::exp(row[j] - max_val);
-                row[j] = e;
-                sum += e;
-            }
-            const float inv_sum = 1.0f / (sum + 1e-9f);
-            #pragma omp simd
-            for (int j = 0; j < seq_len; ++j) {
-                row[j] *= inv_sum;
-            }
-        }
+            // Context for the current query tile.
+            HardwareOpt::matmul_fma_saturated(context.data(), scores.data(), Vh.data(),
+                                              static_cast<size_t>(rows),
+                                              static_cast<size_t>(head_dim),
+                                              static_cast<size_t>(seq_len));
 
-        // context = softmax(scores) @ V_h  => [seq_len x head_dim]
-        HardwareOpt::matmul_fma_saturated(context.data(), scores.data(), Vh.data(),
-                                          static_cast<size_t>(seq_len),
-                                          static_cast<size_t>(head_dim),
-                                          static_cast<size_t>(seq_len));
-
-        // Write context into attended (head slice)
-        for (int i = 0; i < seq_len; ++i) {
-            float* dst = &attended[static_cast<size_t>(i) * static_cast<size_t>(embed_dim) + static_cast<size_t>(head_off)];
-            const float* src = &context[static_cast<size_t>(i) * static_cast<size_t>(head_dim)];
-            std::memcpy(dst, src, static_cast<size_t>(head_dim) * sizeof(float));
+            // Write context into attended (head slice)
+            for (int i = 0; i < rows; ++i) {
+                float* dst = &attended[static_cast<size_t>(query_begin + i) * static_cast<size_t>(embed_dim) + static_cast<size_t>(head_off)];
+                const float* src = &context[static_cast<size_t>(i) * static_cast<size_t>(head_dim)];
+                std::memcpy(dst, src, static_cast<size_t>(head_dim) * sizeof(float));
+            }
         }
     }
-    
+
     // 6. Output projection
     std::vector<float> output(seq_len * embed_dim);
     matmul(attended, out_weight, output, seq_len, embed_dim, embed_dim);
@@ -1449,7 +1443,7 @@ inline std::vector<float> self_attention_forward(
             }
         }
     }
-    
+
     return output;
 }
 
@@ -1521,17 +1515,6 @@ inline std::vector<float> cross_attention_forward(
     std::vector<float> KV(kv_len * (2 * embed_dim));
     matmul(kv_input, kv_weight, KV, kv_len, kv_embed_dim, 2 * embed_dim);
 
-    std::vector<float> K(kv_len * embed_dim);
-    std::vector<float> V(kv_len * embed_dim);
-    for (int m = 0; m < kv_len; ++m) {
-        const int base = m * (2 * embed_dim);
-        const int out = m * embed_dim;
-        for (int k = 0; k < embed_dim; ++k) {
-            K[out + k] = KV[base + k];
-            V[out + k] = KV[base + embed_dim + k];
-        }
-    }
-
     // 2) Multi-head attention (GEMM-based):
     // scores = Q_h @ K_h^T, softmax(scores), context = scores @ V_h
     std::vector<float> attended(query_len * embed_dim, 0.0f);
@@ -1546,8 +1529,10 @@ inline std::vector<float> cross_attention_forward(
     Qh.resize(static_cast<size_t>(query_len) * static_cast<size_t>(head_dim));
     Vh.resize(static_cast<size_t>(kv_len) * static_cast<size_t>(head_dim));
     KhT.resize(static_cast<size_t>(head_dim) * static_cast<size_t>(kv_len));
-    scores.resize(static_cast<size_t>(query_len) * static_cast<size_t>(kv_len));
-    context.resize(static_cast<size_t>(query_len) * static_cast<size_t>(head_dim));
+    constexpr int query_tile = 128;
+    const int tile_rows = std::min(query_tile, query_len);
+    scores.resize(static_cast<size_t>(tile_rows) * static_cast<size_t>(kv_len));
+    context.resize(static_cast<size_t>(tile_rows) * static_cast<size_t>(head_dim));
 
     for (int h = 0; h < num_heads; ++h) {
         const int head_off = h * head_dim;
@@ -1561,76 +1546,79 @@ inline std::vector<float> cross_attention_forward(
 
         // Pack V_h [kv_len x head_dim]
         for (int j = 0; j < kv_len; ++j) {
-            const float* vsrc = &V[static_cast<size_t>(j) * static_cast<size_t>(embed_dim) + static_cast<size_t>(head_off)];
+            const float* vsrc = &KV[static_cast<size_t>(j) * (2ULL * embed_dim) + static_cast<size_t>(embed_dim) + static_cast<size_t>(head_off)];
             float* vdst = &Vh[static_cast<size_t>(j) * static_cast<size_t>(head_dim)];
             std::memcpy(vdst, vsrc, static_cast<size_t>(head_dim) * sizeof(float));
         }
 
         // Build K_h^T as [head_dim x kv_len]
         for (int j = 0; j < kv_len; ++j) {
-            const float* ksrc = &K[static_cast<size_t>(j) * static_cast<size_t>(embed_dim) + static_cast<size_t>(head_off)];
+            const float* ksrc = &KV[static_cast<size_t>(j) * (2ULL * embed_dim) + static_cast<size_t>(head_off)];
             for (int k = 0; k < head_dim; ++k) {
                 KhT[static_cast<size_t>(k) * static_cast<size_t>(kv_len) + static_cast<size_t>(j)] = ksrc[k];
             }
         }
 
-        // scores = Q_h @ K_h^T => [query_len x kv_len]
-        HardwareOpt::matmul_fma_saturated(scores.data(), Qh.data(), KhT.data(),
-                                          static_cast<size_t>(query_len),
-                                          static_cast<size_t>(kv_len),
-                                          static_cast<size_t>(head_dim));
+        for (int query_begin = 0; query_begin < query_len; query_begin += query_tile) {
+            const int rows = std::min(query_tile, query_len - query_begin);
+            // scores for the current query tile.
+            HardwareOpt::matmul_fma_saturated(scores.data(), Qh.data() + static_cast<size_t>(query_begin) * head_dim, KhT.data(),
+                                              static_cast<size_t>(rows),
+                                              static_cast<size_t>(kv_len),
+                                              static_cast<size_t>(head_dim));
 
-        // Scale
-        const size_t scores_n = static_cast<size_t>(query_len) * static_cast<size_t>(kv_len);
-        #pragma omp simd
-        for (size_t idx = 0; idx < scores_n; ++idx) {
-            scores[idx] *= scale;
-        }
+            // Scale
+            const size_t scores_n = static_cast<size_t>(rows) * static_cast<size_t>(kv_len);
+            #pragma omp simd
+            for (size_t idx = 0; idx < scores_n; ++idx) {
+                scores[idx] *= scale;
+            }
 
-        // Causal mask (only meaningful when kv is aligned with query timeline)
-        if (causal) {
-            const int diag = std::min(query_len, kv_len);
-            for (int i = 0; i < diag; ++i) {
-                float* row = &scores[static_cast<size_t>(i) * static_cast<size_t>(kv_len)];
-                for (int j = i + 1; j < kv_len; ++j) {
-                    row[j] = -1e9f;
+            // Causal mask (only meaningful when kv is aligned with query timeline)
+            if (causal) {
+                const int diag = std::min(rows, kv_len - query_begin);
+                for (int i = 0; i < diag; ++i) {
+                    float* row = &scores[static_cast<size_t>(i) * static_cast<size_t>(kv_len)];
+                    for (int j = query_begin + i + 1; j < kv_len; ++j) {
+                        row[j] = -1e9f;
+                    }
                 }
             }
-        }
 
-        // Softmax per row (in-place)
-        #pragma omp parallel for schedule(static) if(static_cast<long long>(query_len) * kv_len > 262144)
-        for (int i = 0; i < query_len; ++i) {
-            float* row = &scores[static_cast<size_t>(i) * static_cast<size_t>(kv_len)];
-            float max_val = row[0];
-            for (int j = 1; j < kv_len; ++j) {
-                if (row[j] > max_val) max_val = row[j];
+            // Softmax per row (in-place)
+            #pragma omp parallel for schedule(static) if(static_cast<long long>(query_len) * kv_len > 262144)
+            for (int i = 0; i < rows; ++i) {
+                float* row = &scores[static_cast<size_t>(i) * static_cast<size_t>(kv_len)];
+                float max_val = row[0];
+                for (int j = 1; j < kv_len; ++j) {
+                    if (row[j] > max_val) max_val = row[j];
+                }
+
+                float sum = 0.0f;
+                for (int j = 0; j < kv_len; ++j) {
+                    const float e = std::exp(row[j] - max_val);
+                    row[j] = e;
+                    sum += e;
+                }
+                const float inv_sum = 1.0f / (sum + 1e-9f);
+                #pragma omp simd
+                for (int j = 0; j < kv_len; ++j) {
+                    row[j] *= inv_sum;
+                }
             }
 
-            float sum = 0.0f;
-            for (int j = 0; j < kv_len; ++j) {
-                const float e = std::exp(row[j] - max_val);
-                row[j] = e;
-                sum += e;
-            }
-            const float inv_sum = 1.0f / (sum + 1e-9f);
-            #pragma omp simd
-            for (int j = 0; j < kv_len; ++j) {
-                row[j] *= inv_sum;
-            }
-        }
+            // Context for the current query tile.
+            HardwareOpt::matmul_fma_saturated(context.data(), scores.data(), Vh.data(),
+                                              static_cast<size_t>(rows),
+                                              static_cast<size_t>(head_dim),
+                                              static_cast<size_t>(kv_len));
 
-        // context = scores @ V_h => [query_len x head_dim]
-        HardwareOpt::matmul_fma_saturated(context.data(), scores.data(), Vh.data(),
-                                          static_cast<size_t>(query_len),
-                                          static_cast<size_t>(head_dim),
-                                          static_cast<size_t>(kv_len));
-
-        // Write context into attended
-        for (int i = 0; i < query_len; ++i) {
-            float* dst = &attended[static_cast<size_t>(i) * static_cast<size_t>(embed_dim) + static_cast<size_t>(head_off)];
-            const float* src = &context[static_cast<size_t>(i) * static_cast<size_t>(head_dim)];
-            std::memcpy(dst, src, static_cast<size_t>(head_dim) * sizeof(float));
+            // Write context into attended
+            for (int i = 0; i < rows; ++i) {
+                float* dst = &attended[static_cast<size_t>(query_begin + i) * static_cast<size_t>(embed_dim) + static_cast<size_t>(head_off)];
+                const float* src = &context[static_cast<size_t>(i) * static_cast<size_t>(head_dim)];
+                std::memcpy(dst, src, static_cast<size_t>(head_dim) * sizeof(float));
+            }
         }
     }
 

@@ -3,9 +3,9 @@ namespace mimir::viz::web {
 inline const char* page=R"HTML(<!doctype html><meta charset="utf-8"><title>Mímir Viz</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#282828;color:#d4d4d4;font:12px system-ui,sans-serif}
-header{height:34px;display:flex;align-items:center;gap:3px;padding:0 8px;background:#303030;border-bottom:1px solid #171717;position:sticky;top:0;z-index:2}
-.brand{color:#e89144;font-weight:700;margin-right:14px;letter-spacing:1px}button{font:inherit;color:#ddd;border:1px solid transparent;border-radius:3px;padding:4px 10px;background:transparent;cursor:pointer}button:hover{background:#484848;border-color:#555}button:focus-visible{outline:1px solid #e89144}#status{margin-left:auto;color:#aaa;padding:0 8px}#stop{color:#edaa79}main{overflow:auto}canvas{display:block;outline:none}footer{padding:5px 10px;background:#303030;border-top:1px solid #171717;color:#aaa}
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#20242b;color:#dfe5ee;font:12px system-ui,sans-serif}
+header{height:34px;display:flex;align-items:center;gap:5px;padding:0 8px;background:#282d36;border-bottom:1px solid #101318;position:sticky;top:0;z-index:2}
+.brand{color:#e89144;font-weight:700;margin-right:14px;letter-spacing:1px}button{font:inherit;font-weight:500;color:#dfe5ee;border:1px solid #4d5562;border-radius:5px;padding:4px 10px;background:#313843;cursor:pointer;box-shadow:0 2px 2px #0002;transition:background .12s,border-color .12s}button:hover{background:#3e4b5c;border-color:#7e97b2}button:active{background:#26394d;box-shadow:inset 0 1px 3px #0004}button:focus-visible{outline:2px solid #80b4e9;outline-offset:1px}#status{margin-left:auto;color:#aaa;padding:0 8px}#stop{color:#edaa79}main{overflow:auto}canvas{display:block;outline:none}footer{padding:5px 10px;background:#282d36;border-top:1px solid #101318;color:#aaa}
 </style>
 <header><span class="brand">MÍMIR</span><button data-key="72" title="H">Aide</button><button data-key="67" title="C">Propriétés</button><button data-key="78" title="N">Graphe</button><button data-key="69" title="E">Capture</button><button data-key="82" title="R">Actualiser</button><span id="status" role="status">Connexion…</span><button id="stop">Fermer</button></header><main><canvas tabindex="0" aria-label="Espace de travail du modèle"></canvas></main><footer>Modèle · Tenseurs · Validation <span style="float:right">Canvas2D / WEB</span></footer>
 <script>

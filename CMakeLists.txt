@@ -711,6 +711,13 @@ if(NOT MIMIR_VIZ_BACKEND STREQUAL "NONE")
     endif()
     set_target_properties(mimir_viz_smoke PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${MIMIR_RUNTIME_OUTPUT_DIRECTORY}")
 
+    if(MIMIR_VIZ_BACKEND STREQUAL "QT")
+        add_executable(mimir_viz_asset_cache_smoke EXCLUDE_FROM_ALL
+            Tests/test_viz_asset_cache.cpp src/viz/SoftwareGraphics.cpp)
+        target_include_directories(mimir_viz_asset_cache_smoke PRIVATE src)
+        target_link_libraries(mimir_viz_asset_cache_smoke PRIVATE Qt6::Gui PkgConfig::VIZ_CAIRO)
+    endif()
+
     add_executable(mimir_viz_script_smoke EXCLUDE_FROM_ALL Tests/test_viz_script.cpp Tests/test_log_stub.cpp)
     target_link_libraries(mimir_viz_script_smoke PRIVATE mimir_core)
     set_target_properties(mimir_viz_script_smoke PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${MIMIR_RUNTIME_OUTPUT_DIRECTORY}")

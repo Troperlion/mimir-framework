@@ -1,17 +1,17 @@
+#include "runtimes/FiniteCheck.hpp"
 #include "runtimes/RuntimeRouter.hpp"
 
 #include "Layers.hpp"
 
 #include <cmath>
 #include <cstddef>
+#include <array>
 
 namespace {
 
 bool tensorsAreFinite(const std::vector<std::vector<float>>& tensors) {
     for (const auto& tensor : tensors) {
-        for (const float value : tensor) {
-            if (!std::isfinite(value)) return false;
-        }
+        if (!Mimir::RuntimeChecks::allFinite(tensor.data(), tensor.size())) return false;
     }
     return true;
 }
@@ -228,10 +228,29 @@ std::vector<AbstractRuntime*> RuntimeRouter::buildBackwardRouteForLayer(const La
 void RuntimeRouter::planForwardLayerRoutes(const std::vector<Layer>& layers) const {
     ensureActivatedAndComposed();
 
-    forward_layer_routes_.clear();
-    forward_layer_routes_.reserve(layers.size());
+    bool reuse = forward_layer_routes_.size() == layers.size();
+    if (reuse) {
+        for (const Layer& layer : layers)
+            if (forward_layer_routes_.find(&layer) == forward_layer_routes_.end()) {
+                reuse = false;
+                break;
+            }
+    }
+    if (!reuse) {
+        forward_layer_routes_.clear();
+        forward_layer_routes_.reserve(layers.size());
+    }
     for (const Layer& layer : layers) {
-        forward_layer_routes_.emplace(&layer, buildForwardRouteForLayer(layer));
+        auto& route = forward_layer_routes_[&layer];
+        route.clear();
+        const size_t idx = layerTypeIndex(layer.type_enum);
+        const auto& base = idx < forward_routes_.size() ? forward_routes_[idx] : runtime_priority_;
+        route.reserve(base.size());
+        // Refresh capability and initialization even when storage is reused.
+        for (AbstractRuntime* rt : base)
+            if (rt && rt->isInitialized() &&
+                runtimeCapabilityIsNative(rt->queryForwardCapability(layer.type_enum)))
+                route.push_back(rt);
     }
 }
 
@@ -418,19 +437,24 @@ bool RuntimeRouter::dispatchBackwardLayer(
 
     // Temporary/rewritten layers can reuse an address. Backward capability is
     // cheap to resolve and must describe this operation, not a previous layer.
-    std::vector<AbstractRuntime*> route = buildBackwardRouteForLayer(layer);
-    if (route.empty()) return false;
+    const size_t idx = layerTypeIndex(layer.type_enum);
+    const auto& base = idx < backward_routes_.size() ? backward_routes_[idx] : runtime_priority_;
+    // Snapshot before callbacks, without a heap allocation for the six backends.
+    std::array<AbstractRuntime*, 6> inline_route{};
+    std::vector<AbstractRuntime*> overflow;
+    if (base.size() > inline_route.size()) overflow.resize(base.size());
+    AbstractRuntime** route = overflow.empty() ? inline_route.data() : overflow.data();
+    size_t count = 0;
+    for (AbstractRuntime* rt : base)
+        if (rt && rt->isInitialized() &&
+            runtimeCapabilityIsNative(rt->queryBackwardCapability(layer.type_enum)))
+            route[count++] = rt;
 
-    size_t i = 0;
-    while (i < route.size()) {
+    for (size_t i = 0; i < count; ++i) {
         AbstractRuntime* rt = route[i];
-        if (!rt || !rt->isInitialized()) {
-            route.erase(route.begin() + static_cast<std::ptrdiff_t>(i));
-            continue;
-        }
+        if (!rt->isInitialized()) continue;
         if (!runtimeCapabilityIsNative(rt->queryBackwardOperationCapability(
                 layer, inputs, grad_outputs, training))) {
-            ++i;
             continue;
         }
 
@@ -443,8 +467,7 @@ bool RuntimeRouter::dispatchBackwardLayer(
             return true;
         }
 
-        // Runtime a échoué à l'exécution: on invalide cette route pour ce layer.
-        route.erase(route.begin() + static_cast<std::ptrdiff_t>(i));
+        // Try the next backend if execution or its finiteness check failed.
     }
 
     return false;

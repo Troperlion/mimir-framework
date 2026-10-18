@@ -1,3 +1,5 @@
+#include <cstring>
+#include <limits>
 #include "Autograd.hpp"
 #include "runtimes/cpu/CpuRuntime.hpp"
 #include "runtimes/cpu/TypedKernels.hpp"
@@ -7,6 +9,33 @@
 #include <vector>
 
 int main() {
+    // F32 conversion is an exact, independent bulk copy (including special bits).
+    {
+        const std::vector<float> source = {0.0f, -0.0f, 1.25f,
+            std::numeric_limits<float>::infinity(),
+            std::numeric_limits<float>::quiet_NaN()};
+        auto tensor = Mimir::TypedTensor::fromFloat32(source, {5}, Mimir::DType::F32);
+        const auto restored = tensor.toFloat32();
+        if (std::memcmp(source.data(), restored.data(), source.size() * sizeof(float)))
+            throw std::runtime_error("F32 round trip changed scalar bits");
+        tensor.values<float>()[2] = 7.0f;
+        if (source[2] != 1.25f || restored[2] != 1.25f)
+            throw std::runtime_error("F32 conversion aliases its source");
+    }
+
+    {
+        auto empty = Mimir::TypedTensor::fromFloat32({}, {2,0,3}, Mimir::DType::F32);
+        if (empty.numel() != 0 || !empty.toFloat32().empty()) return 8;
+        auto scalar = Mimir::TypedTensor::fromFloat32({2.5f}, {}, Mimir::DType::F32);
+        if (scalar.numel() != 1 || scalar.get(0) != 2.5) return 9;
+        for (const auto& shape : {std::vector<int>{-1}, std::vector<int>{2}}) {
+            bool rejected = false;
+            try { (void)Mimir::TypedTensor::fromFloat32({1.0f}, shape, Mimir::DType::F32); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            if (!rejected) return 10;
+        }
+    }
+
     CpuRuntime runtime;
     RuntimeConfig runtime_config;
     runtime_config.backend = "CPU";

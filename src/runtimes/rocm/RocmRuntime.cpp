@@ -13,6 +13,8 @@
 #include <cmath>
 #include <cstddef>
 #include <new>
+#include <mutex>
+#include <array>
 #include <vector>
 
 #ifdef ENABLE_ROCM
@@ -78,6 +80,7 @@ struct RocmRuntime::Impl {
         }
 
         bool alloc(size_t nbytes) {
+            if (nbytes && ptr && nbytes <= bytes) return true;
             reset();
             if (nbytes == 0) return true;
             if (hipMalloc(&ptr, nbytes) != hipSuccess) {
@@ -112,6 +115,11 @@ struct RocmRuntime::Impl {
         }
     };
 
+    // Scratch is shared by consecutive Linear calls, never by tensor identity:
+    // parameters are uploaded every time, including external in-place updates.
+    std::array<DeviceBuf, 5> linear_scratch;
+    std::mutex linear_scratch_mutex;
+    size_t ones_ready_count = 0;
     CachedBuf device_bias;
     CachedBuf device_ones;
     std::vector<float> host_ones;
@@ -565,9 +573,10 @@ bool RocmRuntime::linearForward(
     const size_t bytes_w = static_cast<size_t>(out_f) * static_cast<size_t>(in_f) * sizeof(float);
     const size_t bytes_out = static_cast<size_t>(batch) * static_cast<size_t>(out_f) * sizeof(float);
 
-    Impl::DeviceBuf d_in;
-    Impl::DeviceBuf d_w;
-    Impl::DeviceBuf d_out;
+    std::lock_guard<std::mutex> scratch_lock(impl_->linear_scratch_mutex);
+    auto& d_in = impl_->linear_scratch[0];
+    auto& d_w = impl_->linear_scratch[1];
+    auto& d_out = impl_->linear_scratch[2];
 
     if (!d_in.alloc(bytes_in)) return false;
     if (!d_w.alloc(bytes_w)) return false;
@@ -603,11 +612,18 @@ bool RocmRuntime::linearForward(
         if (!impl_->device_bias.ensure(static_cast<size_t>(out_f))) return false;
         if (!impl_->device_bias.buf.copyFromHost(bias_or_null, static_cast<size_t>(out_f) * sizeof(float))) return false;
 
+        // A failed growth may have released the old allocation. Invalidate the
+        // upload marker before ensure(), so a later smaller call reinitializes it.
+        if (impl_->device_ones.count != static_cast<size_t>(batch) || !impl_->device_ones.buf.ptr)
+            impl_->ones_ready_count = 0;
         if (!impl_->device_ones.ensure(static_cast<size_t>(batch))) return false;
         if (static_cast<int>(impl_->host_ones.size()) != batch) {
             impl_->host_ones.assign(static_cast<size_t>(batch), 1.0f);
         }
-        if (!impl_->device_ones.buf.copyFromHost(impl_->host_ones.data(), static_cast<size_t>(batch) * sizeof(float))) return false;
+        if (impl_->ones_ready_count != static_cast<size_t>(batch)) {
+            if (!impl_->device_ones.buf.copyFromHost(impl_->host_ones.data(), static_cast<size_t>(batch) * sizeof(float))) return false;
+            impl_->ones_ready_count = static_cast<size_t>(batch);
+        }
 
         const float beta1 = 1.0f;
         const int k = 1;
@@ -631,10 +647,8 @@ bool RocmRuntime::linearForward(
         }
     }
 
-    if (hipDeviceSynchronize() != hipSuccess) {
-        return false;
-    }
-
+    // copyToHost is blocking and orders the preceding GEMMs; an additional
+    // device-wide synchronization would also stall unrelated work.
     return d_out.copyToHost(output, bytes_out);
 #endif
 }

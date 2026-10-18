@@ -26,6 +26,8 @@ int keyCode(int k) {
 int mods(Qt::KeyboardModifiers m) { return (m.testFlag(Qt::ControlModifier)?1:0)|(m.testFlag(Qt::ShiftModifier)?2:0)|(m.testFlag(Qt::AltModifier)?4:0)|(m.testFlag(Qt::MetaModifier)?8:0); }
 class Canvas final : public QWidget {
     Frame frame_; Scene scene_; QTimer timer_;
+    mimir::viz::qt::ImageCache images_;
+    int cursor_=-1;
     void mouse(QMouseEvent* e,int type) {
         emitEvent(Event{type,int(e->position().x()),int(e->position().y()),e->button()==Qt::RightButton?1:e->button()==Qt::MiddleButton?2:0});
     }
@@ -33,13 +35,18 @@ public:
     Canvas(const char* title) {
         (void)title; setMouseTracking(true); setFocusPolicy(Qt::StrongFocus);
         resize(800,600);
+        setAttribute(Qt::WA_OpaquePaintEvent);
         connect(&timer_,&QTimer::timeout,this,[this] {
             if(ended) { QApplication::quit(); return; }
-            if(takeFrame(frame_)) {
-                scene_=Scene::parse(frame_.scene);
-                setFixedSize(int(frame_.width),int(frame_.height));
+            if(takeFrame(frame_,scene_)) {
+                if(size()!=QSize(int(frame_.width),int(frame_.height)))
+                    setFixedSize(int(frame_.width),int(frame_.height));
                 const Qt::CursorShape cursors[]={Qt::ArrowCursor,Qt::PointingHandCursor,Qt::CrossCursor,Qt::SizeFDiagCursor};
-                setCursor(cursors[frame_.cursor<4?frame_.cursor:0]); update();
+                if(cursor_!=int(frame_.cursor)) {
+                    cursor_=int(frame_.cursor);
+                    setCursor(cursors[frame_.cursor<4?frame_.cursor:0]);
+                }
+                update();
             }
         }); timer_.start(16);
     }
@@ -47,10 +54,11 @@ protected:
     bool focusNextPrevChild(bool) override { return false; }
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
-        if(!scene_.is_null()) mimir::viz::qt::render(p,scene_,frame_.width,frame_.height);
+        if(!scene_.is_null()) mimir::viz::qt::render(p,scene_,frame_.width,frame_.height,&images_);
+        else p.fillRect(rect(),QColor(32,36,43));
     }
     void mouseMoveEvent(QMouseEvent* e) override { mouse(e,Move); }
-    void mousePressEvent(QMouseEvent* e) override { mouse(e,Down); }
+    void mousePressEvent(QMouseEvent* e) override { setFocus(Qt::MouseFocusReason); mouse(e,Down); }
     void mouseReleaseEvent(QMouseEvent* e) override { mouse(e,Up); }
     void wheelEvent(QWheelEvent* e) override { emitEvent(Event{Wheel,int(e->position().x()),int(e->position().y()),0,0,float(e->angleDelta().y())/120.f}); }
     void keyPressEvent(QKeyEvent* e) override {
@@ -72,12 +80,13 @@ public:
         auto* toolbar=addToolBar("Workspace");toolbar->setMovable(false);toolbar->setFixedHeight(34);
         const std::pair<const char*,int> actions[]={{"Aide",'H'},{"Propriétés",'C'},{"Graphe",'N'},{"Capture",'E'},{"Actualiser",'R'}};
         for(const auto& action:actions){auto* button=toolbar->addAction(QString::fromUtf8(action.first));
+            button->setToolTip(QString::fromUtf8(action.first)+" ("+QChar(action.second)+")");
             connect(button,&QAction::triggered,this,[canvas,key=action.second]{emitEvent(Event{KeyDown,0,0,key});emitEvent(Event{KeyUp,0,0,key});canvas->setFocus();});}
     }
 };
 int main(int argc,char** argv) {
     QApplication app(argc,argv);app.setStyle(QStyleFactory::create("Fusion"));
-    app.setStyleSheet("QWidget {background:#282828;color:#d4d4d4;font-size:12px;} QToolBar {background:#303030;border:0;border-bottom:1px solid #171717;spacing:3px;} QToolButton {border:1px solid transparent;border-radius:3px;padding:4px 10px;} QToolButton:hover {background:#484848;border-color:#555;} QToolButton:focus {border-color:#e89144;}");
+    app.setStyleSheet("QWidget {background:#20242b;color:#dfe5ee;font-size:12px;} QToolBar {background:#282d36;border:0;border-bottom:1px solid #101318;spacing:5px;padding:0 5px;} QToolButton {background:#313843;border:1px solid #4d5562;border-radius:5px;padding:3px 8px;color:#dfe5ee;} QToolButton:hover {background:#3e4b5c;border-color:#7e97b2;} QToolButton:pressed {background:#26394d;border-color:#6e9bc5;} QToolButton:focus {border-color:#80b4e9;} QToolTip {background:#202b38;color:#e6edf7;border:1px solid #546b84;padding:6px;}");
     Workbench workbench(argc>1?argv[1]:"Mímir Viz");workbench.show();
     emitEvent(Event{sceneProtocolHandshake}); std::thread reader(readFrames);
     int result=app.exec(); ended=true; shutdown(STDIN_FILENO,SHUT_RDWR); reader.join(); return result;
