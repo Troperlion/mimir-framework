@@ -1,3 +1,6 @@
+local Help = dofile(ROOTWORK.."/scripts/modules/help_cli.lua")
+Help.auto_exit_help()
+
 -- Smoke test: VAEConv avec blocs ResNet à la place de l'attention.
 --
 -- Usage:
@@ -32,10 +35,9 @@ cfg.latent_w = cfg.latent_w or math.max(1, math.floor(cfg.image_w / 4))
 cfg.latent_c = cfg.latent_c or 256
 cfg.base_channels = cfg.base_channels or 32
 
--- Réutilise les flags historiques: use_attention => active maintenant les blocs ResNet.
-cfg.use_attention = true
+cfg.resnet = true
 -- Désactive SelfAttention: on veut tester ResNet seul.
-cfg.use_attn = false
+cfg.attention = false
 -- Gate assez haut pour injecter un bloc au latent (16x16=256)
 -- + un bloc sur la première upsample (32x32=1024) et skip au-delà.
 cfg.resnet_max_tokens = 1024
@@ -53,8 +55,8 @@ assert(latent_dim > 0, "latent_dim must be > 0")
 
 logx(string.format("[test_vae_conv_resnet_smoke] image=%dx%dx%d latent=%dx%dx%d base=%d", cfg.image_w, cfg.image_h, cfg.image_c, cfg.latent_h, cfg.latent_w, cfg.latent_c, cfg.base_channels))
 logx(string.format("[test_vae_conv_resnet_smoke] resnet=%s attn=%s heads=%d max_tokens=%d",
-  tostring(cfg.use_attention),
-  tostring(cfg.use_attn),
+  tostring(cfg.resnet),
+  tostring(cfg.attention),
   tonumber(cfg.attn_heads or 0) or 0,
   tonumber(cfg.resnet_max_tokens or 0) or 0))
 

@@ -1,20 +1,12 @@
 # Organisation du dépôt
 
-## Pour qui
-
-Débutant qui découvre le dépôt.
-
-## Objectif
-
 Trouver vite où modifier selon le besoin (scripts, modèle, runtime, docs).
 
-## Avant de commencer
+**Public concerné :** Débutant qui découvre le dépôt.
 
-Aucun prérequis technique fort.
-
-## Résultat attendu
-
-Tu navigues le projet sans te perdre.
+> **Prérequis**
+>
+> Aucun prérequis technique fort.
 
 
 Repères utiles pour naviguer vite.
@@ -43,3 +35,9 @@ Repères utiles pour naviguer vite.
 - Exemples : `scripts/examples/`
 - Entraînement : `scripts/training/`
 - Modules partagés : `scripts/modules/` (args, tokenizer base, resume checkpoint, etc.)
+
+## Étapes suivantes
+
+- [Page précédente : CLI (binaire `mimir`)](03-CLI.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Smoketest (5 minutes)](05-Smoketest.md)

@@ -52,6 +52,61 @@ BasicMLPModel::StepStats BasicMLPModel::trainStep(const std::vector<float>& inpu
     return stats;
 }
 
+std::optional<Model::TrainStepResult> BasicMLPModel::trainStep(const TrainStepRequest& request) {
+    if (request.optimizer == nullptr || request.target == nullptr) {
+        return std::nullopt;
+    }
+
+    const std::vector<float>* input = nullptr;
+    if (const auto it = request.float_inputs.find("__input__"); it != request.float_inputs.end()) {
+        input = it->second;
+    } else if (const auto it = request.float_inputs.find("input"); it != request.float_inputs.end()) {
+        input = it->second;
+    }
+    if (input == nullptr) {
+        return std::nullopt;
+    }
+
+    if (request.mode == TrainStepMode::Optimize) {
+        const StepStats stats = trainStep(*input, *request.target, *request.optimizer, request.learning_rate);
+        TrainStepResult result;
+        result.loss = stats.loss;
+        result.grad_norm = stats.grad_norm;
+        result.grad_max_abs = stats.grad_max_abs;
+        result.metrics["mse"] = stats.loss;
+        return result;
+    }
+
+    if (layers.empty()) {
+        throw std::runtime_error("BasicMLPModel::trainStep: model not built");
+    }
+    if (layer_weight_blocks.empty()) {
+        throw std::runtime_error("BasicMLPModel::trainStep: weights not allocated (call allocateParams/initWeights)");
+    }
+
+    const std::vector<float>& prediction = forwardPassView(*input, true);
+    TrainStepResult result;
+    result.loss = computeLoss(prediction, *request.target, "mse");
+    result.metrics["mse"] = result.loss;
+
+    static thread_local std::vector<float> loss_grad;
+    computeLossGradientInto(prediction, *request.target, loss_grad, "mse");
+    if (request.grad_scale != 1.0f) {
+        for (float& gradient : loss_grad) gradient *= request.grad_scale;
+    }
+    backwardPass(loss_grad);
+
+    double sum_sq = 0.0;
+    for (const auto& layer : layers) {
+        for (float gradient : layer.grad_weights) {
+            sum_sq += static_cast<double>(gradient) * static_cast<double>(gradient);
+            result.grad_max_abs = std::max(result.grad_max_abs, std::abs(gradient));
+        }
+    }
+    result.grad_norm = static_cast<float>(std::sqrt(sum_sq));
+    return result;
+}
+
 void BasicMLPModel::buildInto(Model& model, const Config& cfg) {
     model.getMutableLayers().clear();
     model.setModelName("BasicMLPModel");

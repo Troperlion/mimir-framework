@@ -202,17 +202,33 @@ jobs:
         run: |
           "$VCPKG_ROOT/vcpkg" install lua lz4 --triplet x64-mingw-dynamic
 
-      - name: Configure (CMake preset windows-cross-tests)
+      - name: Configure (CMake explicit cross build)
         run: |
-          cmake --preset windows-cross-tests
+          cmake -S . -B build_win_cross_tests \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
+            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
+            -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-mingw-dynamic \
+            -DVCPKG_APPLOCAL_DEPS=OFF \
+            -DMIMIR_ENABLE_TESTS=ON \
+            -DENABLE_VULKAN=OFF \
+            -DENABLE_OPENCL=OFF \
+            -DENABLE_SFML=OFF \
+            -DENABLE_FFMPEG=OFF \
+            -DENABLE_OPENMP=ON \
+            -DENABLE_LZ4=ON
 
-      - name: Build (CMake preset windows-cross-tests)
+      - name: Build (CMake explicit cross build)
         run: |
-          cmake --build --preset build-windows-cross-tests
+          cmake --build build_win_cross_tests
 
       - name: Verify Windows binaries
         run: |
-          test -f bin/mimir.exe
+          test -f build_win_cross_tests/bin/mimir.exe
           test -f build_win_cross_tests/Tests/BridgeTest.API.exe
 
       - name: Upload cross-windows artifacts
@@ -220,5 +236,5 @@ jobs:
         with:
           name: windows-cross-artifacts-v${{ steps.version.outputs.VERSION }}
           path: |
-            bin/mimir.exe
+            build_win_cross_tests/bin/mimir.exe
             build_win_cross_tests/Tests/*.exe

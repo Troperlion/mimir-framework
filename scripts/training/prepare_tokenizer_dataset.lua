@@ -16,8 +16,8 @@
 --   --freeze true          (défaut: true) -> set_max_vocab(vocab_size)
 --   --require-base true    (si true: fail si tokenizer absent)
 
-local Args = dofile("scripts/modules/args.lua")
-local BaseTok = dofile("scripts/modules/base_tokenizer.lua")
+local Args = dofile(ROOTWORK.."/scripts/modules/args.lua")
+local BaseTok = dofile(ROOTWORK.."/scripts/modules/base_tokenizer.lua")
 
 local opts = Args.parse(arg) or {}
 

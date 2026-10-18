@@ -1,3 +1,5 @@
+#include "runtimes/tpu/TpuRuntime.hpp"
+#include "runtimes/fpga/FpgaSession.hpp"
 #include "LuaScripting.hpp"
 #include "Models/Registry/ModelArchitectures.hpp"
 #include "Serialization/Serialization.hpp"
@@ -7,8 +9,15 @@
 #include "MemoryGuard.hpp"
 #include "DynamicTensorAllocator.hpp"
 #include "AsyncMonitor.hpp"
-#include "Models/Diffusion/PonyXLDDPMModel.hpp"
 #include "Helpers.hpp"
+#include "runtimes/LayerOps.hpp"
+#include "runtimes/cpu/CpuRuntime.hpp"
+#include "runtimes/cuda/CudaRuntime.hpp"
+#include "runtimes/rocm/RocmRuntime.hpp"
+#include "runtimes/opencl/OpenCLRuntime.hpp"
+#include "runtimes/vulkan/VulkanRuntime.hpp"
+#include <atomic>
+#include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -18,9 +27,65 @@
 #include <cmath>
 #include <filesystem>
 #include <iomanip>
+#include <unordered_map>
 #include <unordered_set>
 #include <type_traits>
 #include <utility>
+#include <thread>
+
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
+namespace {
+
+bool isInteractiveStderr() {
+#ifdef _WIN32
+    return _isatty(_fileno(stderr)) != 0;
+#else
+    return isatty(fileno(stderr)) != 0;
+#endif
+}
+
+class ModelInitAnimation {
+public:
+    ModelInitAnimation(const std::string& label, bool allow_animation)
+        : label_(label), enabled_(allow_animation && isInteractiveStderr()) {
+        if (!enabled_) return;
+        running_.store(true, std::memory_order_release);
+        worker_ = std::thread([this]() {
+            static constexpr char frames[] = {'|', '/', '-', '\\'};
+            size_t frame = 0;
+            while (running_.load(std::memory_order_acquire)) {
+                std::cerr << '\r' << label_ << " [" << frames[frame++ % 4] << "]" << std::flush;
+                std::this_thread::sleep_for(std::chrono::milliseconds(90));
+            }
+        });
+    }
+
+    ~ModelInitAnimation() {
+        finish(false);
+    }
+
+    void finish(bool success) {
+        if (!enabled_) return;
+        enabled_ = false;
+        running_.store(false, std::memory_order_release);
+        if (worker_.joinable()) worker_.join();
+        std::cerr << "\r\033[2K" << label_ << (success ? " [ok]" : " [erreur]") << std::endl;
+    }
+
+private:
+    std::string label_;
+    bool enabled_ = false;
+    std::atomic<bool> running_{false};
+    std::thread worker_;
+};
+
+} // namespace
+
 int LuaScripting::lua_allocateParams(lua_State* L) {
     auto& ctx = LuaContext::getInstance();
     
@@ -30,8 +95,11 @@ int LuaScripting::lua_allocateParams(lua_State* L) {
         return 2;
     }
     
+    ModelInitAnimation animation(
+        "Allocation du modele", !ctx.asyncMonitor || ctx.asyncMonitor->getHtop() == nullptr);
     try {
         ctx.currentModel->allocateParams();
+        animation.finish(true);
         size_t count = ctx.currentModel->totalParamCount();
         ctx.addLog("Paramètres alloués: " + std::to_string(count));
         
@@ -57,8 +125,11 @@ int LuaScripting::lua_initWeights(lua_State* L) {
     const char* method = luaL_optstring(L, 1, "he");
     unsigned int seed = luaL_optinteger(L, 2, 0);
     
+    ModelInitAnimation animation(
+        "Initialisation des poids", !ctx.asyncMonitor || ctx.asyncMonitor->getHtop() == nullptr);
     try {
         ctx.currentModel->initializeWeights(method, seed);
+        animation.finish(true);
         ctx.addLog("Poids initialisés: méthode=" + std::string(method));
         
         lua_pushboolean(L, true);
@@ -106,7 +177,7 @@ int LuaScripting::lua_getModelLayers(lua_State* L) {
         lua_setfield(L, -2, "name");
         lua_pushstring(L, la.type.c_str());
         lua_setfield(L, -2, "type");
-        lua_pushinteger(L, static_cast<lua_Integer>(la.getWeightsSize()));
+        lua_pushinteger(L, static_cast<lua_Integer>(la.params_count));
         lua_setfield(L, -2, "param_count");
         lua_pushstring(L, la.output.c_str());
         lua_setfield(L, -2, "output");
@@ -132,10 +203,72 @@ int LuaScripting::lua_getModelLayers(lua_State* L) {
         lua_pushinteger(L, la.vocab_size);    lua_setfield(L, -2, "vocab_size");
         lua_pushinteger(L, la.input_height);  lua_setfield(L, -2, "input_height");
         lua_pushinteger(L, la.input_width);   lua_setfield(L, -2, "input_width");
+        lua_pushinteger(L, la.kernel_h);      lua_setfield(L, -2, "kernel_h");
+        lua_pushinteger(L, la.kernel_w);      lua_setfield(L, -2, "kernel_w");
+        lua_pushinteger(L, la.stride_h);      lua_setfield(L, -2, "stride_h");
+        lua_pushinteger(L, la.stride_w);      lua_setfield(L, -2, "stride_w");
+        lua_pushinteger(L, la.pad_h);         lua_setfield(L, -2, "pad_h");
+        lua_pushinteger(L, la.pad_w);         lua_setfield(L, -2, "pad_w");
+        lua_pushinteger(L, la.dilation);      lua_setfield(L, -2, "dilation");
+        lua_pushinteger(L, la.groups);        lua_setfield(L, -2, "groups");
+        lua_pushnumber(L, la.eps);            lua_setfield(L, -2, "eps");
+        lua_pushinteger(L, la.num_groups);    lua_setfield(L, -2, "num_groups");
+        lua_pushnumber(L, la.dropout_p);      lua_setfield(L, -2, "dropout_p");
+        lua_pushinteger(L, la.axis);          lua_setfield(L, -2, "axis");
+        lua_pushinteger(L, la.skipInputIndex()); lua_setfield(L, -2, "skip_input_index");
+        lua_pushinteger(L, la.concat_axis);   lua_setfield(L, -2, "concat_axis");
+        lua_pushinteger(L, la.split_axis);    lua_setfield(L, -2, "split_axis");
+        lua_pushinteger(L, la.num_splits);    lua_setfield(L, -2, "num_splits");
+        lua_pushnumber(L, la.scale_h);        lua_setfield(L, -2, "scale_h");
+        lua_pushnumber(L, la.scale_w);        lua_setfield(L, -2, "scale_w");
+        lua_pushinteger(L, la.out_h);         lua_setfield(L, -2, "out_h");
+        lua_pushinteger(L, la.out_w);         lua_setfield(L, -2, "out_w");
+        lua_pushinteger(L, la.head_dim);      lua_setfield(L, -2, "head_dim");
+        lua_pushboolean(L, la.causal);        lua_setfield(L, -2, "causal");
+        lua_pushboolean(L, la.use_bias);      lua_setfield(L, -2, "use_bias");
+        lua_pushnumber(L, la.nms_iou_threshold);
+        lua_setfield(L, -2, "nms_iou_threshold");
+        lua_pushnumber(L, la.nms_score_threshold);
+        lua_setfield(L, -2, "nms_score_threshold");
+        lua_pushinteger(L, la.nms_max_detections);
+        lua_setfield(L, -2, "nms_max_detections");
+        lua_pushboolean(L, la.nms_class_agnostic);
+        lua_setfield(L, -2, "nms_class_agnostic");
+
+        auto push_int_array = [L](const std::vector<int>& values,
+                                  const char* field) {
+            lua_createtable(L, static_cast<int>(values.size()), 0);
+            for (size_t j = 0; j < values.size(); ++j) {
+                lua_pushinteger(L, values[j]);
+                lua_rawseti(L, -2, static_cast<int>(j + 1));
+            }
+            lua_setfield(L, -2, field);
+        };
+        push_int_array(la.target_shape, "target_shape");
+        push_int_array(la.permute_dims, "permute_dims");
+        push_int_array(la.split_sizes, "split_sizes");
 
         lua_rawseti(L, -2, static_cast<int>(i + 1));
     }
     return 1;
+}
+
+int LuaScripting::lua_clearModelLayers(lua_State* L) {
+    auto& ctx = LuaContext::getInstance();
+    if (!ctx.currentModel) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, "Aucun modèle créé");
+        return 2;
+    }
+
+    auto& layers = ctx.currentModel->getMutableLayers();
+    const lua_Integer old_count = static_cast<lua_Integer>(layers.size());
+    layers.clear();
+    ctx.currentModel->clearVizTaps();
+
+    lua_pushboolean(L, true);
+    lua_pushinteger(L, old_count);
+    return 2;
 }
 
 int LuaScripting::lua_pushLayer(lua_State* L) {
@@ -149,11 +282,123 @@ int LuaScripting::lua_pushLayer(lua_State* L) {
     
     const char* name = luaL_checkstring(L, 1);
     const char* type = luaL_checkstring(L, 2);
-    size_t params_count = luaL_checkinteger(L, 3);
-    
-    ctx.currentModel->push(name, type, params_count);
-    lua_pushboolean(L, true);
-    return 1;
+    const lua_Integer raw_params_count = luaL_checkinteger(L, 3);
+    if (raw_params_count < 0) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, "params_count must be >= 0");
+        return 2;
+    }
+
+    try {
+        ctx.currentModel->push(
+            name, type, static_cast<size_t>(raw_params_count));
+
+        // Argument 4 optionnel: paramètres propres au nœud MPK. Cela évite
+        // d'aplatir une configuration de graphe dans modelConfig.
+        if (lua_istable(L, 4)) {
+            Layer* layer = ctx.currentModel->getLayerByName(name);
+            if (!layer) throw std::runtime_error("new layer not found");
+            const json p = luaTableToJson(L, 4);
+            if (!p.is_object()) {
+                throw std::runtime_error("layer params must be a map");
+            }
+
+            auto set_int = [&p](const char* key, int& dst) {
+                if (p.contains(key)) dst = p.at(key).get<int>();
+            };
+            auto set_float = [&p](const char* key, float& dst) {
+                if (p.contains(key)) dst = p.at(key).get<float>();
+            };
+            auto set_bool = [&p](const char* key, bool& dst) {
+                if (p.contains(key)) dst = p.at(key).get<bool>();
+            };
+            auto set_ints = [&p](const char* key, std::vector<int>& dst) {
+                if (p.contains(key)) dst = p.at(key).get<std::vector<int>>();
+            };
+
+            set_int("in_features", layer->in_features);
+            set_int("out_features", layer->out_features);
+            set_int("in_channels", layer->in_channels);
+            set_int("out_channels", layer->out_channels);
+            set_int("input_height", layer->input_height);
+            set_int("input_width", layer->input_width);
+            set_int("output_height", layer->output_height);
+            set_int("output_width", layer->output_width);
+            set_int("kernel_size", layer->kernel_size);
+            set_int("kernel_h", layer->kernel_h);
+            set_int("kernel_w", layer->kernel_w);
+            set_int("stride", layer->stride);
+            set_int("stride_h", layer->stride_h);
+            set_int("stride_w", layer->stride_w);
+            set_int("padding", layer->padding);
+            set_int("pad_h", layer->pad_h);
+            set_int("pad_w", layer->pad_w);
+            set_int("dilation", layer->dilation);
+            set_int("dilation_h", layer->dilation_h);
+            set_int("dilation_w", layer->dilation_w);
+            set_int("groups", layer->groups);
+            set_float("eps", layer->eps);
+            set_int("num_groups", layer->num_groups);
+            set_float("momentum", layer->momentum);
+            set_bool("affine", layer->affine);
+            set_bool("track_running_stats", layer->track_running_stats);
+            set_float("dropout_p", layer->dropout_p);
+            set_int("vocab_size", layer->vocab_size);
+            set_int("embed_dim", layer->embed_dim);
+            set_int("padding_idx", layer->padding_idx);
+            set_int("axis", layer->axis);
+            set_bool("use_mask", layer->use_mask);
+            set_ints("target_shape", layer->target_shape);
+            set_ints("shape", layer->shape);
+            set_ints("permute_dims", layer->permute_dims);
+            set_int("concat_axis", layer->concat_axis);
+            set_int("skip_input_index", layer->skip_input_index);
+            set_int("num_splits", layer->num_splits);
+            set_ints("split_sizes", layer->split_sizes);
+            set_int("split_axis", layer->split_axis);
+            set_float("scale_h", layer->scale_h);
+            set_float("scale_w", layer->scale_w);
+            set_int("out_h", layer->out_h);
+            set_int("out_w", layer->out_w);
+            set_int("output_h", layer->out_h);
+            set_int("output_w", layer->out_w);
+            set_int("num_heads", layer->num_heads);
+            set_int("head_dim", layer->head_dim);
+            set_int("seq_len", layer->seq_len);
+            set_bool("causal", layer->causal);
+            set_float("alpha", layer->alpha);
+            set_float("negative_slope", layer->negative_slope);
+            set_int("squeeze_dim", layer->squeeze_dim);
+            set_int("unsqueeze_dim", layer->unsqueeze_dim);
+            set_int("num_chunks", layer->num_chunks);
+            set_int("stack_axis", layer->stack_axis);
+            set_bool("use_bias", layer->use_bias);
+            set_bool("trainable_parameter", layer->trainable_parameter);
+
+            set_float("nms_iou_threshold", layer->nms_iou_threshold);
+            set_float("iou_threshold", layer->nms_iou_threshold);
+            set_float("nms_score_threshold", layer->nms_score_threshold);
+            set_float("score_threshold", layer->nms_score_threshold);
+            set_int("nms_max_detections", layer->nms_max_detections);
+            set_int("max_detections", layer->nms_max_detections);
+            set_bool("nms_class_agnostic", layer->nms_class_agnostic);
+            set_bool("class_agnostic", layer->nms_class_agnostic);
+
+            if (p.contains("axis")) {
+                const int axis = p.at("axis").get<int>();
+                layer->concat_axis = axis;
+                layer->split_axis = axis;
+                layer->stack_axis = axis;
+            }
+        }
+
+        lua_pushboolean(L, true);
+        return 1;
+    } catch (const std::exception& e) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, e.what());
+        return 2;
+    }
 }
 
 int LuaScripting::lua_setLayerIO(lua_State* L) {
@@ -210,9 +455,15 @@ int LuaScripting::lua_forwardPass(lua_State* L) {
         return 2;
     }
     
+    if (ctx.asyncMonitor) {
+        ctx.asyncMonitor->bindSkipConnectionControl(ctx.currentModel->skipConnectionControl());
+        ctx.currentModel->publishRuntimeConfiguration();
+        ctx.asyncMonitor->bindRuntimeConfiguration(ctx.currentModel->runtimeConfiguration());
+    }
+
     // Argument 1: input
     // - soit un tableau (array) de floats/ints
-    // - soit une table { __input__ = <array> }
+    // - soit une table nommée { __input__ = <array_float>, text_ids = <array_int> }
     luaL_checktype(L, 1, LUA_TTABLE);
     
     // Argument 2 (optionnel): training (bool, défaut: true)
@@ -242,12 +493,91 @@ int LuaScripting::lua_forwardPass(lua_State* L) {
             bf.h = f.h;
             bf.channels = f.channels;
             bf.pixels_real = std::move(f.pixels_real);
+            bf.heatmap_kind = f.heatmap_kind;
+            bf.tensor_info = std::move(f.tensor_info);
+            bf.tensor_values = std::move(f.tensor_values);
+            bf.tensor_indices = std::move(f.tensor_indices);
+            bf.tensor_sample_channels = f.tensor_sample_channels;
                             bf.label = std::move(f.label);
             frames.push_back(std::move(bf));
         }
-        ctx.asyncMonitor->setLayerBlockImages(frames);
+        ctx.asyncMonitor->setLayerBlockImages(std::move(frames));
     };
     
+    // Support générique des entrées nommées (forwardPassNamedView):
+    // { boxes={...}, scores={...}, classes={...} }, mais aussi les contrats
+    // historiques { __input__={...}, text_ids={...} }.
+    bool has_named_tensors = false;
+    if (lua_rawlen(L, 1) == 0) {
+        lua_pushnil(L);
+        while (lua_next(L, 1) != 0) {
+            if (lua_type(L, -2) == LUA_TSTRING && lua_istable(L, -1)) {
+                has_named_tensors = true;
+            }
+            lua_pop(L, 1);
+            if (has_named_tensors) {
+                lua_pop(L, 1);
+                break;
+            }
+        }
+    }
+
+    if (has_named_tensors) {
+        std::unordered_map<std::string, std::vector<float>> fin;
+        std::unordered_map<std::string, std::vector<int>> iin;
+
+        lua_pushnil(L);
+        while (lua_next(L, 1) != 0) {
+            if (lua_type(L, -2) == LUA_TSTRING && lua_istable(L, -1)) {
+                const std::string key = lua_tostring(L, -2);
+                const size_t count = lua_rawlen(L, -1);
+                if (key == "text_ids") {
+                    std::vector<int> values;
+                    values.reserve(count);
+                    for (size_t i = 1; i <= count; ++i) {
+                        lua_rawgeti(L, -1, static_cast<lua_Integer>(i));
+                        values.push_back(static_cast<int>(lua_tointeger(L, -1)));
+                        lua_pop(L, 1);
+                    }
+                    iin[key] = std::move(values);
+                } else {
+                    std::vector<float> values;
+                    values.reserve(count);
+                    for (size_t i = 1; i <= count; ++i) {
+                        lua_rawgeti(L, -1, static_cast<lua_Integer>(i));
+                        values.push_back(static_cast<float>(lua_tonumber(L, -1)));
+                        lua_pop(L, 1);
+                    }
+                    fin[key] = std::move(values);
+                }
+            }
+            lua_pop(L, 1);
+        }
+
+        if (fin.empty() && iin.empty()) {
+            lua_pushnil(L);
+            lua_pushstring(L, "Model.forward(named): expected named tensor arrays");
+            return 2;
+        }
+
+        try {
+            const std::vector<float>& output = ctx.currentModel->forwardPassNamedView(fin, iin, training);
+
+            maybe_push_viz_taps();
+
+            lua_newtable(L);
+            for (size_t i = 0; i < output.size(); ++i) {
+                lua_pushnumber(L, output[i]);
+                lua_rawseti(L, -2, i + 1);
+            }
+            return 1;
+        } catch (const std::exception& e) {
+            lua_pushnil(L);
+            lua_pushstring(L, e.what());
+            return 2;
+        }
+    }
+
     // Résoudre le tableau "array" à lire.
     // Si arg1 est une map {__input__=...}, on lit arg1.__input__.
     int input_index = 1;
@@ -439,18 +769,29 @@ int LuaScripting::lua_optimizerStep(lua_State* L) {
     const char* opt_type = luaL_optstring(L, 2, "adamw");
     
     try {
-        Optimizer opt;
-        opt.initial_lr = lr;
-        
-        if (std::string(opt_type) == "sgd") {
-            opt.type = OptimizerType::SGD;
-        } else if (std::string(opt_type) == "adam") {
-            opt.type = OptimizerType::ADAM;
-        } else {
-            opt.type = OptimizerType::ADAMW;
+        // Keep moments and step count across Lua calls and checkpoint saves.
+        if (!ctx.currentModel->getSerializedOptimizer()) {
+            Optimizer opt;
+            opt.initial_lr = lr;
+            if (!optimizerTypeFromString(opt_type, opt.type)) {
+                throw std::runtime_error("optimiseur inconnu: " + std::string(opt_type));
+            }
+            const auto& cfg = ctx.currentModel->modelConfig;
+            configureOptimizerFromJson(opt, cfg);
+            optimizerTypeFromString(opt_type, opt.type);
+            ctx.currentModel->setSerializedOptimizer(std::move(opt));
         }
-        
-        ctx.currentModel->optimizerStep(opt, lr, nullptr);
+        Optimizer* opt = ctx.currentModel->getMutableSerializedOptimizer();
+        if (!opt) throw std::runtime_error("optimizer state unavailable");
+        opt->initial_lr = lr;
+        if (ctx.asyncMonitor) {
+            ctx.currentModel->publishRuntimeConfiguration(opt);
+            ctx.asyncMonitor->bindRuntimeConfiguration(ctx.currentModel->runtimeConfiguration());
+            ctx.asyncMonitor->updateRuntimeTrainParams(static_cast<float>(lr), opt->warmup_steps, 0, 0, "mse");
+            const auto live = ctx.asyncMonitor->liveTrainParamsSnapshot();
+            if (live.overrides_enabled) { lr = live.lr; opt->initial_lr = live.lr; opt->warmup_steps = live.lr_warmup_steps; }
+        }
+        ctx.currentModel->optimizerStep(*opt, lr, nullptr);
         lua_pushboolean(L, true);
         return 1;
     } catch (const std::exception& e) {
@@ -462,13 +803,23 @@ int LuaScripting::lua_optimizerStep(lua_State* L) {
 
 int LuaScripting::lua_setHardwareAccel(lua_State* L) {
     bool enable = lua_toboolean(L, 1);
-    Model::setHardwareAcceleration(enable);
+    RuntimeLayerOps::setHardwareAcceleration(enable);
     lua_pushboolean(L, true);
     return 1;
 }
 
 int LuaScripting::lua_getHardwareCaps(lua_State* L) {
     lua_newtable(L);
+    const char* tpu_enabled = std::getenv("MIMIR_TPU");
+    TpuRuntime* tpu = nullptr;
+    std::string tpu_error;
+    try { tpu = Mimir::tpuSessionRuntime(); } catch (const std::exception& e) { tpu_error=e.what(); }
+    jsonToLuaTable(L, nlohmann::json{{"enabled",tpu_enabled && std::string(tpu_enabled)=="1"},
+        {"initialized",tpu != nullptr},{"device",tpu?tpu->deviceDescription():""},
+        {"execution","JAX/XLA/PJRT"},{"error",tpu_error}});
+    lua_setfield(L, -2, "tpu");
+    jsonToLuaTable(L, Mimir::fpgaSessionStatus());
+    lua_setfield(L, -2, "fpga");
     
     lua_pushboolean(L, Model::hasAVX2());
     lua_setfield(L, -2, "avx2");
@@ -485,56 +836,235 @@ int LuaScripting::lua_getHardwareCaps(lua_State* L) {
     return 1;
 }
 
+int LuaScripting::lua_setStdoutLogSuppressed(lua_State* L) {
+    auto& ctx = LuaContext::getInstance();
+
+    const int nargs = lua_gettop(L);
+    if (nargs == 0) {
+        lua_pushboolean(L, ctx.suppress_stdout_logs);
+        return 1;
+    }
+
+    const bool enabled = lua_toboolean(L, 1);
+    const bool previous = ctx.suppress_stdout_logs;
+    ctx.suppress_stdout_logs = enabled;
+    Model::setFrameworkLogsSuppressed(enabled);
+
+    lua_pushboolean(L, previous);
+    lua_pushboolean(L, enabled);
+    return 2;
+}
+
 // ============================================================================
-// Layer Operations API (stubs - implémentation complète optionnelle)
+// Layer inspection API (read-only filters on the current model)
 // ============================================================================
 
+namespace {
+
+// A detached snapshot with protected fields, sequence length and iteration.
+static int readonlyWrite(lua_State* L) {
+    return luaL_error(L, "Mimir.Layers: read-only snapshot");
+}
+static int readonlyLength(lua_State* L) {
+    lua_pushinteger(L, static_cast<lua_Integer>(lua_rawlen(L, lua_upvalueindex(1))));
+    return 1;
+}
+static int readonlyNext(lua_State* L) {
+    lua_settop(L, 2);
+    lua_pushvalue(L, 2);
+    return lua_next(L, lua_upvalueindex(1)) ? 2 : 0;
+}
+static int readonlyPairs(lua_State* L) {
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_pushcclosure(L, readonlyNext, 1);
+    lua_pushnil(L);
+    lua_pushnil(L);
+    return 3;
+}
+static void protectSnapshot(lua_State* L) {
+    const int backing = lua_gettop(L);
+    lua_pushnil(L);
+    while (lua_next(L, backing)) {
+        if (lua_istable(L, -1)) {
+            protectSnapshot(L);
+            lua_pushvalue(L, -2);
+            lua_pushvalue(L, -2);
+            lua_rawset(L, backing);
+        }
+        lua_pop(L, 1);
+    }
+    lua_newtable(L); // Empty proxy: every ordinary write reaches __newindex.
+    lua_newtable(L);
+    lua_pushvalue(L, backing); lua_setfield(L, -2, "__index");
+    lua_pushcfunction(L, readonlyWrite); lua_setfield(L, -2, "__newindex");
+    lua_pushvalue(L, backing); lua_pushcclosure(L, readonlyLength, 1); lua_setfield(L, -2, "__len");
+    lua_pushvalue(L, backing); lua_pushcclosure(L, readonlyPairs, 1); lua_setfield(L, -2, "__pairs");
+    lua_pushliteral(L, "read-only"); lua_setfield(L, -2, "__metatable");
+    lua_pushboolean(L, true); lua_setfield(L, -2, "__mimir_layer_snapshot");
+    lua_setmetatable(L, -2);
+    lua_replace(L, backing);
+}
+
+static void pushLuaLayerInfo(lua_State* L, const Layer& la, size_t index) {
+    lua_newtable(L);
+
+    lua_pushinteger(L, static_cast<lua_Integer>(index + 1));
+    lua_setfield(L, -2, "index");
+    lua_pushstring(L, la.name.c_str());
+    lua_setfield(L, -2, "name");
+    lua_pushstring(L, la.type.c_str());
+    lua_setfield(L, -2, "type");
+    lua_pushinteger(L, static_cast<lua_Integer>(la.params_count));
+    lua_setfield(L, -2, "param_count");
+    lua_pushstring(L, la.output.c_str());
+    lua_setfield(L, -2, "output");
+
+    lua_createtable(L, static_cast<int>(la.inputs.size()), 0);
+    for (size_t j = 0; j < la.inputs.size(); ++j) {
+        lua_pushstring(L, la.inputs[j].c_str());
+        lua_rawseti(L, -2, static_cast<int>(j + 1));
+    }
+    lua_setfield(L, -2, "inputs");
+
+    lua_pushinteger(L, la.in_features);   lua_setfield(L, -2, "in_features");
+    lua_pushinteger(L, la.out_features);  lua_setfield(L, -2, "out_features");
+    lua_pushinteger(L, la.in_channels);   lua_setfield(L, -2, "in_channels");
+    lua_pushinteger(L, la.out_channels);  lua_setfield(L, -2, "out_channels");
+    lua_pushinteger(L, la.kernel_size);   lua_setfield(L, -2, "kernel_size");
+    lua_pushinteger(L, la.stride);        lua_setfield(L, -2, "stride");
+    lua_pushinteger(L, la.padding);       lua_setfield(L, -2, "padding");
+    lua_pushinteger(L, la.seq_len);       lua_setfield(L, -2, "seq_len");
+    lua_pushinteger(L, la.embed_dim);     lua_setfield(L, -2, "embed_dim");
+    lua_pushinteger(L, la.num_heads);     lua_setfield(L, -2, "num_heads");
+    lua_pushinteger(L, la.vocab_size);    lua_setfield(L, -2, "vocab_size");
+    lua_pushinteger(L, la.input_height);  lua_setfield(L, -2, "input_height");
+    lua_pushinteger(L, la.input_width);   lua_setfield(L, -2, "input_width");
+}
+
+template <typename Predicate>
+static int pushFilteredLayers(lua_State* L, Predicate predicate) {
+    auto& ctx = LuaContext::getInstance();
+    if (!ctx.currentModel) {
+        lua_newtable(L);
+        protectSnapshot(L);
+        return 1;
+    }
+
+    const auto& layers = ctx.currentModel->getLayers();
+    int out_index = 1;
+    lua_newtable(L);
+    for (size_t i = 0; i < layers.size(); ++i) {
+        const Layer& la = layers[i];
+        if (!predicate(la)) continue;
+        pushLuaLayerInfo(L, la, i);
+        lua_rawseti(L, -2, out_index++);
+    }
+    protectSnapshot(L);
+    return 1;
+}
+
+static int pushLayersByExactType(lua_State* L, const std::string& requested_type) {
+    const std::string normalized = LayerRegistry::normalize_type(requested_type);
+    return pushFilteredLayers(L, [&](const Layer& la) {
+        return LayerRegistry::normalize_type(la.type) == normalized;
+    });
+}
+
+static bool isConv2dLike(const Layer& la) {
+    return la.type == "Conv2d" || la.type == "ConvTranspose2d" || la.type == "DepthwiseConv2d";
+}
+
+static bool isLinearLike(const Layer& la) {
+    return la.type == "Linear" || la.type == "MatMul" || la.type == "BatchMatMul" || la.type == "Bilinear";
+}
+
+static bool isMaxPoolLike(const Layer& la) {
+    return la.type == "MaxPool2d" || la.type == "GlobalMaxPool2d" || la.type == "Pool1d";
+}
+
+static bool isAvgPoolLike(const Layer& la) {
+    return la.type == "AvgPool2d" || la.type == "GlobalAvgPool2d";
+}
+
+static bool isActivationLike(const Layer& la) {
+    static const std::unordered_set<std::string> kActivationTypes = {
+        "ReLU", "GELU", "GEGLU", "SiLU", "LeakyReLU", "Tanh", "Sigmoid",
+        "Softmax", "LogSoftmax", "Swish", "Mish", "Softplus", "HardSigmoid", "HardSwish"
+    };
+    return kActivationTypes.find(la.type) != kActivationTypes.end();
+}
+
+static bool isBatchNormLike(const Layer& la) {
+    return la.type == "BatchNorm2d" || la.type == "InstanceNorm2d";
+}
+
+static bool isLayerNormLike(const Layer& la) {
+    return la.type == "LayerNorm" || la.type == "GroupNorm" || la.type == "RMSNorm";
+}
+
+static bool isAttentionLike(const Layer& la) {
+    return la.type == "Attention" || la.type == "MultiHeadAttention" || la.type == "SelfAttention" || la.type == "CrossAttention";
+}
+
+} // namespace
+
+int LuaScripting::lua_layersAvailable(lua_State* L) {
+    const auto types = LayerRegistry::get_all_supported_types();
+    lua_createtable(L, static_cast<int>(types.size()), 0);
+    for (size_t i = 0; i < types.size(); ++i) {
+        lua_pushstring(L, types[i].c_str());
+        lua_rawseti(L, -2, static_cast<int>(i + 1));
+    }
+    protectSnapshot(L);
+    return 1;
+}
+
+int LuaScripting::lua_layersByType(lua_State* L) {
+    std::string requested_type;
+    if (lua_gettop(L) >= 1 && lua_isstring(L, 1)) {
+        requested_type = lua_tostring(L, 1);
+    } else if (lua_type(L, lua_upvalueindex(1)) == LUA_TSTRING) {
+        requested_type = lua_tostring(L, lua_upvalueindex(1));
+    }
+
+    if (requested_type.empty()) {
+        lua_newtable(L);
+        protectSnapshot(L);
+        return 1;
+    }
+    return pushLayersByExactType(L, requested_type);
+}
+
 int LuaScripting::lua_computeConv2D(lua_State* L) {
-    lua_pushboolean(L, false);
-    lua_pushstring(L, "Non implémenté - utilisez model.forward() à la place");
-    return 2;
+    return pushFilteredLayers(L, isConv2dLike);
 }
 
 int LuaScripting::lua_computeLinear(lua_State* L) {
-    lua_pushboolean(L, false);
-    lua_pushstring(L, "Non implémenté - utilisez model.forward() à la place");
-    return 2;
+    return pushFilteredLayers(L, isLinearLike);
 }
 
 int LuaScripting::lua_computeMaxPool2D(lua_State* L) {
-    lua_pushboolean(L, false);
-    lua_pushstring(L, "Non implémenté - utilisez model.forward() à la place");
-    return 2;
+    return pushFilteredLayers(L, isMaxPoolLike);
 }
 
 int LuaScripting::lua_computeAvgPool2D(lua_State* L) {
-    lua_pushboolean(L, false);
-    lua_pushstring(L, "Non implémenté - utilisez model.forward() à la place");
-    return 2;
+    return pushFilteredLayers(L, isAvgPoolLike);
 }
 
 int LuaScripting::lua_computeActivation(lua_State* L) {
-    lua_pushboolean(L, false);
-    lua_pushstring(L, "Non implémenté - utilisez model.forward() à la place");
-    return 2;
+    return pushFilteredLayers(L, isActivationLike);
 }
 
 int LuaScripting::lua_computeBatchNorm(lua_State* L) {
-    lua_pushboolean(L, false);
-    lua_pushstring(L, "Non implémenté - utilisez model.forward() à la place");
-    return 2;
+    return pushFilteredLayers(L, isBatchNormLike);
 }
 
 int LuaScripting::lua_computeLayerNorm(lua_State* L) {
-    lua_pushboolean(L, false);
-    lua_pushstring(L, "Non implémenté - utilisez model.forward() à la place");
-    return 2;
+    return pushFilteredLayers(L, isLayerNormLike);
 }
 
 int LuaScripting::lua_computeAttention(lua_State* L) {
-    lua_pushboolean(L, false);
-    lua_pushstring(L, "Non implémenté - utilisez model.forward() à la place");
-    return 2;
+    return pushFilteredLayers(L, isAttentionLike);
 }
 
 // ============================================================================
@@ -590,9 +1120,19 @@ int LuaScripting::lua_saveTokenizer(lua_State* L) {
     const char* filepath = luaL_checkstring(L, 1);
     
     try {
+        const std::filesystem::path output_path(filepath);
+        if (output_path.has_parent_path()) {
+            std::filesystem::create_directories(output_path.parent_path());
+        }
         json j = ctx.currentTokenizer->to_json();
         std::ofstream f(filepath);
+        if (!f) {
+            throw std::runtime_error("Impossible de créer le fichier tokenizer: " + std::string(filepath));
+        }
         f << j.dump(2);
+        if (!f.good()) {
+            throw std::runtime_error("Échec d'écriture du tokenizer: " + std::string(filepath));
+        }
         
         ctx.addLog("Tokenizer sauvegardé: " + std::string(filepath));
         lua_pushboolean(L, true);
@@ -610,6 +1150,9 @@ int LuaScripting::lua_loadTokenizer(lua_State* L) {
     
     try {
         std::ifstream f(filepath);
+        if (!f) {
+            throw std::runtime_error("Fichier tokenizer introuvable ou illisible: " + std::string(filepath));
+        }
         json j;
         f >> j;
         
@@ -1180,7 +1723,11 @@ int LuaScripting::lua_guardSetLimit(lua_State* L) {
         bytes = static_cast<size_t>(value);
     }
     
-    guard.setLimit(bytes);
+    const double max_ram_gb = static_cast<double>(bytes) /
+                              (1024.0 * 1024.0 * 1024.0);
+
+    // Un guard actif doit toujours disposer du chemin d'éviction LRU/spill.
+    DynamicTensorAllocator::instance().configure(max_ram_gb, true, true);
     
     lua_pushboolean(L, true);
     return 1;
@@ -1326,6 +1873,7 @@ int LuaScripting::lua_htopCreate(lua_State* L) {
         //   - Htop.create({ enable_viz = bool, enable_htop = bool, viz_config = { ... } })
         bool enable_viz = false;
         bool enable_htop = true;
+        bool defer_htop = false;
         json viz_config;
         std::optional<bool> csv_flag;
         std::optional<bool> csv_enabled;
@@ -1337,6 +1885,10 @@ int LuaScripting::lua_htopCreate(lua_State* L) {
 
             lua_getfield(L, 1, "enable_htop");
             if (lua_isboolean(L, -1)) enable_htop = lua_toboolean(L, -1);
+            lua_pop(L, 1);
+
+            lua_getfield(L, 1, "defer_htop");
+            if (lua_isboolean(L, -1)) defer_htop = lua_toboolean(L, -1);
             lua_pop(L, 1);
 
             // Alias de compat (certains scripts passent {viz=true}).
@@ -1384,35 +1936,17 @@ int LuaScripting::lua_htopCreate(lua_State* L) {
             }
         }
 
-        ctx.asyncMonitor->start(enable_htop, enable_viz, viz_config);
+        ctx.asyncMonitor->start(enable_htop, enable_viz, viz_config, defer_htop);
 
-        // Appliquer les options CSV côté HtopDisplay si présent.
-        // Par défaut, AsyncMonitor désactive le CSV Htop si la Viz est active,
-        // pour éviter les écritures concurrentes.
-        if (enable_htop) {
-            auto h = ctx.asyncMonitor->getHtop();
-            if (h) {
-                if (csv_path.has_value() && !csv_path->empty()) {
-                    h->setCsvLogFile(*csv_path);
-                }
+        bool enable_csv = true;
+        if (csv_flag.has_value()) enable_csv = *csv_flag;
+        if (csv_enabled.has_value()) enable_csv = *csv_enabled;
+        ctx.asyncMonitor->configureMetricsCsv(
+            csv_path.value_or("checkpoints/loss_history.csv"), enable_csv);
 
-                bool enable_csv = !enable_viz;
-                if (csv_path.has_value()) {
-                    // Si l'utilisateur fournit un chemin, activer par défaut.
-                    enable_csv = true;
-                }
-                if (csv_flag.has_value()) {
-                    enable_csv = *csv_flag;
-                }
-                if (csv_enabled.has_value()) {
-                    enable_csv = *csv_enabled;
-                }
-
-                h->setCsvEnabled(enable_csv);
-            }
-        }
-
-        ctx.addLog(std::string("AsyncMonitor démarré (") + (enable_htop ? "htop enabled" : "htop disabled") + ")");
+        const char* htop_state = !enable_htop ? "htop disabled"
+            : (defer_htop ? "htop pending" : "htop enabled");
+        ctx.addLog(std::string("AsyncMonitor démarré (") + htop_state + ")");
         lua_pushboolean(L, true);
 
         // Remonter un warning sans casser les scripts (ok=true + msg).
@@ -1507,11 +2041,8 @@ int LuaScripting::lua_htopUpdate(lua_State* L) {
         metrics.opt_weight_decay = get_num("opt_weight_decay", get_num("optWeightDecay", 0.0f));
 
         auto parse_opt_type = [&](const std::string& s) -> int {
-            std::string t = s;
-            std::transform(t.begin(), t.end(), t.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
-            if (t == "sgd") return 0;
-            if (t == "adam") return 1;
-            if (t == "adamw") return 2;
+            OptimizerType type;
+            if (optimizerTypeFromString(s, type)) return static_cast<int>(type);
             return metrics.opt_type;
         };
 
@@ -1786,6 +2317,106 @@ int LuaScripting::lua_vizAddImage(lua_State* L) {
     return 1;
 }
 
+int LuaScripting::lua_vizSetDetections(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+
+    const std::string target_name = luaL_optstring(L, 2, "dataset");
+    Visualizer::DetectionTarget target = Visualizer::DetectionTarget::Dataset;
+    if (target_name == "output") target = Visualizer::DetectionTarget::Output;
+    else if (target_name == "both") target = Visualizer::DetectionTarget::Both;
+    else if (target_name != "dataset") {
+        return luaL_error(L, "target doit être 'dataset', 'output' ou 'both'");
+    }
+
+    std::vector<Visualizer::Detection> detections;
+    const size_t count = lua_rawlen(L, 1);
+    detections.reserve(count);
+    for (size_t i = 1; i <= count; ++i) {
+        lua_geti(L, 1, static_cast<lua_Integer>(i));
+        if (!lua_istable(L, -1)) {
+            return luaL_error(L, "detection[%d] doit être une table", static_cast<int>(i));
+        }
+
+        auto number_field = [&](const char* name, bool required, double fallback) -> double {
+            lua_getfield(L, -1, name);
+            if (required && !lua_isnumber(L, -1)) {
+                luaL_error(L, "detection[%d].%s doit être un nombre", static_cast<int>(i), name);
+            }
+            const double value = lua_isnumber(L, -1) ? lua_tonumber(L, -1) : fallback;
+            lua_pop(L, 1);
+            return value;
+        };
+
+        Visualizer::Detection detection;
+        detection.x1 = static_cast<float>(number_field("x1", true, 0.0));
+        detection.y1 = static_cast<float>(number_field("y1", true, 0.0));
+        detection.x2 = static_cast<float>(number_field("x2", true, 0.0));
+        detection.y2 = static_cast<float>(number_field("y2", true, 0.0));
+        detection.score = static_cast<float>(number_field("score", false, -1.0));
+        detection.class_id = static_cast<int>(number_field("class_id", false, -1.0));
+        lua_getfield(L, -1, "label");
+        if (!lua_isnil(L, -1) && !lua_isstring(L, -1)) {
+            return luaL_error(L, "detection[%d].label doit être une chaîne", static_cast<int>(i));
+        }
+        if (lua_isstring(L, -1)) detection.label = lua_tostring(L, -1);
+        lua_pop(L, 1);
+        lua_pop(L, 1);
+
+        const bool coordinates_ok = std::isfinite(detection.x1) && std::isfinite(detection.y1) &&
+            std::isfinite(detection.x2) && std::isfinite(detection.y2) &&
+            detection.x1 >= 0.0f && detection.y1 >= 0.0f &&
+            detection.x2 <= 1.0f && detection.y2 <= 1.0f &&
+            detection.x2 > detection.x1 && detection.y2 > detection.y1;
+        if (!coordinates_ok) {
+            return luaL_error(L, "detection[%d]: coordonnées normalisées invalides", static_cast<int>(i));
+        }
+        if (!std::isfinite(detection.score)) {
+            return luaL_error(L, "detection[%d].score doit être fini", static_cast<int>(i));
+        }
+        detections.push_back(std::move(detection));
+    }
+
+    auto& ctx = LuaContext::getInstance();
+    if (!ctx.asyncMonitor || !ctx.asyncMonitor->getViz()) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, "Visualizer non créé");
+        return 2;
+    }
+    ctx.asyncMonitor->setDetections(detections, target);
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+int LuaScripting::lua_vizShowDetections(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TBOOLEAN);
+    const bool enabled = lua_toboolean(L, 1);
+    auto& ctx = LuaContext::getInstance();
+    if (!ctx.asyncMonitor || !ctx.asyncMonitor->getViz()) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, "Visualizer non créé");
+        return 2;
+    }
+    ctx.asyncMonitor->setDetectionOverlayEnabled(enabled);
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+int LuaScripting::lua_vizSetDetectionThreshold(lua_State* L) {
+    const double threshold = luaL_checknumber(L, 1);
+    if (!std::isfinite(threshold) || threshold < 0.0 || threshold > 1.0) {
+        return luaL_error(L, "threshold doit être un nombre fini entre 0 et 1");
+    }
+    auto& ctx = LuaContext::getInstance();
+    if (!ctx.asyncMonitor || !ctx.asyncMonitor->getViz()) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, "Visualizer non créé");
+        return 2;
+    }
+    ctx.asyncMonitor->setDetectionScoreThreshold(static_cast<float>(threshold));
+    lua_pushboolean(L, true);
+    return 1;
+}
+
 int LuaScripting::lua_vizUpdateMetrics(lua_State* L) {
     auto& ctx = LuaContext::getInstance();
     
@@ -1940,9 +2571,25 @@ int LuaScripting::lua_vizSetValidation(lua_State* L) {
     const float kl = getNumField("kl", 0.0f);
     const float align = getNumField("align", 0.0f);
 
+    lua_getfield(L, 1, "enabled");
+    if (lua_isboolean(L, -1)) {
+        ctx.asyncMonitor->updateRuntimeValidationEnabled(lua_toboolean(L, -1));
+    }
+    lua_pop(L, 1);
+
     ctx.asyncMonitor->updateValidation(in_progress, step, done, total, has, ok, recon, kl, align);
 
     lua_pushboolean(L, true);
+    return 1;
+}
+
+int LuaScripting::lua_vizValidationEnabled(lua_State* L) {
+    auto& ctx = LuaContext::getInstance();
+    if (!ctx.asyncMonitor) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    lua_pushboolean(L, ctx.asyncMonitor->validationEnabledSnapshot());
     return 1;
 }
 
@@ -1962,10 +2609,7 @@ int LuaScripting::lua_vizClear(lua_State* L) {
         return 1;
     }
     
-    auto viz = ctx.asyncMonitor->getViz();
-    if (viz) {
-        viz->clearImages();
-    }
+    ctx.asyncMonitor->clearImages();
     
     lua_pushboolean(L, true);
     return 1;
@@ -1999,12 +2643,8 @@ int LuaScripting::lua_vizSaveLossHistory(lua_State* L) {
     }
     
     const char* filepath = luaL_checkstring(L, 1);
-    auto viz = ctx.asyncMonitor->getViz();
-    if (viz) {
-        viz->saveLossHistory(filepath);
-    }
-    
-    lua_pushboolean(L, true);
+    const bool saved = ctx.asyncMonitor->saveMetricsHistory(filepath);
+    lua_pushboolean(L, saved);
     return 1;
 }
 
@@ -2028,5 +2668,94 @@ int LuaScripting::lua_extractKeywords(lua_State* L) {
         lua_rawseti(L, -2, i + 1);
     }
     
+    return 1;
+}
+
+int LuaScripting::lua_vizBackend(lua_State* L) {
+#ifdef ENABLE_VIZ
+    lua_pushstring(L, vizBackendName());
+#else
+    lua_pushstring(L, "NONE");
+#endif
+    return 1;
+}
+
+int LuaScripting::lua_vizConfigure(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    auto& ctx = LuaContext::getInstance();
+    auto viz = ctx.asyncMonitor ? ctx.asyncMonitor->getViz() : nullptr;
+    if (!viz) { lua_pushboolean(L, false); lua_pushstring(L, "Viz non créée"); return 2; }
+    try {
+        json config = luaTableToJson(L, 1);
+        if (config.is_array() && config.empty()) config = json::object();
+        viz->configureScript(config);
+        lua_pushboolean(L, true);
+        return 1;
+    } catch (const std::exception& e) {
+        lua_pushboolean(L, false); lua_pushstring(L, e.what()); return 2;
+    }
+}
+
+int LuaScripting::lua_vizPollEvents(lua_State* L) {
+    const auto timeout = luaL_optinteger(L, 1, 0);
+    luaL_argcheck(L, timeout >= 0 && timeout <= 1000, 1, "timeout_ms must be 0..1000");
+    auto& ctx = LuaContext::getInstance();
+    auto viz = ctx.asyncMonitor ? ctx.asyncMonitor->getViz() : nullptr;
+    json events = json::array();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout);
+    do {
+        if (viz) events = viz->pollScriptEvents();
+        if (!events.empty() || !viz || timeout == 0 || std::chrono::steady_clock::now() >= deadline) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    } while (true);
+    jsonToLuaTable(L, events);
+    return 1;
+}
+
+int LuaScripting::lua_runtimeOps(lua_State* L) {
+    CpuRuntime cpu;
+    TpuRuntime tpu;
+    AbstractRuntime* runtimes[] = {&cpu, nullptr, nullptr, nullptr, nullptr, &tpu};
+    const char* names[] = {"CPU", "CUDA", "ROCM", "VULKAN", "OPENCL", "TPU"};
+#ifdef ENABLE_CUDA
+    CudaRuntime cuda; runtimes[1] = &cuda;
+#endif
+#ifdef ENABLE_ROCM
+    RocmRuntime rocm; runtimes[2] = &rocm;
+#endif
+#ifdef ENABLE_VULKAN
+    VulkanRuntime vulkan; runtimes[3] = &vulkan;
+#endif
+#ifdef ENABLE_OPENCL
+    OpenCLRuntime opencl; runtimes[4] = &opencl;
+#endif
+    auto label = [](RuntimeCapabilityLevel level) {
+        switch (level) {
+            case RuntimeCapabilityLevel::NativeOptimized: return "NativeOptimized";
+            case RuntimeCapabilityLevel::Native: return "Native";
+            case RuntimeCapabilityLevel::HostFallback: return "HostFallback";
+            default: return "Unsupported";
+        }
+    };
+    const auto types = LayerRegistry::get_all_supported_types();
+    lua_createtable(L, 6, 0);
+    for (int r = 0; r < 6; ++r) {
+        lua_newtable(L);
+        lua_pushstring(L, names[r]); lua_setfield(L, -2, "name");
+        lua_pushboolean(L, runtimes[r] != nullptr); lua_setfield(L, -2, "compiled");
+        lua_pushliteral(L, "type declarations; device/configuration/shapes not tested");
+        lua_setfield(L, -2, "scope");
+        lua_createtable(L, static_cast<int>(types.size()), 0);
+        for (size_t i = 0; i < types.size(); ++i) {
+            const auto type = LayerRegistry::string_to_type(types[i]);
+            lua_newtable(L);
+            lua_pushstring(L, types[i].c_str()); lua_setfield(L, -2, "type");
+            lua_pushstring(L, label(runtimes[r] ? runtimes[r]->queryForwardCapability(type) : RuntimeCapabilityLevel::Unsupported)); lua_setfield(L, -2, "forward");
+            lua_pushstring(L, label(runtimes[r] ? runtimes[r]->queryBackwardCapability(type) : RuntimeCapabilityLevel::Unsupported)); lua_setfield(L, -2, "backward");
+            lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
+        }
+        lua_setfield(L, -2, "ops");
+        lua_rawseti(L, -2, r + 1);
+    }
     return 1;
 }

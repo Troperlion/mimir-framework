@@ -8,28 +8,33 @@
 --   --no-flag (bool=false)
 --   -- (fin des options)
 
+---@class MimirArgsModule
 local M = {}
+local Help = dofile(ROOTWORK.."/scripts/modules/help_cli.lua")
+local caller_script_path = Help.find_script_from_stack(3, 24)
+
+Help.auto_exit_help({
+  script_path = caller_script_path,
+  common_flags = {
+    "--help, -h : affiche cette aide",
+    "--htop/--tux : active uniquement le moniteur TUI",
+    "--viz : active uniquement la visualisation",
+    "--no-htop, --no-viz : desactive explicitement un mode",
+    "--csv, --csv-path, --csv-enabled : options export CSV",
+    "--override key=value : override de configuration (repete)",
+  },
+})
 
 local function maybe_start_htop(opts)
   if not opts then return end
-  -- Historiquement, la viz est pilotée via AsyncMonitor (htop). Beaucoup de scripts
-  -- passent juste `--viz` en pensant que ça "active la viz". On traite donc `--viz`
-  -- comme un alias pratique qui démarre htop+viz.
+  if rawget(_G, "__MIMIR_MONITOR_STARTED") == true then
+    return
+  end
   local requested_htop = (opts.htop == true) or (opts.tux == true)
   local requested_viz = (opts.viz == true) or (opts.visualiser == true) or (opts.visualizer == true) or (opts["enable-viz"] == true)
 
-  -- Si l'utilisateur a explicitement fait `--no-htop`, on ne doit pas démarrer le TUI,
-  -- même si `--viz` est demandé (on garde la viz uniquement).
-  local htop_explicitly_disabled = (opts.htop == false) or (opts.tux == false)
-
   local enable_viz = requested_viz
-  local enable_htop = false
-  if requested_htop then
-    enable_htop = true
-  elseif requested_viz and not htop_explicitly_disabled then
-    -- Compat: `--viz` seul démarre aussi htop, sauf si `--no-htop`.
-    enable_htop = true
-  end
+  local enable_htop = requested_htop
 
   if not (enable_htop or enable_viz) then return end
 
@@ -46,6 +51,7 @@ local function maybe_start_htop(opts)
   local cfg = {
     enable_viz = requested_viz,
     enable_htop = enable_htop,
+    defer_htop = enable_htop,
     viz_config = {
       visualization = {
         enabled = true,
@@ -88,6 +94,9 @@ local function maybe_start_htop(opts)
   local hide = as_bool(opts["viz-hide-activation-blocks"])
   if hide ~= nil then cfg.viz_config.visualization.hide_activation_blocks = hide end
 
+  local hide_norm = as_bool(opts["viz-hide-normalisation-blocks"])
+  if hide_norm ~= nil then cfg.viz_config.visualization.hide_normalisation_blocks = hide_norm end
+
   if opts.csv ~= nil then cfg.csv = opts.csv end
   if opts["csv-enabled"] ~= nil then cfg.csv_enabled = opts["csv-enabled"] end
   if opts["csv-path"] ~= nil then cfg.csv_path = tostring(opts["csv-path"]) end
@@ -95,7 +104,7 @@ local function maybe_start_htop(opts)
 
   do
     local l = rawget(_G, "log")
-    local msg = "[args] start monitor: htop=" .. tostring(enable_htop) .. " viz=" .. tostring(requested_viz)
+    local msg = "[args] monitor configured: htop=" .. tostring(enable_htop) .. " viz=" .. tostring(requested_viz)
     if type(l) == "function" then
       l(msg)
     else
@@ -107,6 +116,7 @@ local function maybe_start_htop(opts)
   if ok == false then
     error("Mimir.Htop.create a échoué: " .. tostring(err))
   end
+  rawset(_G, "__MIMIR_MONITOR_STARTED", true)
   -- `Htop.create` peut retourner (true, "Viz init failed: ...") sans casser le run.
   -- Avant, ce message était silencieux => impression que la viz/htop ne démarre pas.
   if err ~= nil and tostring(err) ~= "" then
@@ -191,10 +201,38 @@ local function apply_override(cfg, expr)
   return cfg
 end
 
+---@param argv? string[]
+---@return MimirScriptArgs opts
+---@return string[] positional
 function M.parse(argv)
   local opts = {}
   local pos = {}
-  local a = argv or {}
+  local raw_args = argv or {}
+  local a = {}
+
+  -- Certains copier-coller (éditeur riche, navigateur, messagerie) remplacent
+  -- l'espace ASCII entre une option et sa valeur par NBSP (U+00A0) ou NNBSP
+  -- (U+202F). Le shell ne les considère pas comme des séparateurs et transmet
+  -- alors un seul argument, par exemple "--image-h<U+202F>1024". On répare
+  -- uniquement ce cas précis pour ne pas modifier les valeurs ordinaires.
+  for _, raw in ipairs(raw_args) do
+    local v = raw
+    if type(v) == "string" and v:sub(1, 2) == "--" then
+      local key, value = v:match("^(%-%-[^\194\226]+)\194\160(.+)$") -- U+00A0
+      if key == nil then
+        key, value = v:match("^(%-%-[^\194\226]+)\226\128\175(.+)$") -- U+202F
+      end
+      if key ~= nil then
+        a[#a + 1] = key
+        a[#a + 1] = value
+      else
+        a[#a + 1] = v
+      end
+    else
+      a[#a + 1] = v
+    end
+  end
+
   local i = 1
   while i <= #a do
     local v = a[i]
@@ -234,7 +272,7 @@ function M.parse(argv)
   -- Option commune: démarrer l'interface TUI (HtopDisplay) si demandée.
   -- Ex:
   --   --htop (ou --tux)
-  --   --viz (active la viz en plus)
+  --   --viz (active uniquement la viz; combiner avec --htop pour les deux)
   --   --csv / --no-csv, --csv-path=..., --csv-enabled
   local ok, err = pcall(maybe_start_htop, opts)
   if not ok then
@@ -268,6 +306,9 @@ function M.apply_overrides(cfg, opts)
   return cfg
 end
 
+---@param opts MimirScriptArgs
+---@param key string
+---@return boolean
 function M.has(opts, key)
   return opts and opts[key] == true
 end
@@ -377,5 +418,3 @@ function M.opt_bool(k, d)
 end
 
 return M
-
-

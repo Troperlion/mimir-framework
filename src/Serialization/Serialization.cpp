@@ -1,3 +1,4 @@
+#include "runtimes/fpga/FpgaIo.hpp"
 #include "Serialization.hpp"
 #include "SafeTensorsWriter.hpp"
 #include "SafeTensorsReader.hpp"
@@ -5,12 +6,19 @@
 #include "RawCheckpointReader.hpp"
 #include "DebugJsonDump.hpp"
 #include "../Model.hpp"
+#include "../DType.hpp"
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
+#include <algorithm>
+#include <cctype>
 
 namespace Mimir {
 namespace Serialization {
+
+#ifndef MIMIR_PROJECT_VERSION
+#define MIMIR_PROJECT_VERSION "0.0.0"
+#endif
 
 // ============================================================================
 // High-Level API Implementation
@@ -23,6 +31,8 @@ bool save_checkpoint(
     std::string* error
 ) {
     try {
+        FpgaCheckpointTransaction fpga_transaction(true);
+        const bool completed = [&]() {
         switch (options.format) {
             case CheckpointFormat::SafeTensors: {
                 SafeTensorsWriter writer;
@@ -40,7 +50,7 @@ bool save_checkpoint(
                 // Convert SaveOptions to DebugJsonOptions
                 DebugJsonOptions debug_opts;
                 debug_opts.include_gradients = options.include_gradients;
-                debug_opts.include_optimizer_state = options.include_optimizer_state;
+                debug_opts.include_optimizer_state = options.include_optimizer_state || options.save_optimizer;
                 debug_opts.max_values_per_tensor = options.max_values_per_tensor;
                 debug_opts.include_activations = options.include_activations;
                 debug_opts.include_checksums = options.include_checksums;
@@ -58,6 +68,12 @@ bool save_checkpoint(
                 }
                 return false;
         }
+        }();
+        if(completed) {
+            fpga_transaction.verifyFiles(path);
+            fpga_transaction.finish();
+        }
+        return completed;
     } catch (const std::exception& e) {
         if (error) {
             *error = std::string("Exception during save: ") + e.what();
@@ -73,6 +89,9 @@ bool load_checkpoint(
     std::string* error
 ) {
     try {
+        FpgaCheckpointTransaction fpga_transaction(false);
+        fpga_transaction.verifyFiles(path);
+        const bool completed = [&]() {
         switch (options.format) {
             case CheckpointFormat::SafeTensors: {
                 SafeTensorsReader reader;
@@ -97,6 +116,11 @@ bool load_checkpoint(
                 }
                 return false;
         }
+        }();
+        if(completed) {
+            fpga_transaction.finish();
+        }
+        return completed;
     } catch (const std::exception& e) {
         if (error) {
             *error = std::string("Exception during load: ") + e.what();
@@ -115,23 +139,59 @@ std::string dtype_to_string(DType dtype) {
         case DType::Float16: return "F16";
         case DType::BFloat16: return "BF16";
         case DType::Float64: return "F64";
+        case DType::Int8: return "I8";
         case DType::Int32: return "I32";
         case DType::Int16: return "I16";
-        case DType::Uint16: return "U16";
+        case DType::Int64: return "I64";
         case DType::Uint8: return "U8";
+        case DType::Uint16: return "U16";
+        case DType::Uint32: return "U32";
+        case DType::Uint64: return "U64";
+        case DType::Bool: return "BOOL";
         default: return "UNKNOWN";
     }
 }
 
 DType string_to_dtype(const std::string& str) {
-    if (str == "F32" || str == "float32") return DType::Float32;
-    if (str == "F16" || str == "float16") return DType::Float16;
-    if (str == "BF16" || str == "bfloat16" || str == "bf16") return DType::BFloat16;
-    if (str == "F64" || str == "float64" || str == "f64" || str == "double") return DType::Float64;
-    if (str == "I32" || str == "int32") return DType::Int32;
-    if (str == "I16" || str == "int16") return DType::Int16;
-    if (str == "U16" || str == "uint16") return DType::Uint16;
-    if (str == "U8" || str == "uint8") return DType::Uint8;
+    // Accept all common aliases/cases used across Lua/config/runtime.
+    // Examples: f16, fp16, F16, float16, bf16, f32, float32, etc.
+    const Mimir::DType rt = Mimir::parse_dtype_safetensors(str);
+    switch (rt) {
+        case Mimir::DType::F32: return DType::Float32;
+        case Mimir::DType::F16: return DType::Float16;
+        case Mimir::DType::BF16: return DType::BFloat16;
+        case Mimir::DType::F64: return DType::Float64;
+        case Mimir::DType::I8: return DType::Int8;
+        case Mimir::DType::I32: return DType::Int32;
+        case Mimir::DType::I16: return DType::Int16;
+        case Mimir::DType::I64: return DType::Int64;
+        case Mimir::DType::U8: return DType::Uint8;
+        case Mimir::DType::U16: return DType::Uint16;
+        case Mimir::DType::U32: return DType::Uint32;
+        case Mimir::DType::U64: return DType::Uint64;
+        case Mimir::DType::BOOL: return DType::Bool;
+        default: break;
+    }
+
+    // Last-resort case-insensitive fallback for serialized tags like "f32".
+    std::string s = str;
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+    if (s == "F32") return DType::Float32;
+    if (s == "F16") return DType::Float16;
+    if (s == "BF16") return DType::BFloat16;
+    if (s == "F64") return DType::Float64;
+    if (s == "I8") return DType::Int8;
+    if (s == "I32") return DType::Int32;
+    if (s == "I16") return DType::Int16;
+    if (s == "I64") return DType::Int64;
+    if (s == "U8") return DType::Uint8;
+    if (s == "U16") return DType::Uint16;
+    if (s == "U32") return DType::Uint32;
+    if (s == "U64") return DType::Uint64;
+    if (s == "BOOL") return DType::Bool;
+
     throw std::runtime_error("Unknown dtype string: " + str);
 }
 
@@ -141,10 +201,15 @@ size_t dtype_size(DType dtype) {
         case DType::Float16: return 2;
         case DType::BFloat16: return 2;
         case DType::Float64: return 8;
+        case DType::Int8: return 1;
         case DType::Int32: return 4;
         case DType::Int16: return 2;
-        case DType::Uint16: return 2;
+        case DType::Int64: return 8;
         case DType::Uint8: return 1;
+        case DType::Uint16: return 2;
+        case DType::Uint32: return 4;
+        case DType::Uint64: return 8;
+        case DType::Bool: return 1;
         default: return 0;
     }
 }
@@ -178,10 +243,14 @@ std::string get_mimir_version() {
         std::ifstream ifs(version_file);
         std::string version;
         if (std::getline(ifs, version)) {
-            return version;
+            const auto first = version.find_first_not_of(" \t\r\n");
+            if (first != std::string::npos) {
+                const auto last = version.find_last_not_of(" \t\r\n");
+                return version.substr(first, last - first + 1);
+            }
         }
     }
-    return "3.0.0";  // Default version
+    return MIMIR_PROJECT_VERSION;
 }
 
 std::string get_git_commit() {

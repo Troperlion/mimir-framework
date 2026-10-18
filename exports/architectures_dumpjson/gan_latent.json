@@ -1,0 +1,524 @@
+{
+  "default_dtype": "float32",
+  "encoder": {
+    "architecture": "ViT",
+    "has_encoder": true
+  },
+  "features": [
+    "layer_config",
+    "real_shapes",
+    "layer_io",
+    "extended_layer_types",
+    "framework_state",
+    "checksums"
+  ],
+  "format": "mimir_debug_dump",
+  "format_version": "1.3.0",
+  "framework_state": {
+    "memory": {
+      "advanced_ram_manager": {
+        "allocations_blocked": false,
+        "current_bytes": 0,
+        "current_mb": 0.0,
+        "freeze_mode": false,
+        "peak_bytes": 0,
+        "peak_mb": 0.0,
+        "usage_percent": 0.0
+      },
+      "dynamic_tensor_allocator": {
+        "loaded_count": 4,
+        "tensor_count": 4
+      },
+      "memory_guard": {
+        "allocations_blocked": false,
+        "current_bytes": 69246976,
+        "current_mb": 66.0390625,
+        "freeze_mode": false,
+        "limit_bytes": 10737418240,
+        "limit_mb": 10240.0,
+        "peak_bytes": 69246976,
+        "peak_mb": 66.0390625,
+        "usage_percent": 0.6449127197265625
+      }
+    },
+    "model": {
+      "default_dtype": "float32",
+      "has_encoder": true,
+      "image_height": 64,
+      "image_width": 64,
+      "model_config": {
+        "dropout": 0.0,
+        "hidden_dim": 2048,
+        "latent_dim": 4096,
+        "noise_dim": 128,
+        "num_hidden_layers": 3,
+        "prompt_dim": 128,
+        "type": "gan_latent"
+      },
+      "model_name": "GanLatentModel",
+      "num_layers": 8,
+      "parameters_frozen": false,
+      "tokenizer_vocab_size": 47,
+      "total_params": 17311744
+    },
+    "registry": {
+      "supported_layer_count": 70,
+      "supported_layer_types": [
+        "Conv2d",
+        "ConvTranspose2d",
+        "Conv1d",
+        "DepthwiseConv2d",
+        "Linear",
+        "Bilinear",
+        "Embedding",
+        "EmbeddingBag",
+        "BatchNorm2d",
+        "BatchNorm1d",
+        "LayerNorm",
+        "GroupNorm",
+        "InstanceNorm2d",
+        "RMSNorm",
+        "ReLU",
+        "LeakyReLU",
+        "GELU",
+        "GEGLU",
+        "SiLU",
+        "Tanh",
+        "Sigmoid",
+        "Softmax",
+        "LogSoftmax",
+        "Softplus",
+        "Mish",
+        "HardSigmoid",
+        "HardSwish",
+        "MaxPool2d",
+        "AvgPool2d",
+        "AdaptiveAvgPool2d",
+        "GlobalAvgPool2d",
+        "MaxPool1d",
+        "AvgPool1d",
+        "TokenMeanPool",
+        "Dropout",
+        "Dropout2d",
+        "AlphaDropout",
+        "Flatten",
+        "Reshape",
+        "Transpose",
+        "Permute",
+        "Squeeze",
+        "Unsqueeze",
+        "View",
+        "Add",
+        "Subtract",
+        "Multiply",
+        "Divide",
+        "Concat",
+        "Split",
+        "Chunk",
+        "Stack",
+        "MatMul",
+        "BatchMatMul",
+        "SelfAttention",
+        "MultiHeadAttention",
+        "CrossAttention",
+        "UpsampleNearest",
+        "UpsampleBilinear",
+        "UpsampleBicubic",
+        "PixelShuffle",
+        "LSTM",
+        "GRU",
+        "RNN",
+        "ZeroPad2d",
+        "ReflectionPad2d",
+        "ReplicationPad2d",
+        "Identity",
+        "Constant",
+        "Lambda"
+      ]
+    },
+    "runtime": {
+      "backends": {
+        "cpu": {
+          "available": true,
+          "compiled": true,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CPU",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "cuda": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CUDA",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "opencl": {
+          "available": false,
+          "compiled": true
+        },
+        "rocm": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "ROCM",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "vulkan": {
+          "available": true,
+          "compiled": true
+        }
+      },
+      "cpu_features": {
+        "avx2": true,
+        "bmi2": true,
+        "f16c": true,
+        "fma": true
+      },
+      "environment_overrides": {},
+      "framework_logs_suppressed": false
+    },
+    "snapshot_timestamp": 1783546784,
+    "snapshot_version": "1.0.0"
+  },
+  "git": {
+    "branch": "unknown",
+    "commit": "unknown"
+  },
+  "layers": [
+    {
+      "index": 0,
+      "inputs": [
+        "__input__"
+      ],
+      "name": "gan/raw_in",
+      "output": "gan/in",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Identity"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 256,
+        "out_features": 2048
+      },
+      "index": 1,
+      "inputs": [
+        "gan/in"
+      ],
+      "name": "gan/fc1",
+      "output": "gan/fc1/out",
+      "params_count": 526336,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "gan/fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2048,
+            256
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 524288,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 2,
+      "inputs": [
+        "gan/fc1/out"
+      ],
+      "name": "gan/act1",
+      "output": "gan/act1/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 2048,
+        "out_features": 2048
+      },
+      "index": 3,
+      "inputs": [
+        "gan/act1/out"
+      ],
+      "name": "gan/fc2",
+      "output": "gan/fc2/out",
+      "params_count": 4196352,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "gan/fc2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2048,
+            2048
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 4194304,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 4,
+      "inputs": [
+        "gan/fc2/out"
+      ],
+      "name": "gan/act2",
+      "output": "gan/act2/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 2048,
+        "out_features": 2048
+      },
+      "index": 5,
+      "inputs": [
+        "gan/act2/out"
+      ],
+      "name": "gan/fc3",
+      "output": "gan/fc3/out",
+      "params_count": 4196352,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "gan/fc3.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2048,
+            2048
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 4194304,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 6,
+      "inputs": [
+        "gan/fc3/out"
+      ],
+      "name": "gan/act3",
+      "output": "gan/act3/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 2048,
+        "out_features": 4096
+      },
+      "index": 7,
+      "inputs": [
+        "gan/act3/out"
+      ],
+      "name": "gan/out",
+      "output": "x",
+      "params_count": 8392704,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "gan/out.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            4096,
+            2048
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 8388608,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    }
+  ],
+  "model_config": {
+    "dropout": 0.0,
+    "dtype": "float32",
+    "hidden_dim": 2048,
+    "latent_dim": 4096,
+    "noise_dim": 128,
+    "num_hidden_layers": 3,
+    "prompt_dim": 128,
+    "type": "gan_latent"
+  },
+  "model_name": "GanLatentModel",
+  "num_layers": 8,
+  "timestamp": 1783546784,
+  "tokenizer": {
+    "has_vocab": true,
+    "vocab_size": 47
+  },
+  "total_params": 17311744,
+  "default_params": {
+    "dropout": 0,
+    "hidden_dim": 2048,
+    "latent_dim": 4096,
+    "noise_dim": 128,
+    "num_hidden_layers": 3,
+    "prompt_dim": 128
+  }
+}

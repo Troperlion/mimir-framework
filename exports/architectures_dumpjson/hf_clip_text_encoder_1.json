@@ -1,0 +1,4380 @@
+{
+  "default_dtype": "float32",
+  "encoder": {
+    "architecture": "ViT",
+    "has_encoder": true
+  },
+  "features": [
+    "layer_config",
+    "real_shapes",
+    "layer_io",
+    "extended_layer_types",
+    "framework_state",
+    "checksums"
+  ],
+  "format": "mimir_debug_dump",
+  "format_version": "1.3.0",
+  "framework_state": {
+    "memory": {
+      "advanced_ram_manager": {
+        "allocations_blocked": false,
+        "current_bytes": 0,
+        "current_mb": 0.0,
+        "freeze_mode": false,
+        "peak_bytes": 0,
+        "peak_mb": 0.0,
+        "usage_percent": 0.0
+      },
+      "dynamic_tensor_allocator": {
+        "loaded_count": 63,
+        "tensor_count": 63
+      },
+      "memory_guard": {
+        "allocations_blocked": false,
+        "current_bytes": 492241920,
+        "current_mb": 469.4384765625,
+        "freeze_mode": false,
+        "limit_bytes": 10737418240,
+        "limit_mb": 10240.0,
+        "peak_bytes": 492241920,
+        "peak_mb": 469.4384765625,
+        "usage_percent": 4.584360122680664
+      }
+    },
+    "model": {
+      "default_dtype": "float32",
+      "has_encoder": true,
+      "image_height": 64,
+      "image_width": 64,
+      "model_config": {
+        "causal": true,
+        "d_model": 768,
+        "mlp_hidden": 3072,
+        "num_heads": 12,
+        "num_layers": 12,
+        "padding_idx": 0,
+        "seq_len": 77,
+        "type": "hf_clip_text_encoder_1",
+        "vocab_size": 49408
+      },
+      "model_name": "HFCLIPTextEncoder1Model",
+      "num_layers": 100,
+      "parameters_frozen": false,
+      "tokenizer_vocab_size": 47,
+      "total_params": 123060480
+    },
+    "registry": {
+      "supported_layer_count": 70,
+      "supported_layer_types": [
+        "Conv2d",
+        "ConvTranspose2d",
+        "Conv1d",
+        "DepthwiseConv2d",
+        "Linear",
+        "Bilinear",
+        "Embedding",
+        "EmbeddingBag",
+        "BatchNorm2d",
+        "BatchNorm1d",
+        "LayerNorm",
+        "GroupNorm",
+        "InstanceNorm2d",
+        "RMSNorm",
+        "ReLU",
+        "LeakyReLU",
+        "GELU",
+        "GEGLU",
+        "SiLU",
+        "Tanh",
+        "Sigmoid",
+        "Softmax",
+        "LogSoftmax",
+        "Softplus",
+        "Mish",
+        "HardSigmoid",
+        "HardSwish",
+        "MaxPool2d",
+        "AvgPool2d",
+        "AdaptiveAvgPool2d",
+        "GlobalAvgPool2d",
+        "MaxPool1d",
+        "AvgPool1d",
+        "TokenMeanPool",
+        "Dropout",
+        "Dropout2d",
+        "AlphaDropout",
+        "Flatten",
+        "Reshape",
+        "Transpose",
+        "Permute",
+        "Squeeze",
+        "Unsqueeze",
+        "View",
+        "Add",
+        "Subtract",
+        "Multiply",
+        "Divide",
+        "Concat",
+        "Split",
+        "Chunk",
+        "Stack",
+        "MatMul",
+        "BatchMatMul",
+        "SelfAttention",
+        "MultiHeadAttention",
+        "CrossAttention",
+        "UpsampleNearest",
+        "UpsampleBilinear",
+        "UpsampleBicubic",
+        "PixelShuffle",
+        "LSTM",
+        "GRU",
+        "RNN",
+        "ZeroPad2d",
+        "ReflectionPad2d",
+        "ReplicationPad2d",
+        "Identity",
+        "Constant",
+        "Lambda"
+      ]
+    },
+    "runtime": {
+      "backends": {
+        "cpu": {
+          "available": true,
+          "compiled": true,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CPU",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "cuda": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CUDA",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "opencl": {
+          "available": false,
+          "compiled": true
+        },
+        "rocm": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "ROCM",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "vulkan": {
+          "available": true,
+          "compiled": true
+        }
+      },
+      "cpu_features": {
+        "avx2": true,
+        "bmi2": true,
+        "f16c": true,
+        "fma": true
+      },
+      "environment_overrides": {},
+      "framework_logs_suppressed": false
+    },
+    "snapshot_timestamp": 1783546785,
+    "snapshot_version": "1.0.0"
+  },
+  "git": {
+    "branch": "unknown",
+    "commit": "unknown"
+  },
+  "layers": [
+    {
+      "config": {
+        "embed_dim": 768,
+        "padding_idx": 0,
+        "vocab_size": 49408
+      },
+      "index": 0,
+      "inputs": [
+        "__input__"
+      ],
+      "name": "sdxl/text_encoder_1/tok_emb",
+      "output": "sdxl/text_encoder_1/tok_emb_out",
+      "params_count": 37945344,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/tok_emb.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            49408,
+            768
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 37945344,
+          "truncated": true
+        }
+      ],
+      "type": "Embedding",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 1,
+      "name": "conditioner.embedders.0.transformer.text_model.embeddings.position_embedding.weight",
+      "output": "sdxl/text_encoder_1/pos_emb",
+      "params_count": 59136,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "conditioner.embedders.0.transformer.text_model.embeddings.position_embedding.weight.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            59136
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 59136,
+          "truncated": true
+        }
+      ],
+      "type": "Constant",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 2,
+      "inputs": [
+        "sdxl/text_encoder_1/tok_emb_out",
+        "sdxl/text_encoder_1/pos_emb"
+      ],
+      "name": "sdxl/text_encoder_1/add_pos",
+      "output": "sdxl/text_encoder_1/in",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 3,
+      "inputs": [
+        "sdxl/text_encoder_1/in"
+      ],
+      "name": "sdxl/text_encoder_1/block1/ln1",
+      "output": "sdxl/text_encoder_1/block1/ln1_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block1/ln1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "causal": true,
+        "embed_dim": 768,
+        "head_dim": 64,
+        "num_heads": 12,
+        "seq_len": 77,
+        "use_mask": false
+      },
+      "index": 4,
+      "inputs": [
+        "sdxl/text_encoder_1/block1/ln1_out"
+      ],
+      "name": "sdxl/text_encoder_1/block1/self_attn",
+      "output": "sdxl/text_encoder_1/block1/self_attn_out",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block1/self_attn.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2362368
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2362368,
+          "truncated": true
+        }
+      ],
+      "type": "MultiHeadAttention",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 5,
+      "inputs": [
+        "sdxl/text_encoder_1/in",
+        "sdxl/text_encoder_1/block1/self_attn_out"
+      ],
+      "name": "sdxl/text_encoder_1/block1/add1",
+      "output": "sdxl/text_encoder_1/block1/res1",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 6,
+      "inputs": [
+        "sdxl/text_encoder_1/block1/res1"
+      ],
+      "name": "sdxl/text_encoder_1/block1/ln2",
+      "output": "sdxl/text_encoder_1/block1/ln2_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block1/ln2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 768,
+        "out_features": 3072
+      },
+      "index": 7,
+      "inputs": [
+        "sdxl/text_encoder_1/block1/ln2_out"
+      ],
+      "name": "sdxl/text_encoder_1/block1/mlp_fc1",
+      "output": "sdxl/text_encoder_1/block1/mlp_h",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block1/mlp_fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3072,
+            768
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 8,
+      "inputs": [
+        "sdxl/text_encoder_1/block1/mlp_h"
+      ],
+      "name": "sdxl/text_encoder_1/block1/mlp_act",
+      "output": "sdxl/text_encoder_1/block1/mlp_h_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 3072,
+        "out_features": 768
+      },
+      "index": 9,
+      "inputs": [
+        "sdxl/text_encoder_1/block1/mlp_h_act"
+      ],
+      "name": "sdxl/text_encoder_1/block1/mlp_fc2",
+      "output": "sdxl/text_encoder_1/block1/mlp_out",
+      "params_count": 2360064,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block1/mlp_fc2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            768,
+            3072
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 10,
+      "inputs": [
+        "sdxl/text_encoder_1/block1/res1",
+        "sdxl/text_encoder_1/block1/mlp_out"
+      ],
+      "name": "sdxl/text_encoder_1/block1/add2",
+      "output": "sdxl/text_encoder_1/block1/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 11,
+      "inputs": [
+        "sdxl/text_encoder_1/block1/out"
+      ],
+      "name": "sdxl/text_encoder_1/block2/ln1",
+      "output": "sdxl/text_encoder_1/block2/ln1_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block2/ln1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "causal": true,
+        "embed_dim": 768,
+        "head_dim": 64,
+        "num_heads": 12,
+        "seq_len": 77,
+        "use_mask": false
+      },
+      "index": 12,
+      "inputs": [
+        "sdxl/text_encoder_1/block2/ln1_out"
+      ],
+      "name": "sdxl/text_encoder_1/block2/self_attn",
+      "output": "sdxl/text_encoder_1/block2/self_attn_out",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block2/self_attn.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2362368
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2362368,
+          "truncated": true
+        }
+      ],
+      "type": "MultiHeadAttention",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 13,
+      "inputs": [
+        "sdxl/text_encoder_1/block1/out",
+        "sdxl/text_encoder_1/block2/self_attn_out"
+      ],
+      "name": "sdxl/text_encoder_1/block2/add1",
+      "output": "sdxl/text_encoder_1/block2/res1",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 14,
+      "inputs": [
+        "sdxl/text_encoder_1/block2/res1"
+      ],
+      "name": "sdxl/text_encoder_1/block2/ln2",
+      "output": "sdxl/text_encoder_1/block2/ln2_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block2/ln2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 768,
+        "out_features": 3072
+      },
+      "index": 15,
+      "inputs": [
+        "sdxl/text_encoder_1/block2/ln2_out"
+      ],
+      "name": "sdxl/text_encoder_1/block2/mlp_fc1",
+      "output": "sdxl/text_encoder_1/block2/mlp_h",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block2/mlp_fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3072,
+            768
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 16,
+      "inputs": [
+        "sdxl/text_encoder_1/block2/mlp_h"
+      ],
+      "name": "sdxl/text_encoder_1/block2/mlp_act",
+      "output": "sdxl/text_encoder_1/block2/mlp_h_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 3072,
+        "out_features": 768
+      },
+      "index": 17,
+      "inputs": [
+        "sdxl/text_encoder_1/block2/mlp_h_act"
+      ],
+      "name": "sdxl/text_encoder_1/block2/mlp_fc2",
+      "output": "sdxl/text_encoder_1/block2/mlp_out",
+      "params_count": 2360064,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block2/mlp_fc2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            768,
+            3072
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 18,
+      "inputs": [
+        "sdxl/text_encoder_1/block2/res1",
+        "sdxl/text_encoder_1/block2/mlp_out"
+      ],
+      "name": "sdxl/text_encoder_1/block2/add2",
+      "output": "sdxl/text_encoder_1/block2/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 19,
+      "inputs": [
+        "sdxl/text_encoder_1/block2/out"
+      ],
+      "name": "sdxl/text_encoder_1/block3/ln1",
+      "output": "sdxl/text_encoder_1/block3/ln1_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block3/ln1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "causal": true,
+        "embed_dim": 768,
+        "head_dim": 64,
+        "num_heads": 12,
+        "seq_len": 77,
+        "use_mask": false
+      },
+      "index": 20,
+      "inputs": [
+        "sdxl/text_encoder_1/block3/ln1_out"
+      ],
+      "name": "sdxl/text_encoder_1/block3/self_attn",
+      "output": "sdxl/text_encoder_1/block3/self_attn_out",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block3/self_attn.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2362368
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2362368,
+          "truncated": true
+        }
+      ],
+      "type": "MultiHeadAttention",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 21,
+      "inputs": [
+        "sdxl/text_encoder_1/block2/out",
+        "sdxl/text_encoder_1/block3/self_attn_out"
+      ],
+      "name": "sdxl/text_encoder_1/block3/add1",
+      "output": "sdxl/text_encoder_1/block3/res1",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 22,
+      "inputs": [
+        "sdxl/text_encoder_1/block3/res1"
+      ],
+      "name": "sdxl/text_encoder_1/block3/ln2",
+      "output": "sdxl/text_encoder_1/block3/ln2_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block3/ln2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 768,
+        "out_features": 3072
+      },
+      "index": 23,
+      "inputs": [
+        "sdxl/text_encoder_1/block3/ln2_out"
+      ],
+      "name": "sdxl/text_encoder_1/block3/mlp_fc1",
+      "output": "sdxl/text_encoder_1/block3/mlp_h",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block3/mlp_fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3072,
+            768
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 24,
+      "inputs": [
+        "sdxl/text_encoder_1/block3/mlp_h"
+      ],
+      "name": "sdxl/text_encoder_1/block3/mlp_act",
+      "output": "sdxl/text_encoder_1/block3/mlp_h_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 3072,
+        "out_features": 768
+      },
+      "index": 25,
+      "inputs": [
+        "sdxl/text_encoder_1/block3/mlp_h_act"
+      ],
+      "name": "sdxl/text_encoder_1/block3/mlp_fc2",
+      "output": "sdxl/text_encoder_1/block3/mlp_out",
+      "params_count": 2360064,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block3/mlp_fc2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            768,
+            3072
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 26,
+      "inputs": [
+        "sdxl/text_encoder_1/block3/res1",
+        "sdxl/text_encoder_1/block3/mlp_out"
+      ],
+      "name": "sdxl/text_encoder_1/block3/add2",
+      "output": "sdxl/text_encoder_1/block3/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 27,
+      "inputs": [
+        "sdxl/text_encoder_1/block3/out"
+      ],
+      "name": "sdxl/text_encoder_1/block4/ln1",
+      "output": "sdxl/text_encoder_1/block4/ln1_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block4/ln1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "causal": true,
+        "embed_dim": 768,
+        "head_dim": 64,
+        "num_heads": 12,
+        "seq_len": 77,
+        "use_mask": false
+      },
+      "index": 28,
+      "inputs": [
+        "sdxl/text_encoder_1/block4/ln1_out"
+      ],
+      "name": "sdxl/text_encoder_1/block4/self_attn",
+      "output": "sdxl/text_encoder_1/block4/self_attn_out",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block4/self_attn.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2362368
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2362368,
+          "truncated": true
+        }
+      ],
+      "type": "MultiHeadAttention",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 29,
+      "inputs": [
+        "sdxl/text_encoder_1/block3/out",
+        "sdxl/text_encoder_1/block4/self_attn_out"
+      ],
+      "name": "sdxl/text_encoder_1/block4/add1",
+      "output": "sdxl/text_encoder_1/block4/res1",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 30,
+      "inputs": [
+        "sdxl/text_encoder_1/block4/res1"
+      ],
+      "name": "sdxl/text_encoder_1/block4/ln2",
+      "output": "sdxl/text_encoder_1/block4/ln2_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block4/ln2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 768,
+        "out_features": 3072
+      },
+      "index": 31,
+      "inputs": [
+        "sdxl/text_encoder_1/block4/ln2_out"
+      ],
+      "name": "sdxl/text_encoder_1/block4/mlp_fc1",
+      "output": "sdxl/text_encoder_1/block4/mlp_h",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block4/mlp_fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3072,
+            768
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 32,
+      "inputs": [
+        "sdxl/text_encoder_1/block4/mlp_h"
+      ],
+      "name": "sdxl/text_encoder_1/block4/mlp_act",
+      "output": "sdxl/text_encoder_1/block4/mlp_h_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 3072,
+        "out_features": 768
+      },
+      "index": 33,
+      "inputs": [
+        "sdxl/text_encoder_1/block4/mlp_h_act"
+      ],
+      "name": "sdxl/text_encoder_1/block4/mlp_fc2",
+      "output": "sdxl/text_encoder_1/block4/mlp_out",
+      "params_count": 2360064,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block4/mlp_fc2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            768,
+            3072
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 34,
+      "inputs": [
+        "sdxl/text_encoder_1/block4/res1",
+        "sdxl/text_encoder_1/block4/mlp_out"
+      ],
+      "name": "sdxl/text_encoder_1/block4/add2",
+      "output": "sdxl/text_encoder_1/block4/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 35,
+      "inputs": [
+        "sdxl/text_encoder_1/block4/out"
+      ],
+      "name": "sdxl/text_encoder_1/block5/ln1",
+      "output": "sdxl/text_encoder_1/block5/ln1_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block5/ln1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "causal": true,
+        "embed_dim": 768,
+        "head_dim": 64,
+        "num_heads": 12,
+        "seq_len": 77,
+        "use_mask": false
+      },
+      "index": 36,
+      "inputs": [
+        "sdxl/text_encoder_1/block5/ln1_out"
+      ],
+      "name": "sdxl/text_encoder_1/block5/self_attn",
+      "output": "sdxl/text_encoder_1/block5/self_attn_out",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block5/self_attn.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2362368
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2362368,
+          "truncated": true
+        }
+      ],
+      "type": "MultiHeadAttention",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 37,
+      "inputs": [
+        "sdxl/text_encoder_1/block4/out",
+        "sdxl/text_encoder_1/block5/self_attn_out"
+      ],
+      "name": "sdxl/text_encoder_1/block5/add1",
+      "output": "sdxl/text_encoder_1/block5/res1",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 38,
+      "inputs": [
+        "sdxl/text_encoder_1/block5/res1"
+      ],
+      "name": "sdxl/text_encoder_1/block5/ln2",
+      "output": "sdxl/text_encoder_1/block5/ln2_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block5/ln2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 768,
+        "out_features": 3072
+      },
+      "index": 39,
+      "inputs": [
+        "sdxl/text_encoder_1/block5/ln2_out"
+      ],
+      "name": "sdxl/text_encoder_1/block5/mlp_fc1",
+      "output": "sdxl/text_encoder_1/block5/mlp_h",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block5/mlp_fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3072,
+            768
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 40,
+      "inputs": [
+        "sdxl/text_encoder_1/block5/mlp_h"
+      ],
+      "name": "sdxl/text_encoder_1/block5/mlp_act",
+      "output": "sdxl/text_encoder_1/block5/mlp_h_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 3072,
+        "out_features": 768
+      },
+      "index": 41,
+      "inputs": [
+        "sdxl/text_encoder_1/block5/mlp_h_act"
+      ],
+      "name": "sdxl/text_encoder_1/block5/mlp_fc2",
+      "output": "sdxl/text_encoder_1/block5/mlp_out",
+      "params_count": 2360064,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block5/mlp_fc2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            768,
+            3072
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 42,
+      "inputs": [
+        "sdxl/text_encoder_1/block5/res1",
+        "sdxl/text_encoder_1/block5/mlp_out"
+      ],
+      "name": "sdxl/text_encoder_1/block5/add2",
+      "output": "sdxl/text_encoder_1/block5/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 43,
+      "inputs": [
+        "sdxl/text_encoder_1/block5/out"
+      ],
+      "name": "sdxl/text_encoder_1/block6/ln1",
+      "output": "sdxl/text_encoder_1/block6/ln1_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block6/ln1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "causal": true,
+        "embed_dim": 768,
+        "head_dim": 64,
+        "num_heads": 12,
+        "seq_len": 77,
+        "use_mask": false
+      },
+      "index": 44,
+      "inputs": [
+        "sdxl/text_encoder_1/block6/ln1_out"
+      ],
+      "name": "sdxl/text_encoder_1/block6/self_attn",
+      "output": "sdxl/text_encoder_1/block6/self_attn_out",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block6/self_attn.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2362368
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2362368,
+          "truncated": true
+        }
+      ],
+      "type": "MultiHeadAttention",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 45,
+      "inputs": [
+        "sdxl/text_encoder_1/block5/out",
+        "sdxl/text_encoder_1/block6/self_attn_out"
+      ],
+      "name": "sdxl/text_encoder_1/block6/add1",
+      "output": "sdxl/text_encoder_1/block6/res1",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 46,
+      "inputs": [
+        "sdxl/text_encoder_1/block6/res1"
+      ],
+      "name": "sdxl/text_encoder_1/block6/ln2",
+      "output": "sdxl/text_encoder_1/block6/ln2_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block6/ln2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 768,
+        "out_features": 3072
+      },
+      "index": 47,
+      "inputs": [
+        "sdxl/text_encoder_1/block6/ln2_out"
+      ],
+      "name": "sdxl/text_encoder_1/block6/mlp_fc1",
+      "output": "sdxl/text_encoder_1/block6/mlp_h",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block6/mlp_fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3072,
+            768
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 48,
+      "inputs": [
+        "sdxl/text_encoder_1/block6/mlp_h"
+      ],
+      "name": "sdxl/text_encoder_1/block6/mlp_act",
+      "output": "sdxl/text_encoder_1/block6/mlp_h_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 3072,
+        "out_features": 768
+      },
+      "index": 49,
+      "inputs": [
+        "sdxl/text_encoder_1/block6/mlp_h_act"
+      ],
+      "name": "sdxl/text_encoder_1/block6/mlp_fc2",
+      "output": "sdxl/text_encoder_1/block6/mlp_out",
+      "params_count": 2360064,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block6/mlp_fc2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            768,
+            3072
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 50,
+      "inputs": [
+        "sdxl/text_encoder_1/block6/res1",
+        "sdxl/text_encoder_1/block6/mlp_out"
+      ],
+      "name": "sdxl/text_encoder_1/block6/add2",
+      "output": "sdxl/text_encoder_1/block6/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 51,
+      "inputs": [
+        "sdxl/text_encoder_1/block6/out"
+      ],
+      "name": "sdxl/text_encoder_1/block7/ln1",
+      "output": "sdxl/text_encoder_1/block7/ln1_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block7/ln1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "causal": true,
+        "embed_dim": 768,
+        "head_dim": 64,
+        "num_heads": 12,
+        "seq_len": 77,
+        "use_mask": false
+      },
+      "index": 52,
+      "inputs": [
+        "sdxl/text_encoder_1/block7/ln1_out"
+      ],
+      "name": "sdxl/text_encoder_1/block7/self_attn",
+      "output": "sdxl/text_encoder_1/block7/self_attn_out",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block7/self_attn.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2362368
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2362368,
+          "truncated": true
+        }
+      ],
+      "type": "MultiHeadAttention",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 53,
+      "inputs": [
+        "sdxl/text_encoder_1/block6/out",
+        "sdxl/text_encoder_1/block7/self_attn_out"
+      ],
+      "name": "sdxl/text_encoder_1/block7/add1",
+      "output": "sdxl/text_encoder_1/block7/res1",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 54,
+      "inputs": [
+        "sdxl/text_encoder_1/block7/res1"
+      ],
+      "name": "sdxl/text_encoder_1/block7/ln2",
+      "output": "sdxl/text_encoder_1/block7/ln2_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block7/ln2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 768,
+        "out_features": 3072
+      },
+      "index": 55,
+      "inputs": [
+        "sdxl/text_encoder_1/block7/ln2_out"
+      ],
+      "name": "sdxl/text_encoder_1/block7/mlp_fc1",
+      "output": "sdxl/text_encoder_1/block7/mlp_h",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block7/mlp_fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3072,
+            768
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 56,
+      "inputs": [
+        "sdxl/text_encoder_1/block7/mlp_h"
+      ],
+      "name": "sdxl/text_encoder_1/block7/mlp_act",
+      "output": "sdxl/text_encoder_1/block7/mlp_h_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 3072,
+        "out_features": 768
+      },
+      "index": 57,
+      "inputs": [
+        "sdxl/text_encoder_1/block7/mlp_h_act"
+      ],
+      "name": "sdxl/text_encoder_1/block7/mlp_fc2",
+      "output": "sdxl/text_encoder_1/block7/mlp_out",
+      "params_count": 2360064,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block7/mlp_fc2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            768,
+            3072
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 58,
+      "inputs": [
+        "sdxl/text_encoder_1/block7/res1",
+        "sdxl/text_encoder_1/block7/mlp_out"
+      ],
+      "name": "sdxl/text_encoder_1/block7/add2",
+      "output": "sdxl/text_encoder_1/block7/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 59,
+      "inputs": [
+        "sdxl/text_encoder_1/block7/out"
+      ],
+      "name": "sdxl/text_encoder_1/block8/ln1",
+      "output": "sdxl/text_encoder_1/block8/ln1_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block8/ln1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "causal": true,
+        "embed_dim": 768,
+        "head_dim": 64,
+        "num_heads": 12,
+        "seq_len": 77,
+        "use_mask": false
+      },
+      "index": 60,
+      "inputs": [
+        "sdxl/text_encoder_1/block8/ln1_out"
+      ],
+      "name": "sdxl/text_encoder_1/block8/self_attn",
+      "output": "sdxl/text_encoder_1/block8/self_attn_out",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block8/self_attn.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2362368
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2362368,
+          "truncated": true
+        }
+      ],
+      "type": "MultiHeadAttention",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 61,
+      "inputs": [
+        "sdxl/text_encoder_1/block7/out",
+        "sdxl/text_encoder_1/block8/self_attn_out"
+      ],
+      "name": "sdxl/text_encoder_1/block8/add1",
+      "output": "sdxl/text_encoder_1/block8/res1",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 62,
+      "inputs": [
+        "sdxl/text_encoder_1/block8/res1"
+      ],
+      "name": "sdxl/text_encoder_1/block8/ln2",
+      "output": "sdxl/text_encoder_1/block8/ln2_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block8/ln2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 768,
+        "out_features": 3072
+      },
+      "index": 63,
+      "inputs": [
+        "sdxl/text_encoder_1/block8/ln2_out"
+      ],
+      "name": "sdxl/text_encoder_1/block8/mlp_fc1",
+      "output": "sdxl/text_encoder_1/block8/mlp_h",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block8/mlp_fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3072,
+            768
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 64,
+      "inputs": [
+        "sdxl/text_encoder_1/block8/mlp_h"
+      ],
+      "name": "sdxl/text_encoder_1/block8/mlp_act",
+      "output": "sdxl/text_encoder_1/block8/mlp_h_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 3072,
+        "out_features": 768
+      },
+      "index": 65,
+      "inputs": [
+        "sdxl/text_encoder_1/block8/mlp_h_act"
+      ],
+      "name": "sdxl/text_encoder_1/block8/mlp_fc2",
+      "output": "sdxl/text_encoder_1/block8/mlp_out",
+      "params_count": 2360064,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block8/mlp_fc2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            768,
+            3072
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 66,
+      "inputs": [
+        "sdxl/text_encoder_1/block8/res1",
+        "sdxl/text_encoder_1/block8/mlp_out"
+      ],
+      "name": "sdxl/text_encoder_1/block8/add2",
+      "output": "sdxl/text_encoder_1/block8/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 67,
+      "inputs": [
+        "sdxl/text_encoder_1/block8/out"
+      ],
+      "name": "sdxl/text_encoder_1/block9/ln1",
+      "output": "sdxl/text_encoder_1/block9/ln1_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block9/ln1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "causal": true,
+        "embed_dim": 768,
+        "head_dim": 64,
+        "num_heads": 12,
+        "seq_len": 77,
+        "use_mask": false
+      },
+      "index": 68,
+      "inputs": [
+        "sdxl/text_encoder_1/block9/ln1_out"
+      ],
+      "name": "sdxl/text_encoder_1/block9/self_attn",
+      "output": "sdxl/text_encoder_1/block9/self_attn_out",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block9/self_attn.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2362368
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2362368,
+          "truncated": true
+        }
+      ],
+      "type": "MultiHeadAttention",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 69,
+      "inputs": [
+        "sdxl/text_encoder_1/block8/out",
+        "sdxl/text_encoder_1/block9/self_attn_out"
+      ],
+      "name": "sdxl/text_encoder_1/block9/add1",
+      "output": "sdxl/text_encoder_1/block9/res1",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 70,
+      "inputs": [
+        "sdxl/text_encoder_1/block9/res1"
+      ],
+      "name": "sdxl/text_encoder_1/block9/ln2",
+      "output": "sdxl/text_encoder_1/block9/ln2_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block9/ln2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 768,
+        "out_features": 3072
+      },
+      "index": 71,
+      "inputs": [
+        "sdxl/text_encoder_1/block9/ln2_out"
+      ],
+      "name": "sdxl/text_encoder_1/block9/mlp_fc1",
+      "output": "sdxl/text_encoder_1/block9/mlp_h",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block9/mlp_fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3072,
+            768
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 72,
+      "inputs": [
+        "sdxl/text_encoder_1/block9/mlp_h"
+      ],
+      "name": "sdxl/text_encoder_1/block9/mlp_act",
+      "output": "sdxl/text_encoder_1/block9/mlp_h_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 3072,
+        "out_features": 768
+      },
+      "index": 73,
+      "inputs": [
+        "sdxl/text_encoder_1/block9/mlp_h_act"
+      ],
+      "name": "sdxl/text_encoder_1/block9/mlp_fc2",
+      "output": "sdxl/text_encoder_1/block9/mlp_out",
+      "params_count": 2360064,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block9/mlp_fc2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            768,
+            3072
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 74,
+      "inputs": [
+        "sdxl/text_encoder_1/block9/res1",
+        "sdxl/text_encoder_1/block9/mlp_out"
+      ],
+      "name": "sdxl/text_encoder_1/block9/add2",
+      "output": "sdxl/text_encoder_1/block9/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 75,
+      "inputs": [
+        "sdxl/text_encoder_1/block9/out"
+      ],
+      "name": "sdxl/text_encoder_1/block10/ln1",
+      "output": "sdxl/text_encoder_1/block10/ln1_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block10/ln1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "causal": true,
+        "embed_dim": 768,
+        "head_dim": 64,
+        "num_heads": 12,
+        "seq_len": 77,
+        "use_mask": false
+      },
+      "index": 76,
+      "inputs": [
+        "sdxl/text_encoder_1/block10/ln1_out"
+      ],
+      "name": "sdxl/text_encoder_1/block10/self_attn",
+      "output": "sdxl/text_encoder_1/block10/self_attn_out",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block10/self_attn.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2362368
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2362368,
+          "truncated": true
+        }
+      ],
+      "type": "MultiHeadAttention",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 77,
+      "inputs": [
+        "sdxl/text_encoder_1/block9/out",
+        "sdxl/text_encoder_1/block10/self_attn_out"
+      ],
+      "name": "sdxl/text_encoder_1/block10/add1",
+      "output": "sdxl/text_encoder_1/block10/res1",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 78,
+      "inputs": [
+        "sdxl/text_encoder_1/block10/res1"
+      ],
+      "name": "sdxl/text_encoder_1/block10/ln2",
+      "output": "sdxl/text_encoder_1/block10/ln2_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block10/ln2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 768,
+        "out_features": 3072
+      },
+      "index": 79,
+      "inputs": [
+        "sdxl/text_encoder_1/block10/ln2_out"
+      ],
+      "name": "sdxl/text_encoder_1/block10/mlp_fc1",
+      "output": "sdxl/text_encoder_1/block10/mlp_h",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block10/mlp_fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3072,
+            768
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 80,
+      "inputs": [
+        "sdxl/text_encoder_1/block10/mlp_h"
+      ],
+      "name": "sdxl/text_encoder_1/block10/mlp_act",
+      "output": "sdxl/text_encoder_1/block10/mlp_h_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 3072,
+        "out_features": 768
+      },
+      "index": 81,
+      "inputs": [
+        "sdxl/text_encoder_1/block10/mlp_h_act"
+      ],
+      "name": "sdxl/text_encoder_1/block10/mlp_fc2",
+      "output": "sdxl/text_encoder_1/block10/mlp_out",
+      "params_count": 2360064,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block10/mlp_fc2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            768,
+            3072
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 82,
+      "inputs": [
+        "sdxl/text_encoder_1/block10/res1",
+        "sdxl/text_encoder_1/block10/mlp_out"
+      ],
+      "name": "sdxl/text_encoder_1/block10/add2",
+      "output": "sdxl/text_encoder_1/block10/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 83,
+      "inputs": [
+        "sdxl/text_encoder_1/block10/out"
+      ],
+      "name": "sdxl/text_encoder_1/block11/ln1",
+      "output": "sdxl/text_encoder_1/block11/ln1_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block11/ln1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "causal": true,
+        "embed_dim": 768,
+        "head_dim": 64,
+        "num_heads": 12,
+        "seq_len": 77,
+        "use_mask": false
+      },
+      "index": 84,
+      "inputs": [
+        "sdxl/text_encoder_1/block11/ln1_out"
+      ],
+      "name": "sdxl/text_encoder_1/block11/self_attn",
+      "output": "sdxl/text_encoder_1/block11/self_attn_out",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block11/self_attn.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2362368
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2362368,
+          "truncated": true
+        }
+      ],
+      "type": "MultiHeadAttention",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 85,
+      "inputs": [
+        "sdxl/text_encoder_1/block10/out",
+        "sdxl/text_encoder_1/block11/self_attn_out"
+      ],
+      "name": "sdxl/text_encoder_1/block11/add1",
+      "output": "sdxl/text_encoder_1/block11/res1",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 86,
+      "inputs": [
+        "sdxl/text_encoder_1/block11/res1"
+      ],
+      "name": "sdxl/text_encoder_1/block11/ln2",
+      "output": "sdxl/text_encoder_1/block11/ln2_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block11/ln2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 768,
+        "out_features": 3072
+      },
+      "index": 87,
+      "inputs": [
+        "sdxl/text_encoder_1/block11/ln2_out"
+      ],
+      "name": "sdxl/text_encoder_1/block11/mlp_fc1",
+      "output": "sdxl/text_encoder_1/block11/mlp_h",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block11/mlp_fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3072,
+            768
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 88,
+      "inputs": [
+        "sdxl/text_encoder_1/block11/mlp_h"
+      ],
+      "name": "sdxl/text_encoder_1/block11/mlp_act",
+      "output": "sdxl/text_encoder_1/block11/mlp_h_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 3072,
+        "out_features": 768
+      },
+      "index": 89,
+      "inputs": [
+        "sdxl/text_encoder_1/block11/mlp_h_act"
+      ],
+      "name": "sdxl/text_encoder_1/block11/mlp_fc2",
+      "output": "sdxl/text_encoder_1/block11/mlp_out",
+      "params_count": 2360064,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block11/mlp_fc2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            768,
+            3072
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 90,
+      "inputs": [
+        "sdxl/text_encoder_1/block11/res1",
+        "sdxl/text_encoder_1/block11/mlp_out"
+      ],
+      "name": "sdxl/text_encoder_1/block11/add2",
+      "output": "sdxl/text_encoder_1/block11/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 91,
+      "inputs": [
+        "sdxl/text_encoder_1/block11/out"
+      ],
+      "name": "sdxl/text_encoder_1/block12/ln1",
+      "output": "sdxl/text_encoder_1/block12/ln1_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block12/ln1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "causal": true,
+        "embed_dim": 768,
+        "head_dim": 64,
+        "num_heads": 12,
+        "seq_len": 77,
+        "use_mask": false
+      },
+      "index": 92,
+      "inputs": [
+        "sdxl/text_encoder_1/block12/ln1_out"
+      ],
+      "name": "sdxl/text_encoder_1/block12/self_attn",
+      "output": "sdxl/text_encoder_1/block12/self_attn_out",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block12/self_attn.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            2362368
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2362368,
+          "truncated": true
+        }
+      ],
+      "type": "MultiHeadAttention",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 93,
+      "inputs": [
+        "sdxl/text_encoder_1/block11/out",
+        "sdxl/text_encoder_1/block12/self_attn_out"
+      ],
+      "name": "sdxl/text_encoder_1/block12/add1",
+      "output": "sdxl/text_encoder_1/block12/res1",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 94,
+      "inputs": [
+        "sdxl/text_encoder_1/block12/res1"
+      ],
+      "name": "sdxl/text_encoder_1/block12/ln2",
+      "output": "sdxl/text_encoder_1/block12/ln2_out",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block12/ln2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 768,
+        "out_features": 3072
+      },
+      "index": 95,
+      "inputs": [
+        "sdxl/text_encoder_1/block12/ln2_out"
+      ],
+      "name": "sdxl/text_encoder_1/block12/mlp_fc1",
+      "output": "sdxl/text_encoder_1/block12/mlp_h",
+      "params_count": 2362368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block12/mlp_fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3072,
+            768
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 96,
+      "inputs": [
+        "sdxl/text_encoder_1/block12/mlp_h"
+      ],
+      "name": "sdxl/text_encoder_1/block12/mlp_act",
+      "output": "sdxl/text_encoder_1/block12/mlp_h_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 3072,
+        "out_features": 768
+      },
+      "index": 97,
+      "inputs": [
+        "sdxl/text_encoder_1/block12/mlp_h_act"
+      ],
+      "name": "sdxl/text_encoder_1/block12/mlp_fc2",
+      "output": "sdxl/text_encoder_1/block12/mlp_out",
+      "params_count": 2360064,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/block12/mlp_fc2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            768,
+            3072
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2359296,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 98,
+      "inputs": [
+        "sdxl/text_encoder_1/block12/res1",
+        "sdxl/text_encoder_1/block12/mlp_out"
+      ],
+      "name": "sdxl/text_encoder_1/block12/add2",
+      "output": "sdxl/text_encoder_1/block12/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 768,
+        "momentum": 0.10000000149011612,
+        "num_features": 768,
+        "num_groups": 1
+      },
+      "index": 99,
+      "inputs": [
+        "sdxl/text_encoder_1/block12/out"
+      ],
+      "name": "sdxl/text_encoder_1/final_ln",
+      "output": "x",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/text_encoder_1/final_ln.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1536
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    }
+  ],
+  "model_config": {
+    "causal": true,
+    "d_model": 768,
+    "dtype": "float32",
+    "mlp_hidden": 3072,
+    "num_heads": 12,
+    "num_layers": 12,
+    "padding_idx": 0,
+    "seq_len": 77,
+    "type": "hf_clip_text_encoder_1",
+    "vocab_size": 49408
+  },
+  "model_name": "HFCLIPTextEncoder1Model",
+  "num_layers": 100,
+  "timestamp": 1783546784,
+  "tokenizer": {
+    "has_vocab": true,
+    "vocab_size": 47
+  },
+  "total_params": 123060480,
+  "default_params": {
+    "causal": true,
+    "d_model": 768,
+    "mlp_hidden": 3072,
+    "num_heads": 12,
+    "num_layers": 12,
+    "padding_idx": 0,
+    "seq_len": 77,
+    "vocab_size": 49408
+  }
+}

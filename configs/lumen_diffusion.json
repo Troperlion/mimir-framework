@@ -1,0 +1,115 @@
+{
+  "$schema": "./conf.schema.json",
+  "description": "Lumen v5: VAEConv latents, per-block time-conditioned Diffusion Transformer, variable-length prompts and DDIM",
+  "architecture": "lumen_diffusion",
+  "lumen_diffusion": {
+    "seed": 1337,
+    "image_w": 512,
+    "image_h": 512,
+    "image_c": 3,
+    "latent_w": 64,
+    "latent_h": 64,
+    "latent_c": 4,
+    "vae_checkpoint": "checkpoint/vae_conv",
+    "vae_base_channels": 8,
+    "vae_stochastic_latent": true,
+    "vae_resnet": true,
+    "vae_attention": false,
+    "vae_use_skip_connections": false,
+    "vae_use_encoder_prior": false,
+    "vae_enc_norm": "none",
+    "vae_dec_norm": "groupnorm",
+    "vae_decoder_upsample": "nearest_conv",
+    "vae_enc_gn_groups": 8,
+    "vae_dec_gn_groups": 32,
+    "vae_attn_heads": 4,
+    "vae_attn_max_tokens": 0,
+    "vae_resnet_max_tokens": 4096,
+    "patch_size": 4,
+    "hidden_size": 384,
+    "depth": 8,
+    "mlp_ratio": 4.0,
+    "text_seq_len": 77,
+    "dynamic_text_seq_len": true,
+    "text_layers": 2,
+    "num_heads": 8,
+    "diffusion_steps": 1000,
+    "beta_start": 0.00085,
+    "beta_end": 0.012,
+    "kl_beta": 0.0,
+    "kl_warmup_steps": 0,
+    "viz_taps_max_frames": 96,
+    "viz_taps_max_side": 96
+  },
+  "tokenizer": {
+    "path": "checkpoint/base_tokenizer/tokenizer.json"
+  },
+  "training": {
+    "optimizer": "adamw",
+    "learning_rate": 0.0001,
+    "weight_decay": 0.01,
+    "cfg_dropout": 0.1,
+    "epochs": 10,
+    "warmup_steps": 100,
+    "log_every": 10,
+    "save_every": 500,
+    "max_items": 0,
+    "vae_calibration_items": 100,
+    "validation_every_steps": 100,
+    "validation_every_epochs": 1,
+    "validation_items": 4,
+    "validation_holdout": true,
+    "validation_feedback_enabled": true,
+    "validation_reward_factor": 1.05,
+    "validation_penalty_factor": 0.7,
+    "validation_lr_scale_min": 0.1,
+    "validation_lr_scale_max": 1.5,
+    "validation_improve_threshold": 0.001,
+    "validation_feedback_min_steps": 0,
+    "validation_epsilon_weight": 0.5,
+    "validation_reconstruction_weight": 0.5,
+    "validation_ema_alpha": 0.25,
+    "validation_penalty_patience": 2,
+    "validation_max_penalties": 0,
+    "validation_save_best": true,
+    "beta1": 0.9,
+    "beta2": 0.999,
+    "epsilon": 1e-8
+  },
+  "inference": {
+    "sample_steps": 30,
+    "guidance_scale": 5.0
+  },
+  "dataset": {
+    "path": "datasets/coco/train2017",
+    "modalities" : 2
+  },
+
+  "lua": {
+    "scripts": [
+        {
+            "script": "scripts/training/train_lumen_diffusion.lua",
+                "args": [
+                    "--dataset",
+                    "datasets/coco/train2017",
+                    "--image-h",
+                    "512",
+                    "--image-w",
+                    "512",
+                    "--image-c",
+                    "3",
+                    "--out",
+                    "checkpoint/lumen-example",
+                    "--viz",
+                    "--htop",
+                    "--epochs",
+                    "10",
+                    "--lr",
+                    "1e-5",
+                    "--warmup-steps",
+                    "1500"
+                ]
+        }
+    ]
+  }
+}

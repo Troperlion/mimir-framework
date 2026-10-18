@@ -49,7 +49,7 @@ inline std::vector<float> mish_forward(const std::vector<float>& input) {
     for (size_t i = 0; i < input.size(); ++i) {
         float x = input[i];
         // softplus(x) = ln(1 + e^x) ≈ x pour x grand, évite overflow
-        float sp = x > 20.0f ? x : std::log(1.0f + std::exp(x));
+        float sp = x > 20.0f ? x : std::log1p(std::exp(x));
         output[i] = x * std::tanh(sp);
     }
     
@@ -64,7 +64,7 @@ inline std::vector<float> softplus_forward(const std::vector<float>& input) {
     for (size_t i = 0; i < input.size(); ++i) {
         float x = input[i];
         // Pour x > 20, softplus(x) ≈ x (évite overflow)
-        output[i] = x > 20.0f ? x : std::log(1.0f + std::exp(x));
+        output[i] = x > 20.0f ? x : std::log1p(std::exp(x));
     }
     
     return output;

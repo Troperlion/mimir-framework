@@ -1,0 +1,39 @@
+#version 450
+layout(local_size_x=256) in;
+layout(set=0,binding=0) readonly buffer A { float a[]; };
+layout(set=0,binding=1) readonly buffer B { float b[]; };
+layout(set=0,binding=2) writeonly buffer Output { float out_data[]; };
+layout(push_constant) uniform Params { uint n; int op; float alpha; } p;
+void main() {
+    uint i=gl_GlobalInvocationID.x;
+    if (i>=p.n) return;
+    float x=a[i], g=b[i], y=0.0f, alpha=p.alpha;
+    switch(p.op) {
+        case 0: y = x + g; break;
+        case 1: y = x - g; break;
+        case 2: y = x * g; break;
+        case 3: { float d = abs(g) < 1e-8f ? (g >= 0.0f ? 1e-8f : -1e-8f) : g; y = x / d; } break;
+        case 4: { float d = abs(g) < 1e-8f ? (g >= 0.0f ? 1e-8f : -1e-8f) : g; y = -x / (d*d); } break;
+        case 10: y = max(x,0.0f); break;
+        case 11: y = x > 0.0f ? x : alpha*x; break;
+        case 12: y = 1.0f/(1.0f+exp(-x)); break;
+        case 13: y = tanh(x); break;
+        case 14: y = x/(1.0f+exp(-x)); break;
+        case 15: y = 0.5f*x*(1.0f+tanh(0.7978845608f*(x+0.044715f*x*x*x))); break;
+        case 16: y = x > 20.0f ? x : log(1.0f+exp(x)); break;
+        case 17: y = x*tanh(x > 20.0f ? x : log(1.0f+exp(x))); break;
+        case 18: y = clamp((x+3.0f)/6.0f,0.0f,1.0f); break;
+        case 19: y = x*clamp((x+3.0f)/6.0f,0.0f,1.0f); break;
+        case 20: y = x > 0.0f ? g : 0.0f; break;
+        case 21: y = g*(x > 0.0f ? 1.0f : alpha); break;
+        case 22: { float s = 1.0f/(1.0f+exp(-x)); y = g*s*(1.0f-s); } break;
+        case 23: { float t = tanh(x); y = g*(1.0f-t*t); } break;
+        case 24: { float s = 1.0f/(1.0f+exp(-x)); y = g*(s+x*s*(1.0f-s)); } break;
+        case 25: { float t = tanh(0.7978845608f*(x+0.044715f*x*x*x)); y = g*(0.5f*(1.0f+t)+0.5f*x*(1.0f-t*t)*0.7978845608f*(1.0f+0.134145f*x*x)); } break;
+        case 26: y = g/(1.0f+exp(-x)); break;
+        case 27: { float t = tanh(x > 20.0f ? x : log(1.0f+exp(x))); float s = 1.0f/(1.0f+exp(-x)); y = g*(t+x*(1.0f-t*t)*s); } break;
+        case 28: y = x > -3.0f && x < 3.0f ? g/6.0f : 0.0f; break;
+        case 29: y = g*(x <= -3.0f ? 0.0f : (x >= 3.0f ? 1.0f : x/3.0f+0.5f)); break;
+    }
+    out_data[i]=y;
+}

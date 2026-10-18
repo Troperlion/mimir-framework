@@ -1,4 +1,7 @@
 #!/usr/bin/env lua
+local Help = dofile(ROOTWORK.."/scripts/modules/help_cli.lua")
+Help.auto_exit_help()
+
 ---@diagnostic disable: undefined-field, need-check-nil
 
 local function die(msg)
@@ -21,8 +24,8 @@ local function apply_dtype(cfg)
   ok_or_die(ok, dt_or_err, "Mimir.model.dtype(" .. tostring(dtype) .. ")")
 end
 
-local checkpoint_path = os.getenv("MIMIR_PONYXL_SAFETENSORS") or "../ponyxl.safetensors"
-local include_prefix = os.getenv("MIMIR_PONYXL_INCLUDE") or "conditioner.embedders.1."
+local checkpoint_path = os.getenv("MIMIR_EXTERNAL_SAFETENSORS") or "../model.safetensors"
+local include_prefix = os.getenv("MIMIR_EXTERNAL_SAFETENSORS_INCLUDE") or "conditioner.embedders.1."
 local max_tensors = tonumber(os.getenv("MIMIR_MAX_TENSORS") or "16") or 16
 
 log("🧪 external_safetensors_base smoke test")

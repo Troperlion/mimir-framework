@@ -31,10 +31,15 @@ enum class DType {
     Float16,
     BFloat16,
     Float64,
-    Int32,
+    Int8,
     Int16,
+    Int32,
+    Int64,
+    Uint8,
     Uint16,
-    Uint8
+    Uint32,
+    Uint64,
+    Bool
 };
 
 struct SaveOptions {
@@ -70,6 +75,7 @@ struct LoadOptions {
     // standalone VAE checkpoint into a composite model).
     bool apply_model_name = true;
     bool apply_model_config = true;
+    bool metadata_only = false;     // Load architecture/config without tensors or auxiliary state
 };
 
 // ============================================================================

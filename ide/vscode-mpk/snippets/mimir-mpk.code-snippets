@@ -1,0 +1,67 @@
+{
+  "MPK package minimal": {
+    "prefix": "mpk-package",
+    "description": "Crée le squelette d'une source MPK moderne.",
+    "body": [
+      "# MPK - Mimir Package Template",
+      "# Source pseudocode lisible; compiler avec scripts/tools/compile_mpk.lua.",
+      "",
+      "map mpk = []",
+      "mpk.set(\"container\", \"pseudocode\")",
+      "mpk.set(\"extension\", \".mpk\")",
+      "mpk.set(\"format\", \"Mimir Package Template\")",
+      "mpk.set(\"format_short\", \"MPK\")",
+      "",
+      "map header = []",
+      "header.set(\"name\", \"${1:architecture_name}\")",
+      "header.set(\"type\", \"${2:basic_mlp}\")",
+      "header.set(\"author\", \"${3:Mimir}\")",
+      "header.set(\"modifiable\", true)",
+      "header.set(\"viz_specified\", false)",
+      "mpk.set(\"header\", header)",
+      "",
+      "map payload = []",
+      "payload.set(\"base_config_b64\", \"${4:BASE64_CONFIG}\")",
+      "payload.set(\"description_b64\", \"${5:BASE64_DESCRIPTION}\")",
+      "",
+      "map structure = []",
+      "structure.set(\"template\", \"${2:basic_mlp}\")",
+      "structure.set(\"architecture\", \"${1:architecture_name}\")",
+      "payload.set(\"model_structure\", structure)",
+      "mpk.set(\"payload\", payload)",
+      "$0"
+    ]
+  },
+  "MPK map": {
+    "prefix": "mpk-map",
+    "body": ["map ${1:name} = []", "$0"]
+  },
+  "MPK list": {
+    "prefix": "mpk-list",
+    "body": ["list ${1:name} = []", "$0"]
+  },
+  "MPK set": {
+    "prefix": "mpk-set",
+    "body": ["${1:map}.set(\"${2:key}\", ${3:value})"]
+  },
+  "MPK append": {
+    "prefix": "mpk-append",
+    "body": ["${1:list}.append(${2:value})"]
+  },
+  "MPK graph node": {
+    "prefix": "mpk-node",
+    "body": [
+      "map ${1:node} = []",
+      "${1:node}.set(\"id\", \"${2:node_id}\")",
+      "${1:node}.set(\"name\", \"${2:node_id}\")",
+      "${1:node}.set(\"type\", \"${3:Identity}\")",
+      "list ${1:node}_inputs = []",
+      "${1:node}_inputs.append(\"${4:x}\")",
+      "${1:node}.set(\"inputs\", ${1:node}_inputs)",
+      "${1:node}.set(\"output\", \"${5:y}\")",
+      "${1:node}.set(\"params_count\", 0)",
+      "${6:nodes}.append(${1:node})",
+      "$0"
+    ]
+  }
+}

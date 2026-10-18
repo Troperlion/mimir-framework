@@ -1,23 +1,25 @@
-# Internals: Monitoring (HtopDisplay / Visualizer / AsyncMonitor)
-
-## Pour qui
-
-Développeur avancé qui modifie le moteur C/C++.
-
-## Objectif
+# Monitoring (HtopDisplay / Visualizer / AsyncMonitor)
 
 Comprendre le fonctionnement interne exact des composants runtime.
 
-## Avant de commencer
+**Public concerné :** Développeur avancé qui modifie le moteur C/C++.
 
-Connaître les bases C++ et la structure du dépôt.
-
-## Résultat attendu
-
-Tu peux modifier le code interne en limitant les régressions.
-
+> **Prérequis**
+>
+> Connaître les bases C++ et la structure du dépôt.
 
 Cette page documente la stack “monitoring” côté C++.
+
+## Sur cette page
+
+- [Source de vérité (C++)](#source-de-vérité-c)
+- [Intention](#intention)
+- [Architecture globale](#architecture-globale)
+- [HtopDisplay (UI terminal)](#htopdisplay-ui-terminal)
+- [Visualizer (SFML, optionnel)](#visualizer-sfml-optionnel)
+- [AsyncMonitor](#asyncmonitor)
+- [Pilotage depuis Lua](#pilotage-depuis-lua)
+- [Étapes suivantes](#étapes-suivantes)
 
 ## Source de vérité (C++)
 
@@ -124,7 +126,9 @@ La logique est best-effort (`maybeLoadArchitecture()`), pensée pour améliorer 
 
 Note importante:
 
-- Quand `Visualizer` est actif, `AsyncMonitor::start()` **désactive** le CSV côté htop (`htop_->setCsvEnabled(!enable_viz)`) pour limiter les écritures concurrentes.
+- `AsyncMonitor::configureMetricsCsv()` maintient un export unique : Viz est
+  prioritaire lorsqu'elle est active, et htop sert de repli lorsqu'il tourne
+  seul. Le chemin et l'état d'activation sont communs aux deux interfaces.
 
 ## `AsyncMonitor`
 
@@ -156,6 +160,12 @@ Note importante:
 - Les images peuvent être volumineuses: garder des copies “pending” a un coût.
 - Les métriques sont “dernier état connu”: pas d’historique côté `AsyncMonitor` (hormis ce que visualizer/htop accumulent).
 
-## Où c’est piloté depuis Lua ?
+## Pilotage depuis Lua
 
 La mise en place/activation du monitoring est exposée côté Lua via `src/scriptings/Lua/luaScripting/LuaScripting.cpp` (voir la doc API: `docs/03-API-Reference/15-Viz-Htop.md`).
+
+## Étapes suivantes
+
+- [Page précédente : Backends hardware : CPU / CUDA / ROCm / Vulkan / OpenCL](03-Hardware-Backends.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Internals: AdvancedRAMManager (cache RAM / compression / spill disque)](05-AdvancedRAMManager.md)

@@ -3,8 +3,9 @@
 -- Dataset attendu: pour chaque image `a.png`, un texte `a.txt` contenant des tags/phrases courtes,
 -- séparés par des points (.) ex: "tag1. tag2. une courte phrase."
 --
--- IMPORTANT: les classes doivent être fixes -> fournir un vocabulaire de tags (une entrée par ligne)
--- via `--tags-vocab`.
+-- Sans --tags-vocab, les classes sont découvertes dans les annotations JSON/textes
+-- du dataset et enregistrées sous <out-dir>/tags_vocab.auto.txt.
+-- --tags-vocab permet de fournir explicitement une liste fixe (une entrée par ligne).
 --
 -- Usage:
 --   ./bin/mimir --lua scripts/training/train_vgg16_tags_multilabel.lua -- \
@@ -17,16 +18,21 @@
 --     --epochs 10 --lr 1e-4 \
 --     --log-every 10 --autosave-every-epochs 1
 --
+-- Composition : utilise automatiquement <tags-vocab sans extension>.composition.json,
+-- puis <dataset-root>/composition.json. --class-composition impose un autre fichier.
+-- --use-class-composition-weights false désactive explicitement ces poids BCE.
+--
 -- Viz (optionnel):
 --   --viz --viz-taps-every-steps 50 --viz-taps-max-frames 12 --viz-taps-max-side 96
 --
 -- TUI (optionnel):
 --   --htop
 
-local Args = dofile("scripts/modules/args.lua")
+local Args = dofile(ROOTWORK.."/scripts/modules/args.lua")
 local opts = Args.parse(arg) or {}
+local FS = dofile(ROOTWORK.."/scripts/modules/fs.lua")
 
-local Ckpt = dofile("scripts/modules/checkpoint_resume.lua")
+local Ckpt = dofile(ROOTWORK.."/scripts/modules/checkpoint_resume.lua")
 
 local function opt_num(k, d)
   local v = opts[k]
@@ -73,19 +79,18 @@ local function apply_dtype(cfg)
   return true
 end
 
-local function shell_quote(s)
-  if s == nil then return "''" end
-  s = tostring(s)
-  return "'" .. s:gsub("'", "'\\''") .. "'"
+local function file_exists(path)
+  return FS.file_exists(path)
 end
 
-local function file_exists(path)
-  if not path or #tostring(path) == 0 then return false end
-  local cmd = "test -f " .. shell_quote(path) .. " >/dev/null 2>&1"
-  local ok, why, code = os.execute(cmd)
-  if type(ok) == "number" then return ok == 0 end
-  if type(ok) == "boolean" then return ok end
-  return (why == "exit" and code == 0)
+local function strip_extension(path)
+  local s = tostring(path or "")
+  local base = s:match("^(.*)%.([^.]+)$")
+  return base or s
+end
+
+local function default_class_composition_path(vocab_path)
+  return strip_extension(vocab_path) .. ".composition.json"
 end
 
 local function read_lines(path)
@@ -126,7 +131,7 @@ if arch ~= "vgg16" and arch ~= "vgg19" then
 end
 
 local dataset_root = opt_str("dataset-root", "dataset_2")
-local tags_vocab_path = opt_str("tags-vocab", "")
+local tags_vocab_path = opt_str("tags-vocab", opt_str("tags-vocabs", ""))
 local out_dir = opt_str("out-dir", "checkpoint/vgg16_tags")
 
 local RESUME = opt_bool("resume", false)
@@ -146,6 +151,8 @@ local max_items = opt_int("max-items", 0)
 local log_every = opt_int("log-every", 1)
 
 local lowercase_tags = opt_bool("lowercase-tags", true)
+local class_composition_path = opt_str("class-composition", "")
+local use_class_composition_weights = opt_bool("use-class-composition-weights", true)
 
 -- Validation (anti-collapse)
 local validate_items = opt_int("validate-items", opt_int("val-items", 32))
@@ -165,11 +172,51 @@ local viz_taps_every_steps = opt_int("viz-taps-every-steps", opt_int("viz-every-
 local viz_taps_max_frames = opt_int("viz-taps-max-frames", 12)
 local viz_taps_max_side = opt_int("viz-taps-max-side", 64)
 
-os.execute("mkdir -p " .. shell_quote(out_dir) .. " 2>/dev/null")
+FS.mkdir_p(out_dir)
 
--- Vocab de tags/classes
+-- Load once: automatic vocabulary discovery uses the exact native label candidates,
+-- without loading image pixels or modifying the source dataset.
+local ok_ds, n_or_err = Mimir.Dataset.load(dataset_root, image_w, image_h, 1, true, 'dataset_cache.json', 10240, true)
+assert_ok(ok_ds, n_or_err, "Dataset.load failed")
+log("✓ Dataset chargé: " .. tostring(n_or_err))
+
+local automatic_weights = nil
 if tags_vocab_path == "" then
-  error("--tags-vocab est requis (liste fixe des tags/classes, 1 par ligne)")
+  local counts, sample_count = {}, 0
+  for index=1, tonumber(n_or_err) or 0 do
+    local item, item_err = Mimir.Dataset.get(index, false)
+    if type(item) ~= "table" then error("lecture dataset: "..tostring(item_err)) end
+    if item.image_file and item.image_file ~= "" and type(item.label_candidates)=="table" then
+      sample_count=sample_count+1
+      local seen={}
+      for _, tag in ipairs(item.label_candidates) do
+        if lowercase_tags then tag=tag:lower() end
+        if tag~="" and not seen[tag] then counts[tag]=(counts[tag] or 0)+1;seen[tag]=true end
+      end
+    end
+    if Mimir.Dataset.release then Mimir.Dataset.release(index) end
+  end
+  local discovered={}
+  for tag in pairs(counts) do discovered[#discovered+1]=tag end
+  table.sort(discovered)
+  if #discovered==0 then
+    error("Aucune classe dans les annotations du dataset ; fournir --tags-vocab ou des fichiers image + JSON/texte annotés")
+  end
+  tags_vocab_path=FS.join(out_dir,"tags_vocab.auto.txt")
+  if RESUME and file_exists(tags_vocab_path) then
+    local previous=assert(read_lines(tags_vocab_path))
+    if table.concat(previous,"\n")~=table.concat(discovered,"\n") then
+      error("Vocabulaire automatique modifié depuis le checkpoint ; utilisez le vocabulaire original avec --tags-vocab")
+    end
+  else
+    local f=assert(io.open(tags_vocab_path,"w"))
+    f:write(table.concat(discovered,"\n"),"\n");f:close()
+  end
+  automatic_weights={}
+  for i,tag in ipairs(discovered) do
+    automatic_weights[i]=math.max(1e-6,(sample_count-counts[tag])/counts[tag])
+  end
+  log(string.format("- classes découvertes dans le dataset : %d (%d images), vocabulaire=%s",#discovered,sample_count,tags_vocab_path))
 end
 if not file_exists(tags_vocab_path) then
   error("tags vocab introuvable: " .. tostring(tags_vocab_path))
@@ -179,13 +226,75 @@ local tags_vocab, err_vocab = read_lines(tags_vocab_path)
 if not tags_vocab then
   error("lecture tags vocab échouée: " .. tostring(err_vocab))
 end
-if #tags_vocab < 2 then
-  error("tags vocab trop petit (>=2 recommandé): " .. tostring(tags_vocab_path))
+if #tags_vocab < 1 then
+  error("tags vocab vide: " .. tostring(tags_vocab_path))
+end
+
+if class_composition_path == "" then
+  -- Prefer the report emitted beside --tags-vocab by build_tags_vocab.lua.
+  local candidates = {
+    default_class_composition_path(tags_vocab_path),
+    FS.join(dataset_root, "composition.json"),
+  }
+  for _, candidate in ipairs(candidates) do
+    if file_exists(candidate) then
+      class_composition_path = candidate
+      break
+    end
+  end
+end
+
+local class_pos_weights = use_class_composition_weights and automatic_weights or nil
+local composition_matched = class_pos_weights and #tags_vocab or 0
+if use_class_composition_weights and class_composition_path ~= "" then
+  if not file_exists(class_composition_path) then
+    error("composition de classes introuvable: " .. tostring(class_composition_path))
+  end
+  local MPK = dofile(ROOTWORK.."/scripts/modules/mpk.lua")
+  local comp, err_comp = MPK.read_json_file(class_composition_path)
+  if not comp then
+    error("lecture composition de classes échouée: " .. tostring(class_composition_path) .. ": " .. tostring(err_comp))
+  end
+  if type(comp) ~= "table" or type(comp.classes) ~= "table" then
+    error("composition de classes invalide: champ classes manquant")
+  end
+
+  local weights_by_tag = {}
+  for _, entry in ipairs(comp.classes) do
+    if type(entry) == "table" and type(entry.tag) == "string" then
+      local w = tonumber(entry.recommended_pos_weight)
+      if w and w > 0 and w < math.huge then
+        weights_by_tag[entry.tag] = w
+      end
+    end
+  end
+
+  class_pos_weights = {}
+  local matched = 0
+  for i, tag in ipairs(tags_vocab) do
+    local w = weights_by_tag[tag]
+    if w then
+      class_pos_weights[i] = w
+      matched = matched + 1
+    else
+      class_pos_weights[i] = bce_pos_weight
+    end
+  end
+  composition_matched = matched
+  if matched == 0 then
+    error("composition de classes invalide: aucune classe du vocabulaire ne correspond")
+  end
 end
 
 log("=== Train " .. arch .. " multi-label tags ===")
 log(string.format("- dataset_root=%s", dataset_root))
 log(string.format("- tags_vocab=%s (classes=%d)", tags_vocab_path, #tags_vocab))
+if class_composition_path ~= "" then
+  log(string.format("- class_composition=%s use_weights=%s", class_composition_path, tostring(use_class_composition_weights)))
+end
+if class_pos_weights then
+  log(string.format("- poids BCE de composition appliqués: %d/%d classes (autres: pos_weight=%.6g)", composition_matched, #tags_vocab, bce_pos_weight))
+end
 log(string.format("- out_dir=%s", out_dir))
 log(string.format("- image=%dx%dx%d", image_w, image_h, image_c))
 log(string.format("- base_channels=%d fc_hidden=%d", base_channels, fc_hidden))
@@ -195,11 +304,6 @@ log(string.format("- lowercase_tags=%s", tostring(lowercase_tags)))
 log(string.format("- val: every_epochs=%d every_steps=%d items=%d threshold=%.3f holdout=%s (frac=%.3f items=%d) pos_weight=%.3f",
   validate_every_epochs, validate_every_steps, validate_items, validate_threshold,
   tostring(validate_holdout), validate_holdout_frac, validate_holdout_items, bce_pos_weight))
-
--- Dataset (doit charger les textes)
-local ok_ds, n_or_err = Mimir.Dataset.load(dataset_root, image_w, image_h, 1, true, 'dataset_cache.json', 10240, true)
-assert_ok(ok_ds, n_or_err, "Dataset.load failed")
-log("✓ Dataset chargé: " .. tostring(n_or_err))
 
 -- Modèle
 local cfg0, err = Mimir.Architectures.default_config(arch)
@@ -221,6 +325,8 @@ cfg.seed = seed
 
 cfg.lowercase_tags = lowercase_tags
 cfg.tags_vocab = tags_vocab
+cfg.use_dataset_annotation_labels = true
+if class_pos_weights then cfg.class_pos_weights = class_pos_weights end
 
 -- Validation knobs (consommés côté C++)
 cfg.validate_items = validate_items
@@ -276,7 +382,7 @@ assert_ok(ok_train, err_train, "Model.train failed")
 
 -- Sauvegarde finale
 local final_dir = out_dir .. "/final"
-os.execute("mkdir -p " .. shell_quote(final_dir) .. " 2>/dev/null")
+FS.mkdir_p(final_dir)
 local ok_save, err_save = Mimir.Serialization.save(final_dir, "raw_folder", {
   save_optimizer = true,
   include_checksums = true,

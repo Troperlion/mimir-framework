@@ -1,20 +1,12 @@
-# Debugging & stabilité numérique
-
-## Pour qui
-
-Utilisateur intermédiaire à avancé.
-
-## Objectif
+# Débogage et stabilité numérique
 
 Optimiser, diagnostiquer et stabiliser des runs complexes.
 
-## Avant de commencer
+**Public concerné :** Utilisateur intermédiaire à avancé.
 
-Avoir déjà exécuté au moins un pipeline complet.
-
-## Résultat attendu
-
-Tu peux investiguer les problèmes de perf et de stabilité.
+> **Prérequis**
+>
+> Avoir déjà exécuté au moins un pipeline complet.
 
 
 Objectif : isoler rapidement si le problème vient de la **mémoire**, de la **stabilité numérique**, ou d’un **chemin API** (Lua → C++).
@@ -103,8 +95,22 @@ Options “enhanced” réellement supportées côté C++ (voir `src/Serializati
 - `save_tokenizer` (bool)
 - `save_encoder` (bool)
 
+Depuis la v1.3, le dump inclut aussi un bloc `framework_state` avec :
+
+- l’état runtime/backends et les overrides d’environnement MIMIR,
+- les capacités CPU détectées,
+- les métriques mémoire (`MemoryGuard`, `DynamicTensorAllocator`, `AdvancedRAMManager`),
+- la liste des layer types supportés,
+- un snapshot d’état modèle (`default_dtype`, `model_config`, etc.).
+
 Usage conseillé :
 
 - faire un dump juste avant le step qui casse
 - activer `include_gradients` uniquement si nécessaire (volume plus gros)
 - comparer deux dumps successifs (avant/après) sur min/max/mean
+
+## Étapes suivantes
+
+- [Page précédente : Performance (CPU)](01-Performance.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : LLM readiness (état réel)](03-LLM-Readiness.md)

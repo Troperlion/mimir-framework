@@ -5,14 +5,23 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <algorithm>
 #include <vector>
+#if !defined(_WIN32)
 #include <sys/mman.h>   // madvise, HugePages
 #include <unistd.h>
+#endif
 
 // ===== FP16 STORAGE + F16C =====
 
 namespace HardwareOpt {
+
+#if defined(_MSC_VER)
+#define MIMIR_RESTRICT __restrict
+#else
+#define MIMIR_RESTRICT __restrict__
+#endif
 
 // Conversion FP32 -> FP16 avec F16C
 inline void fp32_to_fp16_f16c(uint16_t* dst, const float* src, size_t count) {
@@ -115,11 +124,11 @@ inline void bf16_to_fp32(float* dst, const uint16_t* src, size_t count) {
 
 // Matmul optimisé avec FMA complètement saturé
 // Pipeline: 3 accumulateurs indépendants pour saturer les 2 ports FMA
-inline void matmul_fma_saturated(float* __restrict__ C, 
-                                  const float* __restrict__ A,
-                                  const float* __restrict__ B,
+template <bool Accumulate>
+inline void matmul_fma_saturated_impl(float* MIMIR_RESTRICT C,
+                                  const float* MIMIR_RESTRICT A,
+                                  const float* MIMIR_RESTRICT B,
                                   size_t M, size_t N, size_t K) {
-    std::memset(C, 0, M * N * sizeof(float));
 
     const size_t vecN8 = N & ~static_cast<size_t>(7);
     const size_t vecN24 = (N / 24) * 24;
@@ -144,8 +153,11 @@ inline void matmul_fma_saturated(float* __restrict__ C,
                 acc2 = _mm256_fmadd_ps(a_broadcast, b2, acc2);
             }
 
+            if constexpr (Accumulate) acc0 = _mm256_add_ps(_mm256_loadu_ps(&C[i * N + j]), acc0);
             _mm256_storeu_ps(&C[i * N + j], acc0);
+            if constexpr (Accumulate) acc1 = _mm256_add_ps(_mm256_loadu_ps(&C[i * N + j + 8]), acc1);
             _mm256_storeu_ps(&C[i * N + j + 8], acc1);
+            if constexpr (Accumulate) acc2 = _mm256_add_ps(_mm256_loadu_ps(&C[i * N + j + 16]), acc2);
             _mm256_storeu_ps(&C[i * N + j + 16], acc2);
         }
 
@@ -157,6 +169,7 @@ inline void matmul_fma_saturated(float* __restrict__ C,
                 __m256 b = _mm256_loadu_ps(&B[k * N + j]);
                 acc = _mm256_fmadd_ps(a_broadcast, b, acc);
             }
+            if constexpr (Accumulate) acc = _mm256_add_ps(_mm256_loadu_ps(&C[i * N + j]), acc);
             _mm256_storeu_ps(&C[i * N + j], acc);
         }
 
@@ -166,15 +179,30 @@ inline void matmul_fma_saturated(float* __restrict__ C,
             for (size_t k = 0; k < K; ++k) {
                 acc += A[i * K + k] * B[k * N + j];
             }
-            C[i * N + j] = acc;
+            if constexpr (Accumulate) C[i * N + j] += acc;
+            else C[i * N + j] = acc;
         }
     }
 }
 
+inline void matmul_fma_saturated(float* MIMIR_RESTRICT C,
+                                  const float* MIMIR_RESTRICT A,
+                                  const float* MIMIR_RESTRICT B,
+                                  size_t M, size_t N, size_t K) {
+    matmul_fma_saturated_impl<false>(C,A,B,M,N,K);
+}
+
+inline void matmul_add_fma_saturated(float* MIMIR_RESTRICT C,
+                                      const float* MIMIR_RESTRICT A,
+                                      const float* MIMIR_RESTRICT B,
+                                      size_t M, size_t N, size_t K) {
+    matmul_fma_saturated_impl<true>(C,A,B,M,N,K);
+}
+
 // Convolution 2D avec FMA saturé
-inline void conv2d_fma_saturated(float* __restrict__ output,
-                                  const float* __restrict__ input,
-                                  const float* __restrict__ kernel,
+inline void conv2d_fma_saturated(float* MIMIR_RESTRICT output,
+                                  const float* MIMIR_RESTRICT input,
+                                  const float* MIMIR_RESTRICT kernel,
                                   int in_h, int in_w, int out_h, int out_w,
                                   int kernel_size, int stride, int padding) {
     std::memset(output, 0, out_h * out_w * sizeof(float));
@@ -329,6 +357,11 @@ public:
     static void* allocate_huge(size_t size) {
         // Round up to hugepage boundary
         size_t aligned_size = ((size + HUGEPAGE_SIZE - 1) / HUGEPAGE_SIZE) * HUGEPAGE_SIZE;
+
+#if defined(_WIN32)
+        // Windows fallback: standard heap allocation in cross-builds.
+        return std::malloc(aligned_size);
+#else
         
         void* ptr = mmap(nullptr, aligned_size,
                         PROT_READ | PROT_WRITE,
@@ -358,14 +391,20 @@ public:
         }
         
         return ptr;
+#endif
     }
     
     // Libérer
     static void deallocate_huge(void* ptr, size_t size) {
+#if defined(_WIN32)
+        (void)size;
+        std::free(ptr);
+#else
         if (ptr) {
             size_t aligned_size = ((size + HUGEPAGE_SIZE - 1) / HUGEPAGE_SIZE) * HUGEPAGE_SIZE;
             munmap(ptr, aligned_size);
         }
+#endif
     }
     
     // Allouer buffer avec HugePages
@@ -428,5 +467,7 @@ public:
 };
 
 } // namespace HardwareOpt
+
+#undef MIMIR_RESTRICT
 
 #endif // __HARDWARE_OPT_HPP__

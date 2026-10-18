@@ -1,20 +1,34 @@
-# API : `Mimir.Architectures`
-
-## Pour qui
-
-Développeur et utilisateur intermédiaire/avancé.
-
-## Objectif
+# `Mimir.Architectures`
 
 Trouver rapidement le contrat API réel et les paramètres utilisables.
 
-## Avant de commencer
+**Public concerné :** Développeur et utilisateur intermédiaire/avancé.
 
-Connaître les commandes de base de Mímir.
+> **Prérequis**
+>
+> Connaître les commandes de base de Mímir.
 
-## Résultat attendu
+## Sur cette page
 
-Tu peux appeler l'API sans ambiguïté de signature ou de comportement.
+- [Diagrammes d'explication](#diagrammes-dexplication)
+- [available() -> table<string> | (nil, err)](#available---tablestring-nil-err)
+- [defaultconfig(name: string) -> table | (nil, err)](#defaultconfigname-string---table-nil-err)
+- [info(name?: string) -> ArchitectureInfo[] | ArchitectureInfo | (nil, err)](#infoname-string---architectureinfo-architectureinfo-nil-err)
+- [dtypes() -> DTypeInfo[]](#dtypes---dtypeinfo)
+- [Création de modèles](#création-de-modèles)
+- [Alias / rétrocompat](#alias-rétrocompat)
+- [Architectures disponibles](#architectures-disponibles)
+- [Étapes suivantes](#étapes-suivantes)
+
+## Diagrammes d'explication
+
+![Taxonomie du registre](../graphs/05_registry_taxonomy.svg)
+
+![Architecture VGG16](../graphs/21_vgg16_architecture.svg)
+
+![Architecture VGG19](../graphs/22_vgg19_architecture.svg)
+
+![Comparaison de modèles](../graphs/23_model_comparison.svg)
 
 
 Le registre d’architectures est la manière recommandée de créer des modèles.
@@ -61,11 +75,15 @@ Chaque entrée est une table :
 | `name` | `string` | Nom canonique (clé du registry) |
 | `description` | `string` | Description courte (peut être vide) |
 | `config` | `table` | Config par défaut complète (peut contenir un champ `dtype`) |
+| `origin` | `"native"` ou `"mpk"` | Origine explicite de l'entrée |
+| `source_path` | `string?` | Chemin du package pour une entrée MPK |
 
 Notes :
 
-- C’est le seul accesseur qui expose le champ `description` du registry C++.
+- C’est le seul accesseur qui expose la description et l’origine du registre C++.
 - `config` est identique à ce que renvoie `default_config(name)`.
+- `inspect_architectures.lua -a` affiche les noms natifs en cyan et les noms
+  issus d’un MPK en magenta.
 
 Exemple :
 
@@ -110,18 +128,57 @@ end
 
 ## Alias / rétrocompat
 
-Certains noms historiques sont normalisés (ex: PonyXL). Voir `canonicalArchName` dans le code du registre.
+Quelques noms sont normalisés par `canonicalArchName`.
 
 Canonicalisation observée dans le registre C++ :
 
-- anciens noms PonyXL (ex: `ponyxl_ddpm`, `t2i_autoencoder`, `ponyxl_sdxl_stub`, `ponyxl_sdxl_unet2d`) -> `ponyxl_sdxl`
 - variantes conviviales `SD3.5` / `sd3.5` / `SD3_5` -> `sd3_5`
-
-Recommandation : utilisez les noms canoniques pour les configs et la sérialisation (ils sont stables), et ne comptez sur les alias que pour charger des anciens scripts.
 
 ---
 
 ## Architectures disponibles
+
+Le registre C++ contient actuellement 26 entrées natives canoniques :
+
+| Famille | Architectures |
+| --- | --- |
+| Général | `basic_mlp` |
+| Texte | `causal_lm`, `transformer`, `vae_text`, `vae_text_decode`, `hf_clip_text_encoder_1`, `hf_clip_text_encoder_2` |
+| Vision | `vit`, `vae`, `vae_conv`, `vae_conv_decode`, `resnet`, `unet`, `mobilenet`, `vgg16`, `vgg19`, `vgg16_feat`, `hf_vae_decoder` |
+| Diffusion/latent | `diffusion`, `cond_diffusion`, `lumen_diffusion`, `sd3_5`, `hf_sdxl_transformer_block`, `gan_latent` |
+| Discrimination/import | `patch_discriminator`, `external_safetensors_base` |
+
+Cette liste décrit les clés effectivement enregistrées. Les alias acceptés peuvent
+être canonicalisés vers une autre entrée. Pour ne jamais dépendre d’une liste
+documentaire potentiellement ancienne :
+
+```bash
+./bin/mimir --lua scripts/tools/inspect_architectures.lua -- -a
+```
+
+Le nombre affiché au démarrage peut être supérieur : les sources `.mpk` et
+binaires `.mpk.bin` présentes dans `_archi/` sont ajoutées dynamiquement.
+Le dépôt fournit actuellement `r_cnn`, `yolo`, `ssd` et `deeplab`. Voir
+[MPK : packages d’architecture](../02-User-Guide/15-MPK.md).
+
+Les quatre architectures de vision MPK sont des prototypes à délégation :
+
+| MPK | Fabrique native utilisée | Statut |
+| --- | --- | --- |
+| `r_cnn` | `vgg16` | backbone exécutable, tête R-CNN documentaire |
+| `yolo` | `mobilenet` | backbone exécutable, neck/têtes YOLO documentaires |
+| `ssd` | `vgg16` | backbone exécutable, têtes MultiBox documentaires |
+| `deeplab` | `resnet` | backbone exécutable, ASPP/décodeur documentaires |
+
+Leur présence dans `available()` ne signifie pas encore que ROI, décodage de
+boîtes ou convolution atrous spécialisée sont implémentés. NMS est disponible
+comme layer runtime CPU/CUDA/Vulkan/OpenCL en forward et backward stop-gradient,
+et figure dans les graphes documentaires R-CNN, YOLO et SSD.
+
+La présence dans le registre signifie que le builder existe. Elle ne signifie pas
+que l’architecture est complète pour tous les usages : `sd3_5` est explicitement
+un squelette/placeholder et `external_safetensors_base` sert à refléter un
+checkpoint, pas à exécuter une inférence autonome.
 
 ### Modèles MLP
 
@@ -182,11 +239,41 @@ Sortie : `[logits(seq*vocab) || mu(latent_dim) || logvar(latent_dim) || img_proj
   "image_w": 64, "image_h": 64, "image_c": 3,
   "latent_h": 16, "latent_w": 16, "latent_c": 256,
   "base_channels": 64, "stochastic_latent": false,
-  "use_attention": true, "enc_norm": "groupnorm",
-  "enc_gn_groups": 32, "attn_heads": 4,
-  "text_cond": false
+  "resnet": true, "resnet_max_tokens": 0,
+  "attention": false, "attn_heads": 4, "attn_max_tokens": 0,
+  "enc_norm": "groupnorm", "enc_gn_groups": 32,
+  "dec_norm": "groupnorm", "dec_gn_groups": 32,
+  "decoder_upsample": "conv_transpose",
+  "use_skip_connections": false,
+  "use_encoder_prior": false,
+  "text_cond": false, "seq_len": 64,
+  "text_d_model": 256, "proj_dim": 256
 }
 ```
+
+Contrat de sortie :
+
+```text
+recon[image_dim] || mu[latent_dim] || logvar[latent_dim]
+```
+
+Si `text_cond=true`, la sortie ajoute `img_proj[proj_dim] || txt_proj[proj_dim]`.
+
+Points importants :
+
+- `resnet` active les **ResBlocks** ;
+- `attention` active la SelfAttention spatiale ;
+- `attn_max_tokens=0` signifie aucune limite et peut être très coûteux ;
+- `use_encoder_prior=true` ajoute un biais latent global apprenable à `z`, sans modifier la zone `mu` de la sortie ;
+- `stochastic_latent=false` donne `z=mu`, alors que `true` active la réparamétrisation pendant l’entraînement ;
+- `decoder_upsample` accepte `nearest_conv`, `bilinear_conv`, `pixel_shuffle` et l'ancien mode `conv_transpose` ;
+- les ratios `image_h/latent_h` et `image_w/latent_w` doivent être identiques et être une puissance de deux.
+
+Guide détaillé : [VAEConv : architecture, configuration et entraînement](../02-User-Guide/14-VAEConv.md).
+
+**`vae_conv_decode`** — Décodeur VAEConv autonome
+
+Il prend un latent CHW aplati de taille `latent_dim` et produit une image HWC aplatie de taille `image_dim`. Il reconstruit les noms de layers du décodeur principal afin de charger les poids compatibles. Si le VAE complet utilisait des skips encodeur, le décodeur autonome les remplace par des tenseurs zéro fixes : son résultat n’est donc pas strictement équivalent au chemin complet avec skips.
 
 **`vit`** — Vision Transformer (ViT)
 
@@ -199,6 +286,20 @@ Sortie : `[logits(seq*vocab) || mu(latent_dim) || logvar(latent_dim) || img_proj
 
 **`resnet`** — ResNet-18 like  
 **`vgg16`** / **`vgg19`** — VGG classique  
+**`vgg16_feat`** — extracteur de caractéristiques VGG16
+
+```json
+{
+  "image_w": 64, "image_h": 64, "image_c": 3,
+  "base_channels": 8,
+  "enc_norm": "lineargroup", "enc_gn_groups": 32
+}
+```
+
+`enc_norm` accepte `lineargroup` (LayerNorm globale historique sur `C*H*W`)
+ou `groupnorm`. Pour `groupnorm`, chaque bloc choisit le plus grand diviseur du
+nombre de canaux inférieur ou égal à `enc_gn_groups`.
+
 **`mobilenet`** — MobileNet v1 like
 
 ### Discriminateurs
@@ -224,37 +325,6 @@ Sortie : `[logits(seq*vocab) || mu(latent_dim) || logvar(latent_dim) || img_proj
   "prompt_dim": 128, "latent_w": 32, "latent_h": 32, "latent_c": 4,
   "time_dim": 128, "hidden_dim": 2048
 }
-```
-
-**`ponyxl_sdxl`** / `ponyxl_ddpm` (alias) — SDXL-like complet 🔥
-
-Config principale (extraits) :
-```json
-{
-  "d_model": 256, "max_vocab": 32000, "text_ctx_len": 1300,
-  "latent_seq_len": 4096, "latent_in_dim": 64,
-  "num_heads": 8, "unet_layers": 16, "text_layers": 8,
-  "image_w": 64, "image_h": 64, "image_c": 3,
-  "ddpm_steps": 1000, "ddpm_beta_start": 1e-4, "ddpm_beta_end": 0.02,
-  "peltier_noise": true, "peltier_mix": 0.65,
-  "caption_structured_enable": true,
-  "vae_arch": "vae_conv", "vae_scale": 1.0,
-  "cfg_dropout_prob": 0.10
-}
-```
-
-Méthodes spécifiques :
-```lua
--- Entraînement
-local stats = model:train_step_sdxl_latent_diffusion(prompt, rgb, w, h, opt, lr)
--- stats: loss, timestep, kl_divergence, wasserstein, entropy_diff, ...
-
--- Validation
-local val = model:validate_step_sdxl_latent_diffusion(prompt, wrong_prompt, rgb, w, h)
--- val: eps_mse, x0_mse, img_mse, eps_mse_wrong, assoc_margin
-
--- Génération
-local img = model:text2img_sdxl_latent_diffusion(prompt, seed, steps, guidance_scale)
 ```
 
 **`sd3_5`** — Placeholder SD3.5 (stub)
@@ -326,3 +396,8 @@ Champs optionnels supplémentaires : `include_prefixes` / `exclude_prefixes`
 > `Mimir.Architectures.default_config(name)` (ou `info(name)`) pour obtenir la config
 > exacte à jour côté runtime.
 
+## Étapes suivantes
+
+- [Page précédente : API : `Mimir.Model`](10-Model.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : API : `Mimir.Tokenizer`](12-Tokenizer.md)

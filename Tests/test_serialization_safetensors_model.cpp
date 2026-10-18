@@ -2,10 +2,12 @@
 
 #include "Models/Registry/ModelArchitectures.hpp"
 #include "Serialization/Serialization.hpp"
+#include "DType.hpp"
 
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 
 static int compare_model_weights(const Model& a, const Model& b, float eps) {
@@ -80,8 +82,12 @@ int main() {
     };
     const Case cases[] = {
         {"float32", "F32", 1e-6f},
+        {"f32", "F32", 1e-6f},
         {"float16", "F16", 5e-3f},
+        {"f16", "F16", 5e-3f},
+        {"fp16", "F16", 5e-3f},
         {"bfloat16", "BF16", 2e-2f},
+        {"bf16", "BF16", 2e-2f},
         {"float64", "F64", 1e-6f},
     };
 
@@ -93,7 +99,7 @@ int main() {
 
         auto modelA = ModelArchitectures::create("basic_mlp", cfgA);
         TASSERT_TRUE(modelA != nullptr);
-        TASSERT_TRUE(modelA->getDefaultDType() == std::string(c.dtype));
+        TASSERT_TRUE(Mimir::parse_dtype(modelA->getDefaultDType()) == Mimir::parse_dtype(c.dtype));
         modelA->allocateParams();
         modelA->initializeWeights("xavier", 123u);
 
@@ -110,6 +116,20 @@ int main() {
         modelA->setEncoder(enc);
         modelA->setHasEncoder(true);
 
+        if (std::string(c.expected_tag) == "F32") {
+            Optimizer optimizer;
+            optimizer.type = OptimizerType::LAMB;
+            optimizer.step = 23;
+            optimizer.weight_decay = 0.02f;
+            size_t moment_count = 0;
+            for (const auto& layer : modelA->getLayers()) moment_count += layer.getWeightsSize();
+            optimizer.m.assign(moment_count, 0.1f);
+            optimizer.v.assign(moment_count, 0.3f);
+            optimizer.m[1] = 0.2f;
+            optimizer.v[1] = 0.4f;
+            modelA->setSerializedOptimizer(std::move(optimizer));
+        }
+
         const std::filesystem::path p = tmp / (std::string("mimir_test_model_") + c.expected_tag + ".safetensors");
         std::filesystem::remove(p);
 
@@ -117,10 +137,20 @@ int main() {
         sopts.format = CheckpointFormat::SafeTensors;
         sopts.save_tokenizer = true;
         sopts.save_encoder = true;
-        sopts.save_optimizer = false;
+        sopts.save_optimizer = std::string(c.expected_tag) == "F32";
+        sopts.custom_metadata = R"({"run":"dtype-test","seed":123})";
 
         std::string err;
         TASSERT_TRUE(save_checkpoint(*modelA, p.string(), sopts, &err));
+
+        {
+            std::ifstream serialized(p, std::ios::binary);
+            TASSERT_TRUE((bool)serialized);
+            const std::string bytes((std::istreambuf_iterator<char>(serialized)),
+                                    std::istreambuf_iterator<char>());
+            TASSERT_TRUE(bytes.find("\"image_width\"") == std::string::npos);
+            TASSERT_TRUE(bytes.find("\"image_height\"") == std::string::npos);
+        }
 
         // Header should advertise expected dtype on at least one weights tensor.
         {
@@ -134,10 +164,20 @@ int main() {
             }
             TASSERT_TRUE(!first_weight.empty());
             json header = read_safetensors_header_json(p);
+            TASSERT_TRUE(header.contains("__metadata__"));
+            for (auto it = header["__metadata__"].begin(); it != header["__metadata__"].end(); ++it) {
+                TASSERT_TRUE(it.value().is_string());
+            }
+            TASSERT_TRUE(json::parse(header["__metadata__"]["custom"].get<std::string>())["seed"] == 123);
             TASSERT_TRUE(header.contains(first_weight));
             TASSERT_TRUE(header[first_weight].contains("dtype"));
             const std::string dt = header[first_weight]["dtype"].get<std::string>();
             TASSERT_TRUE(dt == c.expected_tag);
+
+            std::ifstream raw(p, std::ios::binary);
+            TASSERT_TRUE((bool)raw);
+            const uint64_t padded_header_len = read_u64_le(raw);
+            TASSERT_TRUE((padded_header_len % 8) == 0);
         }
 
         // Load into a fresh model with different init weights, to make sure load overwrites.
@@ -151,12 +191,25 @@ int main() {
         lopts.strict_mode = true;
         lopts.load_tokenizer = true;
         lopts.load_encoder = true;
-        lopts.load_optimizer = false;
+        lopts.load_optimizer = std::string(c.expected_tag) == "F32";
 
-        TASSERT_TRUE(load_checkpoint(*modelB, p.string(), lopts, &err));
+        std::string logged_tensor_name;
+        for (const auto& layer : modelA->getLayers()) {
+            if (layer.weight_block && layer.weight_block->getSize() > 0) {
+                logged_tensor_name = layer.name + "/weights";
+                break;
+            }
+        }
+        std::ostringstream load_log;
+        std::streambuf* previous_cerr = std::cerr.rdbuf(load_log.rdbuf());
+        const bool loaded = load_checkpoint(*modelB, p.string(), lopts, &err);
+        std::cerr.rdbuf(previous_cerr);
+        TASSERT_TRUE(loaded);
+        TASSERT_TRUE(load_log.str().find(logged_tensor_name) != std::string::npos);
+        TASSERT_TRUE(load_log.str().find(" | sha256:") != std::string::npos);
 
-        // DType should be restored from checkpoint config metadata.
-        TASSERT_TRUE(modelB->getDefaultDType() == std::string(c.dtype));
+        // DType should be restored semantically (aliases allowed: f16/fp16/float16...).
+        TASSERT_TRUE(Mimir::parse_dtype(modelB->getDefaultDType()) == Mimir::parse_dtype(c.dtype));
 
         // Weights should match (within dtype quantization error if any).
         TASSERT_TRUE(compare_model_weights(*modelA, *modelB, c.eps) == 0);
@@ -167,6 +220,32 @@ int main() {
         TASSERT_TRUE(modelB->getEncoder().vocab_size == modelA->getEncoder().vocab_size);
         TASSERT_TRUE(!modelB->getEncoder().token_embeddings.empty());
 
+        if (std::string(c.expected_tag) == "F32") {
+            const Optimizer* optimizer = modelB->getSerializedOptimizer();
+            TASSERT_TRUE(optimizer != nullptr);
+            TASSERT_TRUE(optimizer->type == OptimizerType::LAMB);
+            TASSERT_TRUE(optimizer->step == 23);
+            TASSERT_NEAR(optimizer->weight_decay, 0.02f, 1e-6f);
+            TASSERT_TRUE(optimizer->m.size() == modelA->getSerializedOptimizer()->m.size() && optimizer->v.size() == modelA->getSerializedOptimizer()->v.size());
+        }
+
+        std::filesystem::remove(p);
+    }
+
+    // Invalid custom JSON must be reported, never silently discarded.
+    {
+        auto model = ModelArchitectures::create("basic_mlp", cfg);
+        TASSERT_TRUE(model != nullptr);
+        model->allocateParams();
+        const auto p = tmp / "mimir_test_invalid_custom_metadata.safetensors";
+        SaveOptions options;
+        options.format = CheckpointFormat::SafeTensors;
+        options.save_tokenizer = false;
+        options.save_encoder = false;
+        options.custom_metadata = "{invalid";
+        std::string error;
+        TASSERT_TRUE(!save_checkpoint(*model, p.string(), options, &error));
+        TASSERT_TRUE(!error.empty());
         std::filesystem::remove(p);
     }
     return 0;

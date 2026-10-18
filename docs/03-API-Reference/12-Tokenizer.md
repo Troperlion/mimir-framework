@@ -1,20 +1,12 @@
-# API : `Mimir.Tokenizer`
-
-## Pour qui
-
-Développeur et utilisateur intermédiaire/avancé.
-
-## Objectif
+# `Mimir.Tokenizer`
 
 Trouver rapidement le contrat API réel et les paramètres utilisables.
 
-## Avant de commencer
+**Public concerné :** Développeur et utilisateur intermédiaire/avancé.
 
-Connaître les commandes de base de Mímir.
-
-## Résultat attendu
-
-Tu peux appeler l'API sans ambiguïté de signature ou de comportement.
+> **Prérequis**
+>
+> Connaître les commandes de base de Mímir.
 
 
 Source : `src/scriptings/Lua/luaScripting/LuaScripting.cpp`.
@@ -57,3 +49,9 @@ Note : `tokenize()` utilise actuellement la tokenisation BPE (`tokenizeBPE`) cô
 
 - `save(path: string)`
 - `load(path: string)`
+
+## Étapes suivantes
+
+- [Page précédente : API : `Mimir.Architectures`](11-Architectures.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : API : `Mimir.Dataset`](13-Dataset.md)

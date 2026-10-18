@@ -1,0 +1,175 @@
+{
+  "$schema": "conf.schema.json",
+  "description": "Entraînement VAE convolutionnel générique v6 — 512×512, latent 128ch 64×64",
+  "_doc": {
+    "usage": "./bin/mimir --conf configs/vae_conv-config.json [--run <task>] [--override <key=val> ...]",
+    "tasks_disponibles": {
+      "train": "Lancement de l'entraînement complet (tâche par défaut)",
+      "infer": "Génération d'images depuis le dernier checkpoint",
+      "resume": "Reprise de l'entraînement depuis le dernier checkpoint sauvegardé"
+    },
+    "exemples": [
+      "./bin/mimir --conf configs/vae_conv-config.json",
+      "./bin/mimir --conf configs/vae_conv-config.json --run train",
+      "./bin/mimir --conf configs/vae_conv-config.json --run infer",
+      "./bin/mimir --conf configs/vae_conv-config.json --run resume",
+      "./bin/mimir --conf configs/vae_conv-config.json --override training.learning_rate=5e-6",
+      "./bin/mimir --conf configs/vae_conv-config.json --run train --override model.base_channels=16"
+    ],
+    "sections": {
+      "env": "Variables d'environnement à passer au shell AVANT le lancement (non appliquées par mimir). Servent de documentation / rappel.",
+      "lua": "Section par défaut: liste de scripts Lua exécutés séquentiellement sans --run.",
+      "tasks": "Tâches nommées. Chacune contient son propre bloc 'lua'. Sélectionnée via --run <name>.",
+      "model": "Configuration de l'architecture. Transmise intégralement à CONF.model dans les scripts Lua. La clé 'architecture' détermine les champs valides (voir le JSON Schema).",
+      "training": "Hyperparamètres d'entraînement. Transmis à CONF.training dans les scripts Lua. Les clés non standard (ex: out_dir, kl_beta) sont passées telles quelles au script.",
+      "dataset": "Chemins et paramètres du dataset. Transmis à CONF.dataset dans les scripts Lua.",
+      "visualization": "Configuration de la fenêtre SFML (Visualizer). Lue directement par le runtime C++.",
+      "logging": "Options d'affichage console. Lues par les scripts Lua via CONF.logging.",
+      "inference": "Paramètres de génération. Transmis à CONF.inference dans les scripts Lua."
+    },
+    "override_syntax": "Les overrides utilisent la notation pointée: 'section.clé=valeur'. Ex: --override model.base_channels=16 --override training.learning_rate=1e-4",
+    "conf_glob": "CONF (table Lua globale) contient l'intégralité du fichier JSON fusionné avec les overrides. CONF_PATH = chemin absolu du fichier. CONF_DIR = répertoire du fichier."
+  },
+  "env": {
+    "MIMIR_ACCEL_VERBOSE": 0,
+    "MIMIR_PLANNER_TRACE": 0,
+    "MIMIR_PLANNER_DUMP": 0,
+    "OMP_NUM_THREADS": 10
+  },
+  "lua": {
+    "scripts": [
+      {
+        "script": "scripts/training/train_vae_conv.lua",
+        "args": []
+      }
+    ]
+  },
+  "tasks": {
+    "train": {
+      "description": "Entraînement complet depuis zéro (resume=0)",
+      "lua": {
+        "scripts": [
+          {
+            "script": "scripts/training/train_vae_conv.lua",
+            "args": []
+          }
+        ]
+      }
+    },
+    "resume": {
+      "description": "Reprise de l'entraînement depuis le dernier checkpoint",
+      "lua": {
+        "scripts": [
+          {
+            "script": "scripts/training/train_vae_conv.lua",
+            "args": []
+          }
+        ]
+      }
+    },
+    "infer": {
+      "description": "Génération d'images depuis le checkpoint entraîné",
+      "lua": {
+        "scripts": [
+          {
+            "script": "scripts/inferences/infer_vae_conv.lua",
+            "args": [
+              "--num-samples",
+              "16",
+              "--output-dir",
+              "exports/vae_conv_samples/"
+            ]
+          }
+        ]
+      }
+    },
+    "list-archi": {
+      "description": "liste les architecture disponnible dans le framework",
+      "lua": {
+        "scripts": [
+          {
+            "script": "scripts/tools/inspect_architectures.lua",
+            "args": [
+              "-a",
+              "--dtype",
+              "--runtimes",
+              "--opts"
+            ]
+          },
+          {
+            "script": "scripts/tools/inspect_architectures.lua",
+            "args": [
+              "-l",
+              "vae_conv",
+              "--layers",
+              "--stats",
+              "-p",
+              "--dtype",
+              "--runtimes",
+              "--opts"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "model": {
+    "architecture": "vae_conv",
+    "image_w": 512,
+    "image_h": 512,
+    "image_c": 3,
+    "latent_h": 64,
+    "latent_w": 64,
+    "latent_c": 128,
+    "base_channels": 8,
+    "latent_spatial_context": true,
+    "latent_context_channels": 32,
+    "latent_detail_path": true,
+    "decoder_upsample": "nearest_conv",
+    "d_model": 512,
+    "stochastic_latent": true,
+    "use_encoder_prior": true,
+    "use_skip_connections": false,
+    "resnet": true,
+    "attention": false,
+    "enc_norm": "groupnorm",
+    "text_cond": false,
+    "seq_len": 75
+  },
+  "training": {
+    "num_epochs": 35,
+    "learning_rate": 0.00001,
+    "warmup_steps": 6000,
+    "optimizer": "adamw",
+    "kl_beta": 0.01,
+    "bbox_loss_weight": 1.0,
+    "kl_warmup_steps": 1900,
+    "seed": 1313,
+    "dtype": "float16",
+    "out_dir": "checkpoint/vae_conv-generique.v6/",
+    "log_every": 1,
+    "validate_every_steps": 100,
+    "validate_items": 100,
+    "validate_holdout_frac": 0.1,
+    "resume": 0,
+    "save_every_epoch": 1,
+    "encoder_prior_lr": 0.01,
+    "semantic_label_study": true,
+    "semantic_label_topk": 8,
+    "semantic_label_min_df": 2
+  },
+  "dataset": {
+    "root": "datasets/images"
+  },
+  "visualization": {
+    "enabled": true,
+    "hide_activation_blocks": false,
+    "hide_normalisation_blocks": false,
+    "loss_log_file": "checkpoint/vae_conv-generique.v6/loss_history-part1.csv",
+    "csv_dir": "checkpoint/vae_conv-generique.v6"
+  },
+  "logging": {
+    "show_htop_display": false,
+    "show_viz_display": true
+  }
+}

@@ -1,20 +1,20 @@
-# Checkpoints / reprise d’entraînement
-
-## Pour qui
-
-Débutant à intermédiaire.
-
-## Objectif
+# Checkpoints et reprise d’entraînement
 
 Sauvegarder, charger et reprendre sans perdre d'état utile.
 
-## Avant de commencer
+**Public concerné :** Débutant à intermédiaire.
 
-Avoir un modèle en mémoire (créé ou entraîné).
+> **Prérequis**
+>
+> Avoir un modèle en mémoire (créé ou entraîné).
 
-## Résultat attendu
+## Diagrammes d'explication
 
-Tu peux reprendre un run de manière fiable.
+![Sérialisation des checkpoints](../graphs/09_serialization_checkpoint.svg)
+
+![Inspection et export](../graphs/10_inspection_export.svg)
+
+![Flux d'analyse de checkpoint](../graphs/25_checkpoint_analysis_flow.svg)
 
 
 ## Deux APIs existent
@@ -33,9 +33,9 @@ local ok, err = Mimir.Serialization.save("checkpoint/run1", "raw_folder", {
   include_git_info = true,
 })
 assert(ok, err)
+```
 
 Note dtype : le dtype de stockage (f16/bf16/f32/f64) est contrôlé par `cfg.dtype` (recommandé) ou par `Mimir.Model.dtype("...")`. Lors d’un `load()`, si le checkpoint contient `model_config.dtype`, il est réappliqué au runtime.
-```
 
 Formats disponibles :
 
@@ -66,3 +66,9 @@ Bon pattern :
 - reprendre via `scripts/modules/checkpoint_resume.lua`
 
 VAEText : voir `scripts/training/train_vae_texte.lua`.
+
+## Étapes suivantes
+
+- [Page précédente : Tokenizer & ConditioningEncoder](07-Tokenizer-Encoder.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Mode `--conf`: Config-Driven Scripting](08-Config-Driven-Scripting.md)

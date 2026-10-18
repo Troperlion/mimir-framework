@@ -85,6 +85,32 @@ jobs:
               tail = "-".join([t for t in tail_parts if t])
               return f"{prefix}-{tail}" if tail else prefix
 
+          def resolve_docs_asset(link: str, rel_doc_path: pathlib.PurePosixPath):
+              """Resolve a local asset link to a docs-relative path when possible."""
+              if (link.startswith("#")
+                      or link.startswith("http://")
+                      or link.startswith("https://")):
+                  return None
+
+              asset = link.split("#", 1)[0]
+              if not asset:
+                  return None
+
+              try:
+                  resolved = (DOCS_ROOT / rel_doc_path.parent / pathlib.PurePosixPath(asset)).resolve()
+                  rel = resolved.relative_to(DOCS_ROOT.resolve())
+                  return pathlib.PurePosixPath(rel.as_posix())
+              except (ValueError, RuntimeError):
+                  return None
+
+          def copy_asset(asset_rel: pathlib.PurePosixPath):
+              src = DOCS_ROOT / asset_rel
+              dst = WIKI_DIR / asset_rel
+              if not src.exists() or not src.is_file():
+                  return
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(src, dst)
+
           def fix_links(content: str, rel_doc_path: pathlib.PurePosixPath) -> str:
               """
               Rewrite markdown links so they point to wiki page names.
@@ -95,13 +121,21 @@ jobs:
               base_dir = rel_doc_path.parent
 
               def replace(m):
-                  text = m.group(1)
-                  link = m.group(2)
+                  bang = m.group(1) or ""
+                  text = m.group(2)
+                  link = m.group(3)
 
                   # Leave anchors, external URLs, image extensions intact
                   if (link.startswith("#")
                           or link.startswith("http://")
                           or link.startswith("https://")):
+                      return m.group(0)
+
+                  if bang == "!":
+                      asset_rel = resolve_docs_asset(link, rel_doc_path)
+                      if asset_rel is not None:
+                          copy_asset(asset_rel)
+                          return f"![{text}]({asset_rel.as_posix()})"
                       return m.group(0)
 
                   # Separate path from optional #anchor fragment
@@ -172,7 +206,7 @@ jobs:
 
                   return m.group(0)
 
-              return re.sub(r"\[([^\]]+)\]\(([^)]*)\)", replace, content)
+              return re.sub(r"(!?)\[([^\]]+)\]\(([^)]*)\)", replace, content)
 
           # ── Clone wiki ────────────────────────────────────────────────────────
           if WIKI_DIR.exists():
@@ -222,6 +256,8 @@ jobs:
           SidebarEntry = tuple[str, str]
           sidebar_entries: dict[str, list[SidebarEntry]] = {}
           root_entries: list[SidebarEntry] = []
+          asset_re = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+          copied_assets = set()
 
           for sec, rel in docs_files:
               page_name = wiki_page_name(rel)
@@ -229,7 +265,6 @@ jobs:
               content = src.read_text(encoding="utf-8")
               content = fix_links(content, rel)
               (WIKI_DIR / f"{page_name}.md").write_text(content, encoding="utf-8")
-
               if sec is not None:
                   # Display keeps subpath context inside a section when nested.
                   rel_parts = list(rel.parts[1:])
@@ -245,6 +280,16 @@ jobs:
               elif rel.as_posix() != "00-INDEX.md":
                   display = strip_num(pathlib.Path(rel.name).stem).replace("-", " ")
                   root_entries.append((page_name, display))
+
+              # Copy referenced assets for this page so wiki images resolve locally.
+              for match in asset_re.finditer(content):
+                  asset_rel = resolve_docs_asset(match.group(1), rel)
+                  if asset_rel is None:
+                      continue
+                  if asset_rel.as_posix() in copied_assets:
+                      continue
+                  copied_assets.add(asset_rel.as_posix())
+                  copy_asset(asset_rel)
 
           # ── Generate _Sidebar.md ──────────────────────────────────────────────
           sidebar_lines = ["## Navigation\n", "**[[Home]]**\n"]

@@ -7,43 +7,57 @@
 // Thread-local so it works with OpenMP threads and avoids cross-call interference.
 namespace MimirRng {
 
-inline thread_local bool g_seeded = false;
-inline thread_local bool g_initialized = false;
-inline thread_local std::mt19937 g_gen;
+inline bool& seededFlag() {
+    static thread_local bool value = false;
+    return value;
+}
+
+inline bool& initializedFlag() {
+    static thread_local bool value = false;
+    return value;
+}
+
+inline std::mt19937& generatorStorage() {
+    static thread_local std::mt19937 gen;
+    return gen;
+}
 
 inline void setSeed(uint32_t seed) {
-    g_gen.seed(seed);
-    g_seeded = true;
-    g_initialized = true;
+    auto& gen = generatorStorage();
+    gen.seed(seed);
+    seededFlag() = true;
+    initializedFlag() = true;
 }
 
 inline void clearSeed() {
-    g_seeded = false;
+    seededFlag() = false;
 }
 
 inline bool hasSeed() {
-    return g_seeded;
+    return seededFlag();
 }
 
 inline std::mt19937& generator() {
-    if (!g_initialized) {
+    if (!initializedFlag()) {
         std::random_device rd;
-        g_gen.seed(rd());
-        g_initialized = true;
+        auto& gen = generatorStorage();
+        gen.seed(rd());
+        initializedFlag() = true;
+        return gen;
     }
-    return g_gen;
+    return generatorStorage();
 }
 
 class ScopedSeed {
 public:
-    explicit ScopedSeed(uint32_t seed) : prev_seeded_(g_seeded) {
+    explicit ScopedSeed(uint32_t seed) : prev_seeded_(seededFlag()) {
         // Note: we don't restore the previous generator state (only whether a seed was active).
         // This keeps behavior predictable across calls.
         setSeed(seed);
     }
 
     ~ScopedSeed() {
-        g_seeded = prev_seeded_;
+        seededFlag() = prev_seeded_;
     }
 
     ScopedSeed(const ScopedSeed&) = delete;

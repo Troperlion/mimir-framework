@@ -1,20 +1,16 @@
-# Internals - mémoire
-
-## Pour qui
-
-Développeur avancé qui modifie le moteur C/C++.
-
-## Objectif
+# Mémoire
 
 Comprendre le fonctionnement interne exact des composants runtime.
 
-## Avant de commencer
+**Public concerné :** Développeur avancé qui modifie le moteur C/C++.
 
-Connaître les bases C++ et la structure du dépôt.
+> **Prérequis**
+>
+> Connaître les bases C++ et la structure du dépôt.
 
-## Résultat attendu
+## Diagramme d'explication
 
-Tu peux modifier le code interne en limitant les régressions.
+![Sous-système mémoire](../graphs/08_memory_subsystem.svg)
 
 
 Cette page décrit le système mémoire côté runtime : comment la limite RAM est appliquée, quelles allocations sont comptabilisées, et comment les buffers temporaires sont gérés.
@@ -22,9 +18,9 @@ Cette page décrit le système mémoire côté runtime : comment la limite RAM e
 Sources principales :
 
 - `src/MemoryGuard.hpp`
-- `src/RuntimeAllocator.hpp`
-- `src/DynamicTensorAllocator.hpp`
-- (optionnel) `src/AdvancedRAMManager.hpp` / `src/AdvancedRAMManager.cpp`
+- `src/runtimes/cpu/RuntimeAllocator.hpp`
+- `src/runtimes/cpu/DynamicTensorAllocator.hpp`
+- (optionnel, implémentation header-only) `src/AdvancedRAMManager.hpp`
 
 ## Objectifs
 
@@ -61,7 +57,7 @@ Ce qu’il fait :
 - renvoie des handles RAII (`TensorHandle`, `BufferHandle`) qui relâchent automatiquement via `releaseAllocation` au destructeur
 - propose un **pool de scratchpads** pour réutiliser des buffers et éviter `alloc/free` répétitifs
 
-Points importants (observables dans `src/RuntimeAllocator.hpp`) :
+Points importants (observables dans `src/runtimes/cpu/RuntimeAllocator.hpp`) :
 
 - `allocate_tensor(shape, dtype, name)` alloue un `std::vector<float>` et le comptabilise via `MemoryGuard`.
 - `allocate_buffer(bytes, tag)` alloue via `new[]` et comptabilise via `MemoryGuard`.
@@ -109,3 +105,9 @@ Ce design fonctionne tant que :
 - Pour les ops temporaires, utiliser `RuntimeAllocator::get_scratchpad` plutôt que des `std::vector` locaux dans des boucles.
 - Éviter d’allouer de gros buffers directement dans les scripts Lua : préférer des primitives runtime/ops qui passent par `MemoryGuard`.
 - Pour des workloads “streaming”, vider périodiquement le pool scratchpad si la mémoire doit être rendue au système.
+
+## Étapes suivantes
+
+- [Page précédente : Internals - moteur d’exécution](01-Engine-Overview.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Backends hardware : CPU / CUDA / ROCm / Vulkan / OpenCL](03-Hardware-Backends.md)

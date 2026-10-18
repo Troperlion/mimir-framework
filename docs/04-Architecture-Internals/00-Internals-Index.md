@@ -1,68 +1,58 @@
-# Internals — index étendu
+# Internals du framework
 
-## Pour qui
+Cette section décrit l'implémentation C++ de Mímir : stockage des tenseurs,
+exécution des layers, autograd, mémoire, sérialisation, registre et runtimes.
+Elle est destinée aux développeurs qui doivent vérifier ou modifier le
+comportement du moteur.
 
-Développeur avancé qui modifie le moteur C/C++.
+## Moteur
 
-## Objectif
+- [Vue d'ensemble](01-Engine-Overview.md)
+- [Classe `Model`](10-Model-Class.md)
+- [Stockage des tenseurs](12-Tensor-Storage.md)
+- [Layers et opérations](14-Layers-And-Ops.md)
+- [Autograd et gradients](13-Autograd-Gradients.md)
+- [Planification](22-Planning.md)
 
-Comprendre le fonctionnement interne exact des composants runtime.
+## Mémoire
 
-## Avant de commencer
+- [Gestion de la mémoire](02-Memory.md)
+- [AdvancedRAMManager](05-AdvancedRAMManager.md)
+- [Runtime allocator et scratchpads](18-RuntimeAllocator-And-Scratchpads.md)
 
-Connaître les bases C++ et la structure du dépôt.
+## Runtimes
 
-## Résultat attendu
+- [Backends matériels](03-Hardware-Backends.md)
+- [Runtimes GPU](21-GPU-Runtimes.md)
+- [Monitoring, Htop et visualizer](04-Monitoring-Htop-Visualizer.md)
 
-Tu peux modifier le code interne en limitant les régressions.
+## Modèles et services
 
+- [Registre et builders](19-Models-Registry-And-Builders.md)
+- [Sérialisation](15-Serialization-Internals.md)
+- [Tokenizer et encodeur](16-Tokenizer-Encoder-Internals.md)
+- [Bindings Lua](17-Lua-Bindings-Internals.md)
+- [Entrées CLI](20-CLI-EntryPoints.md)
+- [Helpers C++](11-Helpers.md)
 
-Cette section regroupe la documentation **côté C++** (runtime, données, mémoire, perf) en restant alignée sur le code. Le style est volontairement proche de `10-Model-Class.md` : “source de vérité”, responsabilités, flux, invariants, pièges.
+## Lire une page interne
 
-## Pages existantes (déjà présentes)
+Chaque page distingue autant que possible :
 
-- `docs/04-Architecture-Internals/01-Engine-Overview.md`
-- `docs/04-Architecture-Internals/02-Memory.md`
-- `docs/04-Architecture-Internals/03-Hardware-Backends.md`
-- `docs/04-Architecture-Internals/10-Model-Class.md`
-- `docs/04-Architecture-Internals/11-Helpers.md`
+- la source de vérité ;
+- les responsabilités du composant ;
+- le flux d'exécution ;
+- les invariants et formes de tenseurs ;
+- les fallbacks ;
+- les limites connues ;
+- les tests qui couvrent le comportement.
 
-## Nouvelles pages (extension)
+Les structures historiques encore utilisées sont signalées comme telles. Une
+capacité déclarée par un backend est distinguée d'un kernel matériel réellement
+spécialisé.
 
-### Cœur data / compute
+## Étapes suivantes
 
-- `docs/04-Architecture-Internals/12-Tensor-Storage.md` — le type `tensor` (storage), l’allocation dynamique, et les implications runtime.
-- `docs/04-Architecture-Internals/13-Autograd-Gradients.md` — comment le backward est fait “best-effort”, ce qui est snapshoté, et comment les gradients sont stockés.
-- `docs/04-Architecture-Internals/14-Layers-And-Ops.md` — `Layer`, `LayerType`, `LayerOps`, layouts des poids, conventions et gotchas.
-
-### Runtime “outillage” (monitoring / UI)
-
-- `docs/04-Architecture-Internals/04-Monitoring-Htop-Visualizer.md` — `HtopDisplay`, `Visualizer` (SFML) et `AsyncMonitor`.
-
-### Mémoire “avancée” (best-effort)
-
-- `docs/04-Architecture-Internals/05-AdvancedRAMManager.md` — `AdvancedRAMManager` (cache/compression/spill disque).
-
-### Modules (première passe)
-
-Les pages ci-dessous existent déjà et seront enrichies au fil des passes (plus de détails, invariants, exemples et cross-links).
-
-- `docs/04-Architecture-Internals/15-Serialization-Internals.md`
-- `docs/04-Architecture-Internals/16-Tokenizer-Encoder-Internals.md`
-- `docs/04-Architecture-Internals/17-Lua-Bindings-Internals.md`
-- `docs/04-Architecture-Internals/18-RuntimeAllocator-And-Scratchpads.md`
-- `docs/04-Architecture-Internals/19-Models-Registry-And-Builders.md`
-- `docs/04-Architecture-Internals/20-CLI-EntryPoints.md`
-
-### GPU Runtimes (CUDA / ROCm)
-
-- `docs/04-Architecture-Internals/21-GPU-Runtimes.md` — implémentation interne des fast-paths cuBLAS/rocBLAS (im2col, hybride Norm, Attention multi-SGEMM, DeviceBuf, pattern de dispatch).
-
-### Execution Planner
-
-- `docs/04-Architecture-Internals/22-Planning.md` — analyse des durées de vie des tenseurs, fusions Conv2d+ReLU, scratchpad pré-alloué.
-
-## Convention
-
-- Quand un comportement diverge entre “int path” (Embedding/ids) et “float path”, la doc l’indique explicitement.
-- Quand une structure est **legacy** mais encore utilisée (ex: le type `tensor` historique), la doc explique pourquoi elle existe et ce qu’il ne faut pas faire.
+Pour une modification guidée, utilisez le
+[guide développeur](../07-Devs/00-INDEX.md). Pour ajouter un composant, consultez
+les [tutoriels moteur et runtime](../08-Tuto/00-INDEX.md).

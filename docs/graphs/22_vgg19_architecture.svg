@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1900" height="720" viewBox="0 0 1900 720" role="img" aria-labelledby="title desc">
+<title id="title">VGG19Model — architecture</title><desc id="desc">Diagramme vectoriel éditable généré depuis les dumps du framework.</desc>
+<defs>
+<marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#475569"/></marker>
+<marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#2563eb"/></marker>
+<style><![CDATA[text{font-family:Inter,Segoe UI,Arial,sans-serif}.title{font-size:34px;font-weight:800;fill:#0f172a}.subtitle{font-size:16px;fill:#475569}.label{font-size:17px;font-weight:700;fill:#0f172a}.small{font-size:13px;fill:#475569}.tiny{font-size:11px;fill:#64748b}.box{stroke:#94a3b8;stroke-width:1.4;rx:14}.edge{stroke:#475569;stroke-width:2.2;fill:none;marker-end:url(#arrow)}.edgeB{stroke:#2563eb;stroke-width:2.4;fill:none;marker-end:url(#arrowBlue)}.dash{stroke-dasharray:7 7}.note{font-size:12px;fill:#475569}]]></style>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="60" y="62" class="title" text-anchor="start">VGG19Model — architecture</text>
+<text x="60" y="92" class="subtitle" text-anchor="start">VGG simplifié : downsampling par convolutions stride=2, sortie 1000 classes. 47 couches • 7,02 M params.</text>
+<line x1="60" y1="112" x2="1840" y2="112" stroke="#e2e8f0" stroke-width="2"/>
+<rect x="1510" y="135" width="320" height="90" rx="14" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1670.0" y="160" class="label" text-anchor="middle">Métriques du dump</text>
+<text x="1670.0" y="197" class="small" text-anchor="middle">47 couches • 7.02 M params</text>
+<rect x="70.0" y="330" width="195.5" height="105" rx="14" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="167.75" y="355" class="label" text-anchor="middle">Input</text>
+<text x="167.75" y="407" class="small" text-anchor="middle">64×64×3</text>
+<rect x="293.5" y="330" width="195.5" height="105" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="391.25" y="355" class="label" text-anchor="middle">Block 1</text>
+<text x="391.25" y="407" class="small" text-anchor="middle">32 ch, conv×2</text>
+<path d="M265.5,382.5 L293.5,382.5" class="edgeB"/>
+<rect x="517.0" y="330" width="195.5" height="105" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="614.75" y="355" class="label" text-anchor="middle">Block 2</text>
+<text x="614.75" y="407" class="small" text-anchor="middle">64 ch, conv×2</text>
+<path d="M489.0,382.5 L517.0,382.5" class="edgeB"/>
+<rect x="740.5" y="330" width="195.5" height="105" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="838.25" y="355" class="label" text-anchor="middle">Block 3</text>
+<text x="838.25" y="407" class="small" text-anchor="middle">128 ch, conv×4</text>
+<path d="M712.5,382.5 L740.5,382.5" class="edgeB"/>
+<rect x="964.0" y="330" width="195.5" height="105" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1061.75" y="355" class="label" text-anchor="middle">Block 4</text>
+<text x="1061.75" y="407" class="small" text-anchor="middle">256 ch, conv×4</text>
+<path d="M936.0,382.5 L964.0,382.5" class="edgeB"/>
+<rect x="1187.5" y="330" width="195.5" height="105" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1285.25" y="355" class="label" text-anchor="middle">Block 5</text>
+<text x="1285.25" y="407" class="small" text-anchor="middle">256 ch, conv×4</text>
+<path d="M1159.5,382.5 L1187.5,382.5" class="edgeB"/>
+<rect x="1411.0" y="330" width="195.5" height="105" rx="14" fill="#ede9fe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1508.75" y="355" class="label" text-anchor="middle">GAP</text>
+<text x="1508.75" y="407" class="small" text-anchor="middle">global avg pool</text>
+<path d="M1383.0,382.5 L1411.0,382.5" class="edgeB"/>
+<rect x="1634.5" y="330" width="195.5" height="105" rx="14" fill="#dbeafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1732.25" y="355" class="label" text-anchor="middle">FC head</text>
+<text x="1732.25" y="407" class="small" text-anchor="middle">512 → 1000</text>
+<path d="M1606.5,382.5 L1634.5,382.5" class="edgeB"/>
+<text x="1840" y="696" class="tiny" text-anchor="end">Mímir Framework — SVG vectoriel éditable</text>
+</svg>

@@ -1,27 +1,31 @@
-# 🔧 Installation & Compilation détaillée
+# Installation et compilation
 
-## Pour qui
+Installer les dépendances et compiler selon votre environnement.
 
-Débutant qui veut une installation stable et reproductible.
+**Public concerné :** Débutant qui veut une installation stable et reproductible.
 
-## Objectif
-
-Installer les dépendances et compiler selon ton environnement.
-
-## Avant de commencer
-
-Accès internet + installation de paquets système.
-
-## Résultat attendu
-
-Tu sais quoi installer, quoi activer, et comment diagnostiquer un build.
+> **Prérequis**
+>
+> Accès internet + installation de paquets système.
 
 
 Pour compiler Mímir, il faut CMake, C++17 et quelques dépendances. Cette page couvre tout ce qu'il faut savoir.
 
 ---
 
-## 📦 Dépendances
+## Sur cette page
+
+- [Dépendances](#dépendances)
+- [Google Colab](#google-colab-cuda)
+- [🔨 Build — Guide par OS](#build-guide-par-os)
+- [📋 Options CMake principales](#options-cmake-principales)
+- [🧪 Vérifier l'installation](#vérifier-linstallation)
+- [🐛 Troubleshooting](#troubleshooting)
+- [💡 Tips avancés](#tips-avancés)
+- [Checklist de déploiement en production](#checklist-de-déploiement-en-production)
+- [Étapes suivantes](#étapes-suivantes)
+
+## Dépendances
 
 ### Obligatoires
 
@@ -46,14 +50,71 @@ Pour compiler Mímir, il faut CMake, C++17 et quelques dépendances. Cette page 
 
 | Dépendance | Rôle | Utilité | Installer si |
 | --- | --- | --- | --- |
-| **CUDA Toolkit** | GPU NVIDIA (cuBLAS) | Inférence NVIDIA 100x+ rapide | Tu as GPU NVIDIA + `-DENABLE_CUDA=ON` |
-| **ROCm** | GPU AMD (rocBLAS) | Inférence AMD rapide | Tu as GPU AMD + `-DENABLE_ROCM=ON` |
+| **CUDA Toolkit** | GPU NVIDIA (cuBLAS) | Inférence NVIDIA 100x+ rapide | Vous avez GPU NVIDIA + `-DENABLE_CUDA=ON` |
+| **ROCm** | GPU AMD (rocBLAS) | Inférence AMD rapide | Vous avez GPU AMD + `-DENABLE_ROCM=ON` |
 
 ---
 
 ## 🔨 Build — Guide par OS
 
+### Google Colab (CUDA)
+
+Sélectionnez d'abord un environnement d'exécution avec GPU dans Colab, puis
+vérifiez que le GPU NVIDIA est visible:
+
+```bash
+!nvidia-smi
+```
+
+Après avoir cloné le dépôt dans `/content/tensor-2`, installez les dépendances
+de compilation:
+
+```bash
+!apt-get update -qq
+!apt-get install -y ninja-build build-essential pkg-config \
+  liblua5.3-dev liblz4-dev \
+  libavcodec-dev libavformat-dev libavutil-dev \
+  libswresample-dev libswscale-dev
+```
+
+Compilez ensuite le binaire headless. Le preset détecte automatiquement CUDA
+ou ROCm selon le toolkit disponible et limite la compilation à deux tâches
+parallèles afin de rester compatible avec la mémoire des sessions Colab
+gratuites:
+
+```bash
+%cd /content/tensor-2
+!cmake --preset colab-cuda
+!cmake --build --preset build-colab-cuda
+!./build-colab/bin/mimir --version
+```
+
+Le preset `colab-cuda` active l'auto-détection CUDA/ROCm, OpenMP, SIMD, FFmpeg
+et LZ4. Il désactive Vulkan, OpenCL, l'interface graphique, les bridges
+externes, les exemples et les tests. Vérifiez les lignes `CUDA Compute` et
+`ROCm Compute` du résumé CMake. Si les deux valent `OFF`, vérifiez que le
+notebook utilise bien un environnement GPU et que `nvcc` ou `hipcc` est
+accessible.
+
 ### Linux (Ubuntu/Debian)
+
+**Script automatique recommande:**
+
+```bash
+cd ~/path/to/tensor-2
+
+# Installe les dependances systeme et configure CMake dans build/
+./config.sh
+
+# Compile le projet
+cmake --build build -j$(nproc)
+```
+
+Variables utiles du script:
+
+- `WORKROOT=/path/to/tensor-2` pour pointer explicitement la racine projet
+- `BUILD_TYPE=Debug` pour preparer un build debug
+- `ENABLE_VULKAN=0`, `ENABLE_OPENCL=0`, `ENABLE_SFML=0`, `ENABLE_LZ4=0` pour desactiver des dependances optionnelles
 
 **Installation des dépendances:**
 
@@ -195,6 +256,9 @@ cmake -S . -B build [OPTIONS]
 # Activer ROCm (AMD GPU)
 -DENABLE_ROCM=ON -DMIMIR_ROCM_ROOT=/opt/rocm
 
+# Détecter automatiquement CUDA et ROCm
+-DMIMIR_AUTO_DETECT_GPU_BACKENDS=ON
+
 # Build static (pas de dépendances dynamiques)
 -DBUILD_MIMIR_STATIC=ON
 
@@ -214,7 +278,7 @@ cmake -S . -B build [OPTIONS]
 ./bin/mimir --help
 
 # Expected output:
-# ========== Mímir v3.1.0 ==========
+# ========== Mímir v3.5.0 ==========
 # Capabilities: [AVX2] [FMA] [F16C] [BMI2] [OpenMP] [Vulkan] ...
 # Usage: ./bin/mimir [OPTIONS]
 
@@ -324,7 +388,7 @@ cmake --build build -j
 
 ---
 
-## ✅ Checklist — Déploiement production
+## Checklist de déploiement en production
 
 - [ ] Compiler en `-DCMAKE_BUILD_TYPE=Release`
 - [ ] Vérifier capacités: `./bin/mimir --help`
@@ -333,3 +397,9 @@ cmake --build build -j
 - [ ] Si CPU ancien: compiler sans `-DENABLE_SIMD`
 - [ ] Si GPU requis: `-DENABLE_CUDA=ON` ou `-DENABLE_ROCM=ON`
 - [ ] Archiver le binaire + config utilisée
+
+## Étapes suivantes
+
+- [Page précédente : Quick start](01-Quick-Start.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : CLI (binaire `mimir`)](03-CLI.md)

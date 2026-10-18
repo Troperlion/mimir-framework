@@ -31,7 +31,7 @@ using json = nlohmann::json;
  *   },
  *   "__metadata__": {
  *     "format": "safetensors",
- *     "mimir_version": "3.0.0",
+ *     "mimir_version": "3.5.0",
  *     ...
  *   }
  * }
@@ -64,6 +64,8 @@ private:
     std::vector<std::vector<uint8_t>> owned_buffers_;
 
     // Owned FP16 payloads (aligned) for float tensors when saving as Float16.
+    std::vector<std::vector<float>> owned_f32_buffers_;
+    json optimizer_metadata_;
     std::vector<std::vector<uint16_t>> owned_u16_buffers_;
 
     // Owned FP64 payloads for float tensors when saving as Float64.

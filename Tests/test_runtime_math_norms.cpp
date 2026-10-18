@@ -37,6 +37,12 @@
 #ifdef ENABLE_ROCM
 #  include "runtimes/rocm/RocmRuntime.hpp"
 #endif
+#ifdef ENABLE_OPENCL
+#  include "runtimes/opencl/OpenCLRuntime.hpp"
+#endif
+#ifdef ENABLE_VULKAN
+#  include "runtimes/vulkan/VulkanRuntime.hpp"
+#endif
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Statistiques de base
@@ -120,6 +126,56 @@ static std::vector<float> run_rmsnorm_cpu(
     std::unordered_map<std::string, std::vector<int>> iin;
     return m.forwardPassNamed(fin, iin, false);
 }
+
+#if defined(ENABLE_CUDA) || defined(ENABLE_ROCM) || defined(ENABLE_OPENCL) || defined(ENABLE_VULKAN)
+static int check_layernorm_runtime(AbstractRuntime& runtime) {
+    RuntimeConfig cfg;
+    cfg.norm_enabled = true;
+    cfg.norm_min_elements = 0;
+    if (!runtime.initialize(cfg)) {
+        std::cout << "SKIP: no " << runtime.name() << " device (Norms)\n";
+        return 0;
+    }
+
+    const std::vector<float> input = {0.f, 1.f, 2.f, 3.f, 4.f, 5.f, 6.f, 7.f};
+    const std::vector<float> gamma = {1.f, 2.f, 0.5f, 1.5f};
+    const std::vector<float> beta = {0.5f, -1.f, 2.f, 0.f};
+    Model model;
+    model.push("x0", "LayerNorm", 0);
+    auto& layer = model.getMutableLayers()[0];
+    layer.in_features = 4;
+    layer.affine = true;
+    layer.use_bias = true;
+    layer.eps = 1e-5f;
+    layer.params_count = 8;
+    model.allocateParams();
+    std::copy(gamma.begin(), gamma.end(), layer.getWeights());
+    std::copy(beta.begin(), beta.end(), layer.getWeights() + 4);
+
+    const std::vector<const std::vector<float>*> inputs = {&input};
+    TASSERT_TRUE(runtimeCapabilityIsNative(
+        runtime.queryForwardOperationCapability(layer, inputs, false)));
+    std::vector<std::vector<float>> output;
+    TASSERT_TRUE(runtime.forwardLayer(inputs, output, layer, false));
+    const auto reference = run_layernorm_cpu(input, 4, true, gamma, beta);
+    TASSERT_TRUE(output.size() == 1 && output[0].size() == reference.size());
+    for (size_t index = 0; index < reference.size(); ++index) {
+        TASSERT_NEAR(output[0][index], reference[index], 1e-4f);
+    }
+
+    layer.affine = false;
+    layer.use_bias = false;
+    TASSERT_TRUE(runtime.forwardLayer(inputs, output, layer, false));
+    const std::vector<float> identity_gamma(4, 1.0f);
+    const std::vector<float> zero_beta(4, 0.0f);
+    const auto non_affine_reference =
+        run_layernorm_cpu(input, 4, false, identity_gamma, zero_beta);
+    for (size_t index = 0; index < non_affine_reference.size(); ++index) {
+        TASSERT_NEAR(output[0][index], non_affine_reference[index], 1e-4f);
+    }
+    return 0;
+}
+#endif
 
 int main() {
     // =========================================================================
@@ -321,6 +377,34 @@ int main() {
         }
     }
 #endif  // ENABLE_ROCM
+
+#ifdef ENABLE_CUDA
+    {
+        CudaRuntime runtime;
+        TASSERT_TRUE(check_layernorm_runtime(runtime) == 0);
+    }
+#endif
+
+#ifdef ENABLE_ROCM
+    {
+        RocmRuntime runtime;
+        TASSERT_TRUE(check_layernorm_runtime(runtime) == 0);
+    }
+#endif
+
+#ifdef ENABLE_OPENCL
+    {
+        OpenCLRuntime runtime;
+        TASSERT_TRUE(check_layernorm_runtime(runtime) == 0);
+    }
+#endif
+
+#ifdef ENABLE_VULKAN
+    {
+        VulkanRuntime runtime;
+        TASSERT_TRUE(check_layernorm_runtime(runtime) == 0);
+    }
+#endif
 
     return 0;
 }

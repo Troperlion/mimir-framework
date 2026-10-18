@@ -1,20 +1,12 @@
-# Internals : layers, `LayerType`, `LayerOps` et layouts de poids (C++)
-
-## Pour qui
-
-Développeur avancé qui modifie le moteur C/C++.
-
-## Objectif
+# Layers, opérations et disposition des poids
 
 Comprendre le fonctionnement interne exact des composants runtime.
 
-## Avant de commencer
+**Public concerné :** Développeur avancé qui modifie le moteur C/C++.
 
-Connaître les bases C++ et la structure du dépôt.
-
-## Résultat attendu
-
-Tu peux modifier le code interne en limitant les régressions.
+> **Prérequis**
+>
+> Connaître les bases C++ et la structure du dépôt.
 
 
 Cette page documente l’API interne des layers : la structure `Layer`, le registre de types, les conventions de routing `inputs/output`, et les implémentations de forward/backward.
@@ -23,9 +15,22 @@ Source de vérité :
 
 - Enum & mapping : `src/LayerTypes.hpp`
 - Structure `Layer` : `src/Layers.hpp`
-- Forward ops (principal) : `src/LayerOps.hpp`
-- Forward ops (extensions) : `src/LayerOpsExt.hpp`
+- Forward ops (principal) : `src/runtimes/cpu/LayerOps.hpp`
+- Forward ops (extensions) : `src/runtimes/cpu/LayerOpsExt.hpp`
 - Dispatch runtime : `src/Model.cpp` (switch `layer.type_enum`)
+
+## Sur cette page
+
+- [0) TL;DR](#0-tldr)
+- [1) LayerType et normalisation de type](#1-layertype-et-normalisation-de-type)
+- [2) struct Layer : champs “universels”](#2-struct-layer-champs-universels)
+- [3) Helpers dans Layer](#3-helpers-dans-layer)
+- [4) LayerOps : conventions et performance](#4-layerops-conventions-et-performance)
+- [5) Attention : layout des poids (runtime)](#5-attention-layout-des-poids-runtime)
+- [6) LayerOpsExt : extensions et statut](#6-layeropsext-extensions-et-statut)
+- [7) Backward : où regarder](#7-backward-où-regarder)
+- [8) Checklist lorsque vous ajoutez un nouveau layer](#8-checklist-lorsque-vous-ajoutez-un-nouveau-layer)
+- [Étapes suivantes](#étapes-suivantes)
 
 ## 0) TL;DR
 
@@ -150,7 +155,7 @@ Conventions :
 - gradients d’un layer : écrits dans `layer.grad_weights` (taille = `getWeightsSize()`), et éventuellement `layer.grad_bias`.
 - routing des gradients : via un `grad_store` par nom de tensor (miroir du forward).
 
-## 8) Checklist quand tu ajoutes un nouveau layer
+## 8) Checklist lorsque vous ajoutez un nouveau layer
 
 1) Ajouter l’enum dans `LayerType` (si absent).
 2) Ajouter mapping string↔enum dans `LayerRegistry::string_to_type`.
@@ -158,3 +163,9 @@ Conventions :
 4) Implémenter `LayerOps::<layer>_forward` (ou dans `LayerOpsExt`).
 5) Ajouter le `case LayerType::<...>` dans le switch du forward runtime (et backward si nécessaire).
 6) Définir le layout de poids + formule `params_count` et documenter.
+
+## Étapes suivantes
+
+- [Page précédente : Internals : Autograd + gradients + backward (C++)](13-Autograd-Gradients.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Internals : sérialisation (SafeTensors / RawFolder / DebugJson)](15-Serialization-Internals.md)

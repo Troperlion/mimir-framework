@@ -29,6 +29,7 @@ void UNetModel::buildInto(Model& model, const Config& cfg) {
     const int image_dim = W * H * C;
 
     model.modelConfig["task"] = "unet_denoiser";
+    model.modelConfig["bbox_output_layout"] = "CHW";
     model.modelConfig["image_w"] = W;
     model.modelConfig["image_h"] = H;
     model.modelConfig["image_c"] = C;
@@ -152,6 +153,7 @@ void UNetModel::buildInto(Model& model, const Config& cfg) {
         // Concat skip
         model.push(b + "/concat", "Concat", 0);
         if (auto* L = model.getLayerByName(b + "/concat")) {
+            L->skip_input_index = 1;
             L->inputs = {x, skips[static_cast<size_t>(d)]};
             L->output = b + "/cat";
             L->concat_axis = 0;

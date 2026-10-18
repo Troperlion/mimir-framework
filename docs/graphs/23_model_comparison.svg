@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="900" viewBox="0 0 1700 900" role="img" aria-labelledby="title desc">
+<title id="title">Comparaison des modèles fournis</title><desc id="desc">Diagramme vectoriel éditable généré depuis les dumps du framework.</desc>
+<defs>
+<marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#475569"/></marker>
+<marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#2563eb"/></marker>
+<style><![CDATA[text{font-family:Inter,Segoe UI,Arial,sans-serif}.title{font-size:34px;font-weight:800;fill:#0f172a}.subtitle{font-size:16px;fill:#475569}.label{font-size:17px;font-weight:700;fill:#0f172a}.small{font-size:13px;fill:#475569}.tiny{font-size:11px;fill:#64748b}.box{stroke:#94a3b8;stroke-width:1.4;rx:14}.edge{stroke:#475569;stroke-width:2.2;fill:none;marker-end:url(#arrow)}.edgeB{stroke:#2563eb;stroke-width:2.4;fill:none;marker-end:url(#arrowBlue)}.dash{stroke-dasharray:7 7}.note{font-size:12px;fill:#475569}]]></style>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="60" y="62" class="title" text-anchor="start">Comparaison des modèles fournis</text>
+<text x="60" y="92" class="subtitle" text-anchor="start">Nombre de paramètres et de couches d’après les dumps JSON fournis.</text>
+<line x1="60" y1="112" x2="1640" y2="112" stroke="#e2e8f0" stroke-width="2"/>
+<text x="80" y="150" class="label" text-anchor="start">Modèle</text>
+<text x="300" y="150" class="label" text-anchor="start">Couches</text>
+<text x="445" y="150" class="label" text-anchor="start">Paramètres</text>
+<text x="85" y="215" class="label" text-anchor="start">VAEConv</text>
+<text x="320" y="215" class="small" text-anchor="start">48</text>
+<rect x="445" y="185" width="5.533150722350371" height="38" rx="10" fill="#2563eb" opacity="0.75"/>
+<text x="460.53315072235034" y="212" class="small" text-anchor="start">  311.1 k</text>
+<text x="85" y="305" class="label" text-anchor="start">UNet</text>
+<text x="320" y="305" class="small" text-anchor="start">43</text>
+<rect x="445" y="275" width="38.0406246206143" height="38" rx="10" fill="#2563eb" opacity="0.75"/>
+<text x="493.0406246206143" y="302" class="small" text-anchor="start">  2.14 M</text>
+<text x="85" y="395" class="label" text-anchor="start">Diffusion</text>
+<text x="320" y="395" class="small" text-anchor="start">4</text>
+<rect x="445" y="365" width="900.0" height="38" rx="10" fill="#2563eb" opacity="0.75"/>
+<text x="1355.0" y="392" class="small" text-anchor="start">  50.61 M</text>
+<text x="85" y="485" class="label" text-anchor="start">SD3.5</text>
+<text x="320" y="485" class="small" text-anchor="start">25</text>
+<rect x="445" y="455" width="2.3559851887823235" height="38" rx="10" fill="#2563eb" opacity="0.75"/>
+<text x="457.3559851887823" y="482" class="small" text-anchor="start">  132.5 k</text>
+<text x="85" y="575" class="label" text-anchor="start">VGG16</text>
+<text x="320" y="575" class="small" text-anchor="start">41</text>
+<rect x="445" y="545" width="101.29270934502853" height="38" rx="10" fill="#2563eb" opacity="0.75"/>
+<text x="556.2927093450285" y="572" class="small" text-anchor="start">  5.70 M</text>
+<text x="85" y="665" class="label" text-anchor="start">VGG19</text>
+<text x="320" y="665" class="small" text-anchor="start">47</text>
+<rect x="445" y="635" width="124.89353488830885" height="38" rx="10" fill="#2563eb" opacity="0.75"/>
+<text x="579.8935348883089" y="662" class="small" text-anchor="start">  7.02 M</text>
+<text x="1640" y="876" class="tiny" text-anchor="end">Mímir Framework — SVG vectoriel éditable</text>
+</svg>

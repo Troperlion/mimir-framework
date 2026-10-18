@@ -1,20 +1,12 @@
-# Internals : bindings Lua (`LuaScripting` / `LuaContext`)
-
-## Pour qui
-
-Développeur avancé qui modifie le moteur C/C++.
-
-## Objectif
+# Internals des bindings Lua
 
 Comprendre le fonctionnement interne exact des composants runtime.
 
-## Avant de commencer
+**Public concerné :** Développeur avancé qui modifie le moteur C/C++.
 
-Connaître les bases C++ et la structure du dépôt.
-
-## Résultat attendu
-
-Tu peux modifier le code interne en limitant les régressions.
+> **Prérequis**
+>
+> Connaître les bases C++ et la structure du dépôt.
 
 
 Cette page explique comment l’API Lua est exposée et comment elle appelle le runtime C++.
@@ -29,7 +21,7 @@ Source de vérité :
 	- `src/scriptings/Lua/luaScripting/LuaScriptingTokenizerDataset.cpp`
 	- `src/scriptings/Lua/luaScripting/LuaScriptingRuntimeAndViz.cpp`
 - Modèle : `src/Model.hpp`, `src/Model.cpp`
-- Registre d’architectures : `src/Models/Registry/ModelArchitectures.hpp/.cpp`
+- Registre d’architectures : `src/Models/Registry/ModelArchitectures.hpp` et `src/Models/Registry/ModelArchitectures.cpp`
 
 ## 1) `LuaScripting` : rôle
 
@@ -82,3 +74,9 @@ Rôle :
 Les noms globaux et aliases système (`Mimir`, `CONF`, `CONF_PATH`, `CONF_DIR`, `arg`, `model`, `tokenizer`, etc.) sont normalisés dans `ScriptingContext` via les constantes `kGlobal*` et `kAlias*`.
 
 Objectif : empêcher les divergences d'API entre bridges (Lua aujourd'hui, Python/Ruby/JS demain).
+
+## Étapes suivantes
+
+- [Page précédente : Internals : Tokenizer / ConditioningEncoder (C++)](16-Tokenizer-Encoder-Internals.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Internals : `RuntimeAllocator` et scratchpads](18-RuntimeAllocator-And-Scratchpads.md)

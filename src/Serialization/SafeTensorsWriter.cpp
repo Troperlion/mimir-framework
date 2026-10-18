@@ -1,5 +1,7 @@
+#include "runtimes/fpga/FpgaIo.hpp"
 #include "SafeTensorsWriter.hpp"
 #include "../Model.hpp"
+#include "CheckpointState.hpp"
 #include "../Tokenizer.hpp"
 #include "../Encoder.hpp"
 #include "HardwareOpt.hpp"
@@ -7,6 +9,7 @@
 #include <cstring>
 #include <iomanip>
 #include <ctime>
+#include <iostream>
 
 namespace Mimir {
 namespace Serialization {
@@ -20,12 +23,20 @@ SafeTensorsWriter::~SafeTensorsWriter() {
 bool SafeTensorsWriter::save(
     Model& model,
     const std::string& path,
-    const SaveOptions& options,
+    const SaveOptions& requested_options,
     std::string* error
 ) {
+    const auto options = effective_save_options(model, requested_options);
     try {
+        const uint16_t endian_probe = 1;
+        if (*reinterpret_cast<const uint8_t*>(&endian_probe) != 1) {
+            if (error) *error = "SafeTensors serialization requires little-endian host support";
+            return false;
+        }
         // Collect all tensors
         std::vector<TensorData> tensors = collect_tensors(model, options);
+        std::cerr << "[serialization] safetensors save path=" << path
+                  << " tensors=" << tensors.size() << std::endl;
         
         if (tensors.empty()) {
             if (error) {
@@ -56,6 +67,8 @@ std::vector<SafeTensorsWriter::TensorData> SafeTensorsWriter::collect_tensors(
 
     // Reset owned buffers for this save call
     owned_buffers_.clear();
+    owned_f32_buffers_.clear();
+    optimizer_metadata_ = json::object();
     owned_u16_buffers_.clear();
     owned_f64_buffers_.clear();
 
@@ -84,13 +97,13 @@ std::vector<SafeTensorsWriter::TensorData> SafeTensorsWriter::collect_tensors(
 
         if (float_storage == DType::Float16) {
             owned_u16_buffers_.emplace_back(count);
-            HardwareOpt::fp32_to_fp16_f16c(owned_u16_buffers_.back().data(), data_ptr, count);
+            if (!Mimir::fpgaEncode16(owned_u16_buffers_.back().data(), data_ptr, count, false)) HardwareOpt::fp32_to_fp16_f16c(owned_u16_buffers_.back().data(), data_ptr, count);
             td.dtype = DType::Float16;
             td.byte_size = count * sizeof(uint16_t);
             td.data_ptr = owned_u16_buffers_.back().data();
         } else if (float_storage == DType::BFloat16) {
             owned_u16_buffers_.emplace_back(count);
-            HardwareOpt::fp32_to_bf16(owned_u16_buffers_.back().data(), data_ptr, count);
+            if (!Mimir::fpgaEncode16(owned_u16_buffers_.back().data(), data_ptr, count, true)) HardwareOpt::fp32_to_bf16(owned_u16_buffers_.back().data(), data_ptr, count);
             td.dtype = DType::BFloat16;
             td.byte_size = count * sizeof(uint16_t);
             td.data_ptr = owned_u16_buffers_.back().data();
@@ -119,6 +132,12 @@ std::vector<SafeTensorsWriter::TensorData> SafeTensorsWriter::collect_tensors(
         arch["total_params"] = model.totalParamCount();
         arch["num_layers"] = layers.size();
         arch["model_config"] = model.modelConfig;
+        try {
+            if (model.modelConfig.contains("type") && model.modelConfig["type"].is_string()) {
+                arch["model_type"] = model.modelConfig["type"].get<std::string>();
+            }
+        } catch (...) {
+        }
         arch["model_config"]["dtype"] = dtype_to_string(float_storage);
 
         json layers_array = json::array();
@@ -127,7 +146,9 @@ std::vector<SafeTensorsWriter::TensorData> SafeTensorsWriter::collect_tensors(
             layer_obj["name"] = layer.name;
             layer_obj["type"] = layer.type;
             layer_obj["params_count"] = layer.params_count;
+            layer_obj["trainable_parameter"] = layer.trainable_parameter;
             layer_obj["inputs"] = layer.inputs;
+            if (layer.skip_input_index >= 0) layer_obj["skip_input_index"] = layer.skip_input_index;
             layer_obj["output"] = layer.output;
             // Common shape fields
             layer_obj["in_features"] = layer.in_features;
@@ -217,43 +238,32 @@ std::vector<SafeTensorsWriter::TensorData> SafeTensorsWriter::collect_tensors(
 
     // Add optimizer state (if requested and available)
     if (options.save_optimizer) {
-        if (const Optimizer* opt = model.getSerializedOptimizer()) {
-            // JSON meta
-            {
-                json j;
-                j["type"] = static_cast<int>(opt->type);
-                j["step"] = opt->step;
-                j["lr_current"] = opt->getCurrentLR();
-                j["beta1"] = opt->beta1;
-                j["beta2"] = opt->beta2;
-                j["eps"] = opt->eps;
-                j["weight_decay"] = opt->weight_decay;
-                j["decay_strategy"] = static_cast<int>(opt->decay_strategy);
-                j["initial_lr"] = opt->initial_lr;
-                j["min_lr"] = opt->min_lr;
-                j["decay_rate"] = opt->decay_rate;
-                j["decay_steps"] = opt->decay_steps;
-                j["total_steps"] = opt->total_steps;
-                j["warmup_steps"] = opt->warmup_steps;
-
-                std::string s = j.dump();
-                owned_buffers_.push_back(std::vector<uint8_t>(s.begin(), s.end()));
+        if (const Optimizer* live = model.getSerializedOptimizer()) {
+            auto snapshot = model.optimizerSnapshot(*live);
+            optimizer_metadata_ = optimizer_metadata(snapshot);
+            auto add_state = [&](const std::string& name, std::vector<float>& values) {
+                if (values.empty()) return;
+                owned_f32_buffers_.push_back(std::move(values));
+                const auto& data = owned_f32_buffers_.back();
                 TensorData td;
-                td.name = "optimizer/json";
-                td.dtype = DType::Uint8;
-                td.shape = {owned_buffers_.back().size()};
-                td.byte_size = owned_buffers_.back().size();
-                td.data_ptr = owned_buffers_.back().data();
+                td.name = name;
+                td.dtype = DType::Float32; // Optimizer arithmetic is F32, even for F16/BF16 weights.
+                td.shape = {data.size()};
+                td.byte_size = data.size() * sizeof(float);
+                td.data_ptr = data.data();
                 tensors.push_back(td);
-            }
-
-            // State vectors
-            if (!opt->m.empty()) {
-                push_float_tensor("optimizer/m", {opt->m.size()}, opt->m.data(), opt->m.size());
-            }
-            if (!opt->v.empty()) {
-                push_float_tensor("optimizer/v", {opt->v.size()}, opt->v.data(), opt->v.size());
-            }
+            };
+            add_state("optimizer/m", snapshot.m);
+            add_state("optimizer/v", snapshot.v);
+            const std::string metadata = optimizer_metadata_.dump();
+            owned_buffers_.emplace_back(metadata.begin(), metadata.end());
+            TensorData td;
+            td.name = "optimizer/json";
+            td.dtype = DType::Uint8;
+            td.shape = {owned_buffers_.back().size()};
+            td.byte_size = owned_buffers_.back().size();
+            td.data_ptr = owned_buffers_.back().data();
+            tensors.push_back(td);
         }
     }
 
@@ -296,7 +306,8 @@ json SafeTensorsWriter::build_header(
     // Add metadata
     json metadata;
     metadata["format"] = "safetensors";
-    metadata["format_version"] = "0.3.0";
+    metadata["format_version"] = "0.4.0";
+    metadata["components"] = checkpoint_components(options).dump();
     metadata["mimir_version"] = get_mimir_version();
     
     if (options.include_git_info) {
@@ -308,18 +319,19 @@ json SafeTensorsWriter::build_header(
     
     // Timestamp
     auto now = std::time(nullptr);
-    metadata["created_at"] = static_cast<long long>(now);
+    metadata["created_at"] = std::to_string(static_cast<long long>(now));
     
     // Total size
-    metadata["total_size"] = current_offset;
+    metadata["total_size"] = std::to_string(current_offset);
     
     // Custom metadata
     if (!options.custom_metadata.empty()) {
         try {
-            json custom = json::parse(options.custom_metadata);
-            metadata["custom"] = custom;
-        } catch (...) {
-            // Ignore invalid JSON
+            // SafeTensors requires __metadata__ to be string-to-string.
+            // Keep structured user metadata as a canonical JSON string.
+            metadata["custom"] = json::parse(options.custom_metadata).dump();
+        } catch (const std::exception& e) {
+            throw std::runtime_error(std::string("Invalid custom_metadata JSON: ") + e.what());
         }
     }
     
@@ -337,6 +349,8 @@ bool SafeTensorsWriter::write_file(
     try {
         // Ensure directory exists
         fs::path file_path(path);
+        std::cerr << "[serialization] safetensors write_file path=" << file_path.string()
+                  << " tensors=" << tensors.size() << std::endl;
         if (file_path.has_parent_path()) {
             fs::create_directories(file_path.parent_path());
         }
@@ -352,6 +366,10 @@ bool SafeTensorsWriter::write_file(
         
         // Serialize header to JSON string
         std::string header_str = header.dump();
+        // Padding is part of N and must consist solely of ASCII spaces.
+        // Aligning the data section to 8 bytes matches the reference writers.
+        const size_t padding = (8 - (header_str.size() % 8)) % 8;
+        header_str.append(padding, ' ');
         uint64_t header_len = static_cast<uint64_t>(header_str.size());
         
         // Write header length (8 bytes, little-endian)
@@ -368,15 +386,17 @@ bool SafeTensorsWriter::write_file(
         
         // Write tensor data in order
         for (const auto& tensor : tensors) {
-            if (tensor.data_ptr == nullptr || tensor.byte_size == 0) {
+            if (tensor.byte_size > 0 && tensor.data_ptr == nullptr) {
                 if (error) {
                     *error = "Invalid tensor data for: " + tensor.name;
                 }
                 return false;
             }
             
-            // Write raw bytes (already in little-endian on x86/ARM)
-            file.write(static_cast<const char*>(tensor.data_ptr), tensor.byte_size);
+            if (tensor.byte_size > 0) {
+                // Numeric payloads are emitted little-endian on supported hosts.
+                file.write(static_cast<const char*>(tensor.data_ptr), tensor.byte_size);
+            }
             if (!file) {
                 if (error) {
                     *error = "Failed to write tensor data: " + tensor.name;

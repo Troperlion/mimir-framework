@@ -42,5 +42,7 @@ int main() {
     TASSERT_TRUE(lua.getBoolean("TEST_OK"));
     TASSERT_TRUE(lua.getString("TEST_ARCH") == "basic_mlp");
 
+    LuaContext::getInstance().resetRuntimeState();
+
     return 0;
 }

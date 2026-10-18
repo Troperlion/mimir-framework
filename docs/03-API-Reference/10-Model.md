@@ -1,20 +1,12 @@
-# API : `Mimir.Model`
-
-## Pour qui
-
-Développeur et utilisateur intermédiaire/avancé.
-
-## Objectif
+# `Mimir.Model`
 
 Trouver rapidement le contrat API réel et les paramètres utilisables.
 
-## Avant de commencer
+**Public concerné :** Développeur et utilisateur intermédiaire/avancé.
 
-Connaître les commandes de base de Mímir.
-
-## Résultat attendu
-
-Tu peux appeler l'API sans ambiguïté de signature ou de comportement.
+> **Prérequis**
+>
+> Connaître les commandes de base de Mímir.
 
 
 `Mimir.Model` est le point d'entrée principal du framework. Il regroupe toutes les opérations sur le modèle courant : création, construction du graphe de layers, allocation des poids, exécution du forward/backward, et entraînement haut-niveau.
@@ -24,6 +16,22 @@ Tu peux appeler l'API sans ambiguïté de signature ou de comportement.
 Source C++ : `src/scriptings/Lua/luaScripting/LuaScripting.cpp` — liaisons Lua → C++.
 
 ---
+
+## Sur cette page
+
+- [Cycle de vie d'un modèle](#cycle-de-vie-dun-modèle)
+- [Création et construction](#création-et-construction)
+- [Paramètres (poids)](#paramètres-poids)
+- [Exécution (forward / backward)](#exécution-forward-backward)
+- [Entraînement haut-niveau](#entraînement-haut-niveau)
+- [Recon-Loss supportées (état actuel)](#recon-loss-supportées-état-actuel)
+- [DType (précision des poids)](#dtype-précision-des-poids)
+- [Matériel](#matériel)
+- [Exemple complet (nouveau modèle)](#exemple-complet-nouveau-modèle)
+- [API legacy](#api-legacy)
+- [Calibration par feedback de validation](#calibration-par-feedback-de-validation)
+- [Voir aussi](#voir-aussi)
+- [Étapes suivantes](#étapes-suivantes)
 
 ## Cycle de vie d'un modèle
 
@@ -50,11 +58,11 @@ Détails du cycle de vie : [docs/02-User-Guide/02-Model-Lifecycle.md](../02-User
 Mimir.Model.create(name: string, cfg?: table) -> true | (false, string)
 ```
 
-Enregistre l'architecture `name` comme modèle courant et fusionne `cfg` avec la configuration par défaut de cette architecture. Ne construit pas encore le graphe (c'est le rôle de `build()`).
+Enregistre l'architecture `name` comme modèle courant et fusionne `cfg` avec la configuration par défaut de cette architecture. **Construit automatiquement le graphe en v3.0+** (l'appel à `build()` est legacy/no-op).
 
 **Paramètres :**
 
-- `name` — nom canonique de l'architecture (ex: `"transformer"`, `"vae_conv"`, `"ponyxl_sdxl"`). Voir [la liste complète](./11-Architectures.md).
+- `name` — nom canonique de l'architecture (ex: `"causal_lm"`, `"transformer"`, `"vae_conv"`, `"diffusion"`). Voir [la liste complète](./11-Architectures.md).
 - `cfg` *(optionnel)* — table Lua de surcharge de config. Les clés non spécifiées conservent leurs valeurs par défaut.
 
 **Retour :** `true` en cas de succès, ou `(false, message_erreur)`.
@@ -72,7 +80,8 @@ local ok, err = Mimir.Model.create("transformer", {
 assert(ok, err)
 ```
 
-> **Note :** `create()` normalise aussi le nom via `canonicalArchName` — les anciens alias (ex: `"ponyxl_ddpm"`) sont acceptés et redirigés vers leur nom canonique.
+Un chemin terminé par `.mpk` est également accepté : le package est décodé,
+vérifié puis créé via le registre.
 
 ---
 
@@ -144,7 +153,9 @@ assert(Mimir.Model.init_weights("he", 42))  -- seed 42 pour reproductibilité
 Mimir.Model.total_params() -> int
 ```
 
-Retourne le nombre total de paramètres scalaires (floats) du modèle. Utile pour estimer la mémoire nécessaire (approximativement `total_params * 4` octets en float32).
+Retourne le nombre total de paramètres scalaires du modèle. Pour estimer la
+taille brute, multipliez par `bytes` du dtype correspondant, disponible via
+`Mimir.Architectures.dtypes()`.
 
 ---
 
@@ -173,6 +184,11 @@ local out = Mimir.Model.forward({
     text_ids  = int_ids,
 }, false)
 ```
+
+Toutes les clés chaîne associées à un tableau sont transmises comme tenseurs
+nommés en `float`, à l'exception de `text_ids` qui conserve le chemin entier.
+Cela permet notamment d'appeler un graphe NMS avec `boxes`, `scores` et
+`classes`.
 
 > **Conseil :** privilégiez toujours la forme **map**, même pour un seul tenseur d'entrée. Elle rend vos scripts compatibles avec les architectures multi-input sans modification.
 
@@ -203,13 +219,16 @@ Exécute la passe backward (rétropropagation). `grad_out` est le gradient de la
 
 ---
 
-### `Mimir.Model.optimizer_step()`
+### `Mimir.Model.optimizer_step(learning_rate, optimizer?)`
 
 ```
-Mimir.Model.optimizer_step() -> true | (false, string)
+Mimir.Model.optimizer_step(learning_rate: number, optimizer?: string = "adamw")
+    -> true | (false, string)
 ```
 
-Applique une étape de l'optimiseur (SGD, Adam ou AdamW selon la config) pour mettre à jour les poids à partir des gradients calculés par `backward()`.
+Applique une étape SGD, Adam, AdamW, Lion, Adafactor, RAdam, NAdam, RMSprop
+ou LAMB. L'état de l'optimiseur est conservé entre les appels et peut être
+inclus dans un checkpoint.
 
 ---
 
@@ -228,10 +247,11 @@ Remet à zéro tous les gradients accumulés. À appeler au début de chaque ste
 ### `Mimir.Model.train(epochs, lr)`
 
 ```
-Mimir.Model.train(epochs: int, lr: number) -> true | (false, string)
+Mimir.Model.train(epochs: int, lr: number)
+    -> (true, step_global: int) | (false, string)
 ```
 
-Lance la boucle d'entraînement complète. Le comportement exact dépend de l'architecture : certains modèles (VAE, DDPM, Tags) ont des chemins d'entraînement dédiés dans `LuaScripting.cpp` qui gèrent automatiquement le dataset, la validation, les checkpoints et le feedback de calibration.
+Lance la boucle d'entraînement complète. Le comportement exact dépend de l'architecture : certains modèles, notamment VAEConv, ont des chemins dédiés dans `LuaScriptingModelAndRegistry.cpp`. Les fonctions mathématiques d’un step VAE vivent dans `Model.cpp`.
 
 **Prérequis :** le dataset doit être chargé avant cet appel (`Mimir.Dataset.load()`).
 
@@ -241,6 +261,43 @@ assert(Mimir.Model.train(50, 1e-4))
 ```
 
 > **Note :** si le processus reçoit `Ctrl+C` pendant l'entraînement, Mímir effectue un checkpoint d'interruption propre avant de terminer (si `cfg.checkpoint_dir` est défini).
+
+## Recon-Loss supportées (état actuel)
+
+Le paramètre `modelConfig.recon_loss` est interprété selon le chemin d'entraînement (VAE, diffusion, VAEText, etc.).
+
+### Noms supportés (généraux)
+
+| Valeur `recon_loss` | Alias | Disponibilité | Notes |
+| --- | --- | --- | --- |
+| `mse` | `l2` | générale | défaut dans la plupart des chemins |
+| `mae` | `l1` | générale | erreur absolue moyenne |
+| `bce` | - | générale | binary cross-entropy |
+| `huber` | - | générale | `delta` configurable |
+| `smoothl1` | `smooth_l1` | générale | équivalent Huber |
+| `charbonnier` | - | générale | robuste, `eps` configurable |
+| `gaussian_nll` | `nll_gaussian`, `gaussian-nll` | générale | NLL gaussienne |
+
+### Noms supportés (spécifiques)
+
+| Valeur `recon_loss` | Disponibilité | Notes |
+| --- | --- | --- |
+| `ce` | VAEText | cross-entropy token-level |
+| `cross_entropy` | VAEText | alias de `ce` |
+| `xent` | VAEText | alias court |
+
+### Hyperparamètres associés
+
+Selon le type choisi, ces clés de config peuvent s'appliquer :
+
+- `huber_delta` (ou `smoothl1_delta`, `smoothl1_beta`)
+- `charbonnier_eps`
+- `nll_sigma` (ou `gaussian_nll_sigma`)
+
+### Important
+
+- Certains chemins internes publient `recon_loss_type` avec des valeurs comme `bce_logits` pour l'affichage/monitoring; ce label peut être émis même si la clé `recon_loss` n'est pas utilisée telle quelle dans la config.
+- Si une valeur n'est pas reconnue par un modèle, un fallback explicite vers `mse` peut être appliqué.
 
 ---
 
@@ -255,7 +312,15 @@ Mimir.Model.dtype(dtype: string) -> true | (false, string)
 
 Lit ou fixe le **dtype par défaut** du modèle. Ce dtype est utilisé notamment lors de la sérialisation pour déterminer le format de stockage des poids.
 
-Dtypes supportés : `"float32"`, `"float16"`, `"bfloat16"`.
+Dtypes et alias acceptés :
+
+- flottants : `float32`/`float`/`f32`, `float16`/`f16`/`fp16`,
+  `bfloat16`/`bf16`, `float64`/`double`/`f64` ;
+- signés : `int8`, `int16`, `int32`, `int64` et alias `i8` à `i64` ;
+- non signés : `uint8`, `uint16`, `uint32`, `uint64` et alias `u8` à `u64` ;
+- booléen : `bool`/`b1`.
+
+La liste autoritative est accessible avec `Mimir.Architectures.dtypes()`.
 
 Accessible aussi via l'alias **`Mimir.model.dtype`** (lowercase) :
 
@@ -273,23 +338,7 @@ assert(ok, err)
 
 ---
 
-## Encodage et forward spécialisés
-
-### `Mimir.Model.encode_prompt(prompt?)`
-
-```
-Mimir.Model.encode_prompt(prompt?: string) -> table<float> | (nil, string)
-```
-
-Encode un prompt texte en vecteur de flottants via le tokenizer et l'encodeur internes au modèle. La dimension de sortie dépend de l'architecture (typiquement `d_model` ou `latent_dim`).
-
-```lua
-local vec, err = Mimir.Model.encode_prompt("a landscape with mountains")
-assert(vec, err)
--- vec est un tableau de floats prêt à être utilisé comme condition de génération
-```
-
----
+## Matériel
 
 ### `Mimir.Model.hardware_caps()`
 
@@ -331,9 +380,7 @@ local cfg = {
 
 -- 2. Cycle de vie
 assert(Mimir.Model.create("transformer", cfg))
-
-local ok, nb_params = Mimir.Model.build()
-assert(ok, nb_params)
+local nb_params = Mimir.Model.total_params()
 print(string.format("%.2f M paramètres", nb_params / 1e6))
 
 assert(Mimir.Model.allocate_params())
@@ -358,7 +405,8 @@ print(string.format("Sortie : %d flottants", #output))
 Mimir.Model.infer(prompt: string) -> string | nil
 ```
 
-Chemin d'inférence historique (texte → texte). Non recommandé pour les nouveaux scripts — utilisez `encode_prompt()` + `forward()` pour un contrôle total.
+Chemin d'inférence historique (texte → texte). Pour les nouveaux scripts,
+utilisez `forward()` avec le contrat d'entrée propre à l'architecture.
 
 ---
 
@@ -411,4 +459,10 @@ local cfg = {
 - [Cycle de vie d'un modèle](../02-User-Guide/02-Model-Lifecycle.md)
 - [Entraînement](../02-User-Guide/04-Training.md)
 - [Architectures disponibles](./11-Architectures.md)
-- [Sérialisation](./12-Serialization.md)
+- [Sérialisation](./16-Serialization.md)
+
+## Étapes suivantes
+
+- [Page précédente : Sérialisation (save/load) — résumé](02-Serialization.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : API : `Mimir.Architectures`](11-Architectures.md)

@@ -1,20 +1,12 @@
 # Mémoire (Allocator, MemoryGuard)
 
-## Pour qui
-
-Débutant à intermédiaire.
-
-## Objectif
-
 Éviter les OOM avec une configuration mémoire simple et sûre.
 
-## Avant de commencer
+**Public concerné :** Débutant à intermédiaire.
 
-Connaître la RAM disponible sur ta machine.
-
-## Résultat attendu
-
-Tu peux stabiliser les runs longs sans crash mémoire.
+> **Prérequis**
+>
+> Connaître la RAM disponible sur votre machine.
 
 
 Mímir est “CPU-first” et peut allouer de gros buffers. La pratique recommandée est d’activer :
@@ -51,7 +43,7 @@ assert(ok ~= false, err)
 | Clé | Type | Effet | Conseil |
 | --- | --- | --- | --- |
 | `max_ram_gb` | number | budget RAM pour tenseurs dynamiques | commence bas (8–12GB) et monte |
-| `enable_compression` | bool | compresse des buffers évincés | `true` si tu vises stabilité |
+| `enable_compression` | bool | compresse des buffers évincés | `true` si vous visez stabilité |
 | `swap_strategy` | string | stratégie d’éviction | `"lru"` est un bon défaut |
 
 ## Patterns recommandés
@@ -85,4 +77,10 @@ assert(Mimir.Allocator.configure({
 Conseils debug :
 
 - Si ça dépasse la limite, baisse `seq_len`, `d_model`, ou `batch` (quand applicable) avant d’augmenter la RAM.
-- Quand tu compares des runs, fixe un `seed` et garde `max_ram_gb` constant.
+- Quand vous comparez des runs, fixe un `seed` et garde `max_ram_gb` constant.
+
+## Étapes suivantes
+
+- [Page précédente : Mode `--conf`: Config-Driven Scripting](08-Config-Driven-Scripting.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Scripts et outils Lua](10-Examples.md)

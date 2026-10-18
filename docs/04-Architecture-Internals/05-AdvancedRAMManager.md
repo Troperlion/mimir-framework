@@ -1,20 +1,12 @@
-# Internals: AdvancedRAMManager (cache RAM / compression / spill disque)
-
-## Pour qui
-
-Développeur avancé qui modifie le moteur C/C++.
-
-## Objectif
+# AdvancedRAMManager
 
 Comprendre le fonctionnement interne exact des composants runtime.
 
-## Avant de commencer
+**Public concerné :** Développeur avancé qui modifie le moteur C/C++.
 
-Connaître les bases C++ et la structure du dépôt.
-
-## Résultat attendu
-
-Tu peux modifier le code interne en limitant les régressions.
+> **Prérequis**
+>
+> Connaître les bases C++ et la structure du dépôt.
 
 
 Cette page documente `AdvancedRAMManager` et comment il se positionne par rapport aux autres mécanismes mémoire (`MemoryGuard`, `DynamicTensorAllocator`).
@@ -148,3 +140,9 @@ En pratique:
 
 - Où `AdvancedRAMManager` est appelé concrètement (sites d’appel) pour définir son rôle exact dans le framework.
 - Les politiques précises d’éviction (LRU vs prédiction) dans les sections plus bas du fichier.
+
+## Étapes suivantes
+
+- [Page précédente : Internals: Monitoring (HtopDisplay / Visualizer / AsyncMonitor)](04-Monitoring-Htop-Visualizer.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Internals : classe `Model` (C++)](10-Model-Class.md)

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Mimir
+Comment=Machine learning framework and scripting runtime
+Exec=mimir
+Icon=mimir
+Terminal=true
+Categories=Development;Science;

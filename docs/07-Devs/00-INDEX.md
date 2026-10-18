@@ -1,49 +1,58 @@
-# Devs - Index
+# Développement du framework
 
-## Pour qui
+Cette section s'adresse aux personnes qui modifient le moteur C++, les modèles,
+les runtimes ou les bridges de scripting. Elle décrit les contrats à préserver
+et relie chaque mécanisme à ses sources de vérité.
 
-Développeur framework (C/C++/runtime/scripting).
+> **Limitation**
+> Lua est le bridge de référence pour le scripting métier. Les bridges
+> JavaScript, C# et Rust restent partiels tant que leur parité avec Lua n'est
+> pas explicitement validée.
 
-## Objectif
+## Parcours recommandé
 
-Implémenter ou modifier des briques techniques sans casser le contrat global.
+1. [Comprendre le fonctionnement du framework](01-How-The-Framework-Works.md)
+2. [Construire des modèles et des layers](02-Building-Models-And-Layers.md)
+3. [Comprendre la configuration et le registre](03-Config-And-Registry.md)
+4. [Développer un runtime](04-Runtime-Development.md)
+5. [Préserver le contrat de scripting](05-Scripting-System-Contract.md)
 
-## Avant de commencer
+Exécutez les tests associés à un composant avant et après toute modification.
+Un backend qui accepte un type de layer doit soit l'exécuter correctement, soit
+le refuser afin que le routeur puisse essayer le backend suivant.
 
-Comprendre le registre d'architectures et les conventions I/O.
+## Modèles et configuration
 
-## Résultat attendu
+- [Construction de modèles et de layers](02-Building-Models-And-Layers.md)
+- [Configuration et registre](03-Config-And-Registry.md)
+- [Ajouter une architecture et ses outils](../06-Contributing/02-New-Architecture-And-Tools.md)
 
-Tu peux livrer des évolutions compatibles avec la base existante.
+## Runtimes
 
+- [Développement d'un runtime](04-Runtime-Development.md)
+- [Internals des runtimes GPU](../04-Architecture-Internals/21-GPU-Runtimes.md)
+- [Tutoriel : modifier ou ajouter un runtime](../08-Tuto/04-Tuto-Modifier-Ou-Ajouter-Runtime.md)
+- [Tutoriel : ajouter une opération](../08-Tuto/05-Tuto-Ajouter-Op.md)
 
-Cette section est le point d'entree principal pour les developpeurs du framework.
+## Scripting et visualisation
 
-Objectif : expliquer comment le framework fonctionne de l'interieur et comment ajouter/modifier des briques sans casser la coherence globale.
+- [Contrat du système de scripting](05-Scripting-System-Contract.md)
+- [Étendre le visualizer](06-Visualizer-Tips-And-Features.md)
+- [Runbook de débogage du visualizer](07-Visualizer-Debug-Runbook.md)
 
-Chaque chapitre contient des demos orientees contraintes metier : reproductibilite, stabilite de contrat, fallback runtime, et tracabilite config.
+## Sources de vérité
 
-## Parcours recommande
+| Domaine | Sources principales |
+| --- | --- |
+| Modèle | `src/Model.hpp`, `src/Model.cpp` |
+| Registre | `src/Models/Registry/ModelArchitectures.hpp`, `ModelArchitectures.cpp` |
+| Runtime | `src/runtimes/AbstractRuntime.hpp`, `RuntimeRouter.cpp` |
+| Contrat de scripting | `src/scriptings/ScriptingContext.hpp`, `ScriptingRuntime.hpp` |
+| Bridge Lua | `src/scriptings/Lua/luaScripting/` |
 
-1. Lire le fonctionnement general du framework.
-2. Lire la construction des modeles (`model.push(...)`, I/O des layers).
-3. Lire la composition de config et l'enregistrement au registre.
-4. Lire la section runtime (modification et ajout).
-5. Lire le contrat API scripting (stabilite inter-langages).
-6. Executer les demos de chaque chapitre avant merge.
+## Étapes suivantes
 
-## Chapitres
-
-- Fonctionnement du framework : [docs/07-Devs/01-How-The-Framework-Works.md](01-How-The-Framework-Works.md)
-- Construire un modele (model.push + wiring C/C++) : [docs/07-Devs/02-Building-Models-And-Layers.md](02-Building-Models-And-Layers.md)
-- Config et registre : [docs/07-Devs/03-Config-And-Registry.md](03-Config-And-Registry.md)
-- Runtime (modifier / ajouter) : [docs/07-Devs/04-Runtime-Development.md](04-Runtime-Development.md)
-- Contrat API scripting : [docs/07-Devs/05-Scripting-System-Contract.md](05-Scripting-System-Contract.md)
-
-## Sources code de reference
-
-- Moteur modele : `src/Model.hpp`, `src/Model.cpp`
-- Registre archis : `src/Models/Registry/ModelArchitectures.hpp`, `src/Models/Registry/ModelArchitectures.cpp`
-- Runtime abstrait : `src/runtimes/AbstractRuntime.hpp`
-- Scripting (contrat commun) : `src/scriptings/ScriptingContext.hpp`, `src/scriptings/ScriptingRuntime.hpp`
-- Bridge Lua actuel : `src/scriptings/Lua/luaScripting/LuaScripting.hpp`, `src/scriptings/Lua/luaScripting/LuaScripting.cpp`
+Consultez l'[index des internals](../04-Architecture-Internals/00-Internals-Index.md)
+pour étudier l'implémentation composant par composant, ou le
+[guide de contribution](../06-Contributing/01-Contributing.md) avant de
+préparer une modification.

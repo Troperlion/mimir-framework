@@ -148,4 +148,8 @@ void PatchDiscriminatorModel::buildInto(Model& model, const Config& cfg) {
 
     const int out_dim = std::max(1, cur_h * cur_w);
     model.modelConfig["output_dim"] = out_dim;
+    model.modelConfig["bbox_output_w"] = cur_w;
+    model.modelConfig["bbox_output_h"] = cur_h;
+    model.modelConfig["bbox_output_c"] = 1;
+    model.modelConfig["bbox_output_layout"] = "CHW";
 }

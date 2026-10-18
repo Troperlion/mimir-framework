@@ -1,0 +1,714 @@
+{
+  "default_dtype": "float32",
+  "encoder": {
+    "architecture": "ViT",
+    "has_encoder": true
+  },
+  "features": [
+    "layer_config",
+    "real_shapes",
+    "layer_io",
+    "extended_layer_types",
+    "framework_state",
+    "checksums"
+  ],
+  "format": "mimir_debug_dump",
+  "format_version": "1.3.0",
+  "framework_state": {
+    "memory": {
+      "advanced_ram_manager": {
+        "allocations_blocked": false,
+        "current_bytes": 0,
+        "current_mb": 0.0,
+        "freeze_mode": false,
+        "peak_bytes": 0,
+        "peak_mb": 0.0,
+        "usage_percent": 0.0
+      },
+      "dynamic_tensor_allocator": {
+        "loaded_count": 5,
+        "tensor_count": 5
+      },
+      "memory_guard": {
+        "allocations_blocked": false,
+        "current_bytes": 1255936,
+        "current_mb": 1.19775390625,
+        "freeze_mode": false,
+        "limit_bytes": 10737418240,
+        "limit_mb": 10240.0,
+        "peak_bytes": 1255936,
+        "peak_mb": 1.19775390625,
+        "usage_percent": 0.011696815490722656
+      }
+    },
+    "model": {
+      "default_dtype": "float32",
+      "has_encoder": true,
+      "image_height": 64,
+      "image_width": 64,
+      "model_config": {
+        "base_channels": 32,
+        "image_c": 3,
+        "image_h": 64,
+        "image_w": 64,
+        "num_down": 3,
+        "type": "patch_discriminator"
+      },
+      "model_name": "PatchDiscriminatorModel",
+      "num_layers": 13,
+      "parameters_frozen": false,
+      "tokenizer_vocab_size": 47,
+      "total_params": 313984
+    },
+    "registry": {
+      "supported_layer_count": 70,
+      "supported_layer_types": [
+        "Conv2d",
+        "ConvTranspose2d",
+        "Conv1d",
+        "DepthwiseConv2d",
+        "Linear",
+        "Bilinear",
+        "Embedding",
+        "EmbeddingBag",
+        "BatchNorm2d",
+        "BatchNorm1d",
+        "LayerNorm",
+        "GroupNorm",
+        "InstanceNorm2d",
+        "RMSNorm",
+        "ReLU",
+        "LeakyReLU",
+        "GELU",
+        "GEGLU",
+        "SiLU",
+        "Tanh",
+        "Sigmoid",
+        "Softmax",
+        "LogSoftmax",
+        "Softplus",
+        "Mish",
+        "HardSigmoid",
+        "HardSwish",
+        "MaxPool2d",
+        "AvgPool2d",
+        "AdaptiveAvgPool2d",
+        "GlobalAvgPool2d",
+        "MaxPool1d",
+        "AvgPool1d",
+        "TokenMeanPool",
+        "Dropout",
+        "Dropout2d",
+        "AlphaDropout",
+        "Flatten",
+        "Reshape",
+        "Transpose",
+        "Permute",
+        "Squeeze",
+        "Unsqueeze",
+        "View",
+        "Add",
+        "Subtract",
+        "Multiply",
+        "Divide",
+        "Concat",
+        "Split",
+        "Chunk",
+        "Stack",
+        "MatMul",
+        "BatchMatMul",
+        "SelfAttention",
+        "MultiHeadAttention",
+        "CrossAttention",
+        "UpsampleNearest",
+        "UpsampleBilinear",
+        "UpsampleBicubic",
+        "PixelShuffle",
+        "LSTM",
+        "GRU",
+        "RNN",
+        "ZeroPad2d",
+        "ReflectionPad2d",
+        "ReplicationPad2d",
+        "Identity",
+        "Constant",
+        "Lambda"
+      ]
+    },
+    "runtime": {
+      "backends": {
+        "cpu": {
+          "available": true,
+          "compiled": true,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CPU",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "cuda": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CUDA",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "opencl": {
+          "available": false,
+          "compiled": true
+        },
+        "rocm": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "ROCM",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "vulkan": {
+          "available": true,
+          "compiled": true
+        }
+      },
+      "cpu_features": {
+        "avx2": true,
+        "bmi2": true,
+        "f16c": true,
+        "fma": true
+      },
+      "environment_overrides": {},
+      "framework_logs_suppressed": false
+    },
+    "snapshot_timestamp": 1783546795,
+    "snapshot_version": "1.0.0"
+  },
+  "git": {
+    "branch": "unknown",
+    "commit": "unknown"
+  },
+  "layers": [
+    {
+      "index": 0,
+      "inputs": [
+        "__input__"
+      ],
+      "name": "patch_disc/raw_in",
+      "output": "patch_disc/in_vec",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Identity"
+    },
+    {
+      "config": {
+        "target_shape": [
+          64,
+          64,
+          3
+        ]
+      },
+      "index": 1,
+      "inputs": [
+        "patch_disc/in_vec"
+      ],
+      "name": "patch_disc/in_reshape",
+      "output": "patch_disc/in_hwc",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Reshape"
+    },
+    {
+      "config": {
+        "permute_dims": [
+          2,
+          0,
+          1
+        ],
+        "shape": [
+          64,
+          64,
+          3
+        ]
+      },
+      "index": 2,
+      "inputs": [
+        "patch_disc/in_hwc"
+      ],
+      "name": "patch_disc/in_to_chw",
+      "output": "patch_disc/in_chw",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Permute"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": true,
+        "in_channels": 3,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 4,
+        "kernel_w": 4,
+        "out_channels": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 3,
+      "inputs": [
+        "patch_disc/in_chw"
+      ],
+      "name": "patch_disc/c1",
+      "output": "patch_disc/y1",
+      "params_count": 1536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "patch_disc/c1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            3,
+            4,
+            4
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1536,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "negative_slope": 0.009999999776482582
+      },
+      "index": 4,
+      "inputs": [
+        "patch_disc/y1"
+      ],
+      "name": "patch_disc/c1/act",
+      "output": "patch_disc/y1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LeakyReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": true,
+        "in_channels": 32,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 4,
+        "kernel_w": 4,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 5,
+      "inputs": [
+        "patch_disc/y1_act"
+      ],
+      "name": "patch_disc/d1/conv",
+      "output": "patch_disc/d1/y",
+      "params_count": 32768,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "patch_disc/d1/conv.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            32,
+            4,
+            4
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 32768,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "negative_slope": 0.009999999776482582
+      },
+      "index": 6,
+      "inputs": [
+        "patch_disc/d1/y"
+      ],
+      "name": "patch_disc/d1/conv/act",
+      "output": "patch_disc/d1/y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LeakyReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": true,
+        "in_channels": 64,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 4,
+        "kernel_w": 4,
+        "out_channels": 128,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 7,
+      "inputs": [
+        "patch_disc/d1/y_act"
+      ],
+      "name": "patch_disc/d2/conv",
+      "output": "patch_disc/d2/y",
+      "params_count": 131072,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "patch_disc/d2/conv.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            64,
+            4,
+            4
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 131072,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "negative_slope": 0.009999999776482582
+      },
+      "index": 8,
+      "inputs": [
+        "patch_disc/d2/y"
+      ],
+      "name": "patch_disc/d2/conv/act",
+      "output": "patch_disc/d2/y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LeakyReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": true,
+        "in_channels": 128,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 128,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 9,
+      "inputs": [
+        "patch_disc/d2/y_act"
+      ],
+      "name": "patch_disc/head",
+      "output": "patch_disc/head_y",
+      "params_count": 147456,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "patch_disc/head.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            128,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 147456,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "negative_slope": 0.009999999776482582
+      },
+      "index": 10,
+      "inputs": [
+        "patch_disc/head_y"
+      ],
+      "name": "patch_disc/head/act",
+      "output": "patch_disc/head_y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LeakyReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": true,
+        "in_channels": 128,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 1,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 11,
+      "inputs": [
+        "patch_disc/head_y_act"
+      ],
+      "name": "patch_disc/out_conv",
+      "output": "patch_disc/logits",
+      "params_count": 1152,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "patch_disc/out_conv.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1,
+            128,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1152,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 12,
+      "inputs": [
+        "patch_disc/logits"
+      ],
+      "name": "patch_disc/flat",
+      "output": "x",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Flatten"
+    }
+  ],
+  "model_config": {
+    "base_channels": 32,
+    "dtype": "float32",
+    "image_c": 3,
+    "image_h": 64,
+    "image_w": 64,
+    "num_down": 3,
+    "type": "patch_discriminator"
+  },
+  "model_name": "PatchDiscriminatorModel",
+  "num_layers": 13,
+  "timestamp": 1783546795,
+  "tokenizer": {
+    "has_vocab": true,
+    "vocab_size": 47
+  },
+  "total_params": 313984,
+  "default_params": {
+    "base_channels": 32,
+    "image_c": 3,
+    "image_h": 64,
+    "image_w": 64,
+    "num_down": 3
+  }
+}

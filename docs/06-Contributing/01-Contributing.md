@@ -1,20 +1,16 @@
 # Contribuer
 
-## Pour qui
-
-Contributeur du projet.
-
-## Objectif
-
 Contribuer avec des changements cohérents et maintenables.
 
-## Avant de commencer
+**Public concerné :** Contributeur du projet.
 
-Connaître le workflow Git et les bases du projet.
+> **Prérequis**
+>
+> Connaître le workflow Git et les bases du projet.
 
-## Résultat attendu
+## Diagramme d'explication
 
-Tu sais proposer des changements alignés avec les conventions du framework.
+![Plaque de publication et diffusion docs](../graphs/28_publication_plate.svg)
 
 
 Compléments développeurs :
@@ -23,6 +19,8 @@ Compléments développeurs :
 - Ajouter une architecture + registry + script Lua + outils : [docs/06-Contributing/02-New-Architecture-And-Tools.md](02-New-Architecture-And-Tools.md)
 - Chapitre complet (models, runtimes, features, scripting multi-langage) : [docs/06-Contributing/03-Extending-Models-Runtimes-And-Features.md](03-Extending-Models-Runtimes-And-Features.md)
 - Tutoriel pas-à-pas (ajouter une entrée Python, transposable Ruby/JS/Perl/Java/Rust) : [docs/06-Contributing/04-Tutorial-Add-Python-Scripting-Entry.md](04-Tutorial-Add-Python-Scripting-Entry.md)
+- Audit, nettoyage et pull request publique : [Préparer une publication GitHub](05-Publishing-GitHub.md)
+- Maturité vérifiée des composants : [État réel du projet](../00-PROJECT-STATUS.md)
 
 ## Philosophie
 
@@ -40,3 +38,9 @@ Compléments développeurs :
 - Nouvelle architecture : `src/Models/Registry/ModelArchitectures.cpp`
 - API scripting (contrat système commun) : `src/scriptings/ScriptingContext.hpp`
 - API Lua (implémentation) : `src/scriptings/Lua/luaScripting/LuaScripting.cpp`
+
+## Étapes suivantes
+
+- [Revenir à la documentation](../00-INDEX.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Développeurs : Ajouter une Architecture et Utiliser les Outils](02-New-Architecture-And-Tools.md)

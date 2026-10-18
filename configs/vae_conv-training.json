@@ -1,0 +1,55 @@
+{
+  "$schema": "./conf.schema.json",
+  "description": "Entraînement VAEConv générique v7 sans skip connections avec régularisation L2",
+  "env": {
+    "OMP_NUM_THREADS": 10
+  },
+  "lua": {
+    "scripts": [
+      {
+        "script": "scripts/training/train_vae_conv.lua",
+        "args": [
+          "--dataset-root", "datasets/compose",
+          "--out-dir", "checkpoint/vae_conv-example-no-skip-L2",
+          "--arch", "vae_conv",
+          "--image-w", "512",
+          "--image-h", "512",
+          "--image-c", "3",
+          "--latent-h", "32",
+          "--latent-w", "32",
+          "--latent-c", "4",
+          "--base-channels", "8",
+          "--decoder-upsample", "nearest_conv",
+          "--stochastic-latent", "true",
+          "--kl-beta", "0.001",
+          "--kl-warmup-steps", "1500",
+          "--seed", "0",
+          "--epochs", "100",
+          "--lr", "2e-4",
+          "--lr-warmup-steps", "50",
+          "--optimizer", "adamw",
+          "--log-every", "1",
+          "--validate-every-steps", "500",
+          "--validate-items", "500",
+          "--validate-holdout-frac", "0.1",
+          "--validate-holdout-items", "120",
+          "--viz",
+          "--resume", "0",
+          "--no-htop",
+          "--resnet", "false",
+          "--attn", "false",
+          "--enc-norm", "none",
+          "--no-dec-norm",
+          "--csv-path", "checkpoint/vae_conv-example-no-skip-L2/loss_history.csv",
+          "--use-skip-connections", "false",
+          "--encoder-prior", "false",
+          "--d-model", "0",
+          "--text-cond", "false",
+          "--perceptual-weight", "0.0",
+          "--dtype", "bf16",
+          "--decay-strategy", "cosine"
+        ]
+      }
+    ]
+  }
+}

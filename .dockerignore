@@ -9,17 +9,51 @@ compile_commands.json
 # Large assets / datasets / runs
 checkpoints/
 checkpoint/
-dataset_2/
+datasets/
+dataset*/
+data/
 logs/
 logs-ctest/
 .mimir-spill/
 .mimir_spill/
+Testing/
 
 # Bundles / archives
 *.zip
+*.7z
+*.tar
+*.tar.gz
 
 # Model weights
 model.safetensors
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+
+# Données et sorties générées
+*.csv
+*.raw
+*.ppm
+snapshots/
+exports/vae_conv_samples/
+graph_data.json
+graph_report.html
+viz_ui_settings.json
+
+# Sources non requises pour l'image CPU/headless
+docs/
+Tests/
+examples/
+fpga/
+ide/
+.vscode/
+
+# Secrets et configuration locale
+secrets/
+.env
+.env.*
+config_local.json
 
 # Git
 .git/

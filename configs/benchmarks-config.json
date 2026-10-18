@@ -1,0 +1,120 @@
+{
+  "$schema": "conf.schema.json",
+  "description": "Lance les benchmarks Mimir dans l'ordre recommandé et dans des processus isolés.",
+
+  "_doc": {
+    "usage": "./bin/mimir --conf configs/benchmarks-config.json [--run <suite>]",
+    "suites": {
+      "all": "Tous les benchmarks, du contrôle API au stress test.",
+      "smoke": "Contrôles rapides de l'API, du spill mémoire et de NMS.",
+      "core": "Benchmarks spécialisés et globaux, sans stress test (par défaut).",
+      "quick": "Suite principale avec dimensions et répétitions réduites.",
+      "stress": "Stress test uniquement."
+    },
+    "ordre": [
+      "Contrôles API et mémoire",
+      "Micro-benchmarks NMS et attention",
+      "Entraînement convolutionnel",
+      "Benchmarks général, complet et officiel",
+      "Stress test en dernier"
+    ],
+    "isolation": "Chaque benchmark est lancé dans un processus Mimir distinct afin de réinitialiser le modèle, les runtimes et l'allocateur.",
+    "reports": {
+      "format": "Un résumé Markdown et un rapport JSON détaillé par benchmark.",
+      "location": "outputs/benchmarks/<suite>",
+      "metrics": ["minimum", "moyenne", "médiane", "p95", "maximum", "débit"]
+    },
+    "notes": [
+      "Les données utilisées sont synthétiques; aucun dataset n'est lu.",
+      "La suite complète peut consommer plusieurs gigaoctets de RAM.",
+      "MIMIR_BIN peut désigner un autre exécutable Mimir.",
+      "La section env est appliquée par Mimir et héritée par les processus enfants.",
+      "Conserver OMP_NUM_THREADS identique pour comparer deux exécutions.",
+      "Toutes les durées utilisent l'horloge murale monotone steady_clock, avec une résolution inférieure à la seconde.",
+      "Les forwards GPU sont chronométrés jusqu'au retour des sorties matérialisées côté hôte."
+    ]
+  },
+
+  "env": {
+    "MIMIR_ACCEL_VERBOSE": 0,
+    "MIMIR_PLANNER_TRACE": 0,
+    "MIMIR_PLANNER_DUMP": 0,
+    "OMP_NUM_THREADS": 10
+  },
+
+  "visualization": {
+    "enabled": false
+  },
+
+  "logging": {
+    "show_htop_display": false,
+    "show_viz_display": false
+  },
+
+  "lua": {
+    "scripts": [
+      {
+        "script": "scripts/benchmarks/run_suite.lua",
+        "args": ["--suite", "core", "--keep-going", "--report-dir", "outputs/benchmarks/core"]
+      }
+    ]
+  },
+
+  "tasks": {
+    "all": {
+      "description": "Exécute tous les benchmarks dans l'ordre recommandé.",
+      "lua": {
+        "scripts": [
+          {
+            "script": "scripts/benchmarks/run_suite.lua",
+            "args": ["--suite", "all", "--keep-going", "--report-dir", "outputs/benchmarks/all"]
+          }
+        ]
+      }
+    },
+    "smoke": {
+      "description": "Exécute les contrôles rapides dans des processus isolés.",
+      "lua": {
+        "scripts": [
+          {
+            "script": "scripts/benchmarks/run_suite.lua",
+            "args": ["--suite", "smoke", "--report-dir", "outputs/benchmarks/smoke"]
+          }
+        ]
+      }
+    },
+    "core": {
+      "description": "Exécute les benchmarks principaux sans le stress test.",
+      "lua": {
+        "scripts": [
+          {
+            "script": "scripts/benchmarks/run_suite.lua",
+            "args": ["--suite", "core", "--keep-going", "--report-dir", "outputs/benchmarks/core"]
+          }
+        ]
+      }
+    },
+    "quick": {
+      "description": "Exécute rapidement les benchmarks principaux avec rapports dédiés.",
+      "lua": {
+        "scripts": [
+          {
+            "script": "scripts/benchmarks/run_suite.lua",
+            "args": ["--suite", "quick", "--keep-going", "--report-dir", "outputs/benchmarks/quick"]
+          }
+        ]
+      }
+    },
+    "stress": {
+      "description": "Exécute uniquement le benchmark de stress.",
+      "lua": {
+        "scripts": [
+          {
+            "script": "scripts/benchmarks/run_suite.lua",
+            "args": ["--suite", "stress", "--report-dir", "outputs/benchmarks/stress"]
+          }
+        ]
+      }
+    }
+  }
+}

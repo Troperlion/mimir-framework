@@ -1,23 +1,42 @@
-# Chapitre développeur complet : Étendre le framework
-
-## Pour qui
-
-Contributeur du projet.
-
-## Objectif
+# Étendre le framework
 
 Contribuer avec des changements cohérents et maintenables.
 
-## Avant de commencer
+**Public concerné :** Contributeur du projet.
 
-Connaître le workflow Git et les bases du projet.
+> **Prérequis**
+>
+> Connaître le workflow Git et les bases du projet.
 
-## Résultat attendu
+## Sur cette page
 
-Tu sais proposer des changements alignés avec les conventions du framework.
+- [Diagramme d'explication](#diagramme-dexplication)
+- [Comment utiliser ce guide](#comment-utiliser-ce-guide)
+- [1. Vue d'ensemble de l'extension](#1-vue-densemble-de-lextension)
+- [2. Ajouter un nouveau modèle](#2-ajouter-un-nouveau-modèle)
+- [3. Ajouter un runtime (backend d'exécution)](#3-ajouter-un-runtime-backend-dexécution)
+- [4. Ajouter une fonctionnalité transverse](#4-ajouter-une-fonctionnalité-transverse)
+- [5. Ajouter une nouvelle entrée de scripting (autre que Lua)](#5-ajouter-une-nouvelle-entrée-de-scripting-autre-que-lua)
+- [6. Plan de validation complet (avant merge)](#6-plan-de-validation-complet-avant-merge)
+- [7. Template de PR recommandé](#7-template-de-pr-recommandé)
+- [Étapes suivantes](#étapes-suivantes)
 
+## Diagramme d'explication
+
+![Points d'extension du framework](../graphs/16_extension_points.svg)
 
 Ce chapitre est le guide de référence pour ajouter des capacités au framework côté code source.
+
+## Comment utiliser ce guide
+
+Lis ce document comme une carte de navigation :
+
+1. Vous modifiez un modèle : va à la section 2.
+2. Vous modifiez un runtime : va à la section 3.
+3. Vous ajoutez une feature transverse : va à la section 4.
+4. Vous ajoutez une entrée de scripting : va à la section 5.
+
+Objectif pédagogique : transformer une idée technique en changement testable avec un minimum de régressions.
 
 Objectifs :
 
@@ -39,6 +58,8 @@ Le framework se compose de 5 zones qui évoluent ensemble :
 Quand vous ajoutez une brique, validez toujours la chaîne complète :
 
 create -> allocate -> init/load -> forward -> save/load -> script smoke test.
+
+Règle pratique : si une étape de cette chaîne casse, la PR n'est pas prête.
 
 ## 2. Ajouter un nouveau modèle
 
@@ -83,6 +104,12 @@ Commandes utiles :
 ./bin/mimir --lua scripts/tools/inspect_architectures.lua -- -l my_new_model -p --layers --stats
 ```
 
+Attendu :
+
+1. Le modèle apparaît dans la liste.
+2. La config par défaut est lisible.
+3. Le graphe est inspectable sans erreur.
+
 ## 3. Ajouter un runtime (backend d'exécution)
 
 Le framework inclut une base runtime dans `src/runtimes/`.
@@ -111,6 +138,12 @@ Fichiers actuels :
 - mémoire temporaire (scratchpads) et cycle de vie,
 - comportement identique entre runtimes pour un même graphe.
 
+Approche recommandée :
+
+1. Commencer par une seule op stable.
+2. Vérifier fallback et logs.
+3. Élargir progressivement le périmètre d'ops.
+
 ## 4. Ajouter une fonctionnalité transverse
 
 Exemples de fonctionnalités transverses :
@@ -134,6 +167,13 @@ Checklist :
 - backward implémenté si entraînement,
 - validation shape/dtype,
 - tests ciblés.
+
+Bon pattern de livraison :
+
+1. Ajouter le type et le dispatch.
+2. Ajouter au moins un test nominal.
+3. Ajouter un test de forme invalide.
+4. Mettre à jour la doc API correspondante.
 
 ### 4.2 Option CLI et comportement d'exécution
 
@@ -226,6 +266,8 @@ Objectif : un script de pipeline doit rester conceptuellement portable d'un lang
 5. Test smoke scripting (et multi-entry si ajout d'un nouveau langage).
 6. Documentation mise à jour dans Contributing + API/Guide utilisateur si nécessaire.
 
+Conseil : exécuter les commandes de validation dans l'ordre et coller les sorties clés dans la PR.
+
 ## 7. Template de PR recommandé
 
 Inclure dans la PR :
@@ -238,3 +280,9 @@ Inclure dans la PR :
 - sortie de test principale.
 
 Ce format accélère la revue et réduit les regressions silencieuses.
+
+## Étapes suivantes
+
+- [Page précédente : Développeurs : Ajouter une Architecture et Utiliser les Outils](02-New-Architecture-And-Tools.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Tutoriel pas-à-pas : Ajouter une entrée scripting Python](04-Tutorial-Add-Python-Scripting-Entry.md)

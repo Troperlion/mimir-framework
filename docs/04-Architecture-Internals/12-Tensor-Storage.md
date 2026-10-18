@@ -1,20 +1,12 @@
-# Internals : stockage `tensor` + allocation dynamique (C++)
-
-## Pour qui
-
-Développeur avancé qui modifie le moteur C/C++.
-
-## Objectif
+# Stockage des tenseurs et allocation dynamique
 
 Comprendre le fonctionnement interne exact des composants runtime.
 
-## Avant de commencer
+**Public concerné :** Développeur avancé qui modifie le moteur C/C++.
 
-Connaître les bases C++ et la structure du dépôt.
-
-## Résultat attendu
-
-Tu peux modifier le code interne en limitant les régressions.
+> **Prérequis**
+>
+> Connaître les bases C++ et la structure du dépôt.
 
 
 Cette page documente la structure `tensor` (C++) utilisée comme **bloc de stockage** pour certains buffers (notamment `Layer::weight_block`) et le sous-système d’allocation dynamique qui l’entoure.
@@ -23,7 +15,7 @@ Source de vérité :
 
 - Structure `tensor` : `src/tensors.hpp`
 - Implémentation (dynamic alloc + OpenCL legacy) : `src/tensors.cpp`
-- Allocateur dynamique : `src/DynamicTensorAllocator.hpp`
+- Allocateur dynamique : `src/runtimes/cpu/DynamicTensorAllocator.hpp`
 - Garde-fou mémoire : `src/MemoryGuard.hpp`
 - Utilitaires sécurité : `src/MemorySafety.hpp`
 - Utilisation “poids unifiés” : `src/Layers.hpp` (champ `Layer::weight_block`) + `src/Model.cpp` (`allocateParams`, forwards)
@@ -129,13 +121,19 @@ Invariant : `params_count` doit être correct **avant** l’allocation des poids
 
 ## 6) OpenCL “TensorSystem” (legacy)
 
-`TensorSystem` (dans `src/tensors.hpp/.cpp`) contient un kernel OpenCL `compute_weights` destiné à calculer un champ `Weight` à partir de `Pos/Value/Length`.
+`TensorSystem` (dans `src/tensors.hpp` et `src/tensors.cpp`) contient un kernel OpenCL `compute_weights` destiné à calculer un champ `Weight` à partir de `Pos/Value/Length`.
 
 - Ce chemin est orthogonal aux “tensors du modèle”.
 - S’il est compilé (`ENABLE_OPENCL`), il peut exister dans le binaire mais ne signifie pas que les poids du modèle sont sur GPU.
 
-## 7) Checklist (quand tu ajoutes/modifies un codepath)
+## 7) Checklist (lorsque vous ajoutez/modifies un codepath)
 
-- Si tu crées des poids : préférer `weight_block` + `params_count` exact.
+- Si vous créez des poids : préférer `weight_block` + `params_count` exact.
 - Éviter d’allouer des gros `std::vector<float>` dans des boucles hot-path sans passer par les scratchpads / allocateurs prévus.
-- Si tu touches à `DynamicTensorAllocator`, vérifier la cohérence `reserved/reserved_bytes` (sinon MemoryGuard “pense” qu’on fuit).
+- Si vous modifiez à `DynamicTensorAllocator`, vérifier la cohérence `reserved/reserved_bytes` (sinon MemoryGuard “pense” qu’on fuit).
+
+## Étapes suivantes
+
+- [Page précédente : Internals : `Helpers.hpp` (helpers C++)](11-Helpers.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Internals : Autograd + gradients + backward (C++)](13-Autograd-Gradients.md)

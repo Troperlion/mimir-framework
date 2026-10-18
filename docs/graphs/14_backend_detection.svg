@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="620" viewBox="0 0 1600 620" role="img" aria-labelledby="title desc">
+<title id="title">Détection matériel au démarrage</title><desc id="desc">Diagramme vectoriel éditable généré depuis les dumps du framework.</desc>
+<defs>
+<marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#475569"/></marker>
+<marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#2563eb"/></marker>
+<style><![CDATA[text{font-family:Inter,Segoe UI,Arial,sans-serif}.title{font-size:34px;font-weight:800;fill:#0f172a}.subtitle{font-size:16px;fill:#475569}.label{font-size:17px;font-weight:700;fill:#0f172a}.small{font-size:13px;fill:#475569}.tiny{font-size:11px;fill:#64748b}.box{stroke:#94a3b8;stroke-width:1.4;rx:14}.edge{stroke:#475569;stroke-width:2.2;fill:none;marker-end:url(#arrow)}.edgeB{stroke:#2563eb;stroke-width:2.4;fill:none;marker-end:url(#arrowBlue)}.dash{stroke-dasharray:7 7}.note{font-size:12px;fill:#475569}]]></style>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="60" y="62" class="title" text-anchor="start">Détection matériel au démarrage</text>
+<text x="60" y="92" class="subtitle" text-anchor="start">Le framework détecte les capacités CPU et les backends disponibles.</text>
+<line x1="60" y1="112" x2="1540" y2="112" stroke="#e2e8f0" stroke-width="2"/>
+<rect x="70.0" y="240" width="269.6" height="110" rx="14" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="204.8" y="265" class="label" text-anchor="middle">Startup</text>
+<text x="204.8" y="322" class="small" text-anchor="middle">initialisation</text>
+<rect x="367.6" y="240" width="269.6" height="110" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="502.40000000000003" y="265" class="label" text-anchor="middle">CPU features</text>
+<text x="502.40000000000003" y="322" class="small" text-anchor="middle">AVX2 • BMI2 • F16C • FMA</text>
+<path d="M339.6,295.0 L367.6,295.0" class="edgeB"/>
+<rect x="665.2" y="240" width="269.6" height="110" rx="14" fill="#dbeafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="800.0" y="265" class="label" text-anchor="middle">Backend registry</text>
+<text x="800.0" y="322" class="small" text-anchor="middle">CPU / Vulkan / OpenCL / CUDA /</text>
+<text x="800.0" y="336" class="small" text-anchor="middle">ROCm</text>
+<path d="M637.2,295.0 L665.2,295.0" class="edgeB"/>
+<rect x="962.8000000000001" y="240" width="269.6" height="110" rx="14" fill="#ffedd5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1097.6000000000001" y="265" class="label" text-anchor="middle">Select backend</text>
+<text x="1097.6000000000001" y="322" class="small" text-anchor="middle">CPU-first robuste</text>
+<path d="M934.8000000000001,295.0 L962.8000000000001,295.0" class="edgeB"/>
+<rect x="1260.4" y="240" width="269.6" height="110" rx="14" fill="#ede9fe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1395.2" y="265" class="label" text-anchor="middle">Execute</text>
+<text x="1395.2" y="322" class="small" text-anchor="middle">runtime graph</text>
+<path d="M1232.4,295.0 L1260.4,295.0" class="edgeB"/>
+<text x="1540" y="596" class="tiny" text-anchor="end">Mímir Framework — SVG vectoriel éditable</text>
+</svg>

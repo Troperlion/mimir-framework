@@ -1,4 +1,9 @@
 #!/usr/bin/env lua
+local Help = dofile(ROOTWORK.."/scripts/modules/help_cli.lua")
+Help.auto_exit_help()
+
+---@diagnostic disable: undefined-global
+
 -- scripts/examples/example_conf_inference.lua
 --
 -- Exemple: charger une config via --conf et faire de l'inférence

@@ -1,0 +1,71 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(std430, binding = 0) readonly buffer InBuf {
+    float in_data[];
+};
+
+layout(std430, binding = 1) readonly buffer WBuf {
+    float w_data[];
+};
+
+layout(std430, binding = 2) readonly buffer BBuf {
+    float b_data[];
+};
+
+layout(std430, binding = 3) writeonly buffer OutBuf {
+    float out_data[];
+};
+
+layout(push_constant) uniform ConvDims {
+    uint in_h;
+    uint in_w;
+    uint in_c;
+    uint out_c;
+    uint k;
+    uint stride;
+    uint pad;
+    uint dilation;
+    uint out_h;
+    uint out_w;
+    uint use_bias;
+} pc;
+
+void main() {
+    const uint ow = gl_GlobalInvocationID.x;
+    const uint oh = gl_GlobalInvocationID.y;
+    const uint oc = gl_GlobalInvocationID.z;
+
+    if (ow >= pc.out_w || oh >= pc.out_h || oc >= pc.out_c) {
+        return;
+    }
+
+    float sum = 0.0;
+
+    for (uint ic = 0; ic < pc.in_c; ++ic) {
+        for (uint kh = 0; kh < pc.k; ++kh) {
+            const int ih = int(oh * pc.stride + kh * pc.dilation) - int(pc.pad);
+            if (ih < 0 || ih >= int(pc.in_h)) {
+                continue;
+            }
+            for (uint kw = 0; kw < pc.k; ++kw) {
+                const int iw = int(ow * pc.stride + kw * pc.dilation) - int(pc.pad);
+                if (iw < 0 || iw >= int(pc.in_w)) {
+                    continue;
+                }
+
+                const uint in_idx = (ic * pc.in_h + uint(ih)) * pc.in_w + uint(iw);
+                const uint w_idx = ((oc * pc.in_c + ic) * pc.k + kh) * pc.k + kw;
+                sum += in_data[in_idx] * w_data[w_idx];
+            }
+        }
+    }
+
+    if (pc.use_bias != 0u) {
+        sum += b_data[oc];
+    }
+
+    const uint out_idx = (oc * pc.out_h + oh) * pc.out_w + ow;
+    out_data[out_idx] = sum;
+}

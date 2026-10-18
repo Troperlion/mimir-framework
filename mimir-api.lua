@@ -1,20 +1,22 @@
 ---@meta
----@version 3.0.0
+---@version 3.5.0
 ---@author <bri45> for "Mímir Framework"
----@date 25 mai 2026 (dernière sync)
+---@date 1 octobre 2026 (dernière sync)
 ---@diagnostic disable: missing-return, unused-local, unused-vararg, duplicate-doc-field, redundant-parameter
 
 --=============================================================================
--- Mímir Framework v3.0 — IDE Stub (EmmyLua)
+-- Mímir Framework v3.5 — IDE Stub (EmmyLua)
 --=============================================================================
 -- Ce fichier est un "stub" destiné aux IDE (LuaLS / EmmyLua / IntelliJ, etc.).
 -- Il documente l'API globale exposée par le binaire `mimir` (bindings C/C++).
 --
--- ⚠️  IMPORTANT: Ce fichier est synchronisé avec src/LuaScripting.cpp
+-- ⚠️  IMPORTANT: Ce fichier est synchronisé avec
+--    src/scriptings/Lua/luaScripting/LuaScripting.cpp
 --    Toute modification de l'API C++ doit être reflétée ici.
---    Dernière synchronisation: 25 mai 2026 - 15 modules, 130+ fonctions
+--    Dernière synchronisation: 1 octobre 2026
 --  • Alias `Mimir.model` (lowercase) + stub explicite `Mimir.model.dtype`
 --  • Operations multi-input complètes (Add, Multiply, Concat, MatMul, Split)
+--  • Configuration live du modèle dans Htop/Viz (`C`, édition avec `Entrée`)
 -- Historique v2.0.0 :
 -- Namespace Mimir
 ---@class Mimir
@@ -23,11 +25,13 @@ Mimir = {}
 ---@class Mimir
 ---@field Model MimirModelAPI
 ---@field model MimirModelAPI @Alias de `Mimir.Model`
+---@field Benchmark MimirBenchmarkAPI
 ---@field Architectures MimirArchitecturesAPI
 ---@field Layers MimirLayersAPI
 ---@field Checkpoint MimirCheckpointAPI
 ---@field Tokenizer MimirTokenizerAPI
 ---@field Dataset MimirDatasetAPI
+---@field Database MimirDatabaseAPI
 ---@field IO MimirIOAPI
 ---@field Memory MimirMemoryAPI
 ---@field Guard MimirGuardAPI
@@ -36,7 +40,6 @@ Mimir = {}
 ---@field Htop MimirHtopAPI
 ---@field Viz MimirVizAPI
 ---@field Serialization MimirSerializationAPI
----@field NeuroPulse MimirNeuroPulseAPI
 
 --=============================================================================
 -- Aliases / Types de base
@@ -51,38 +54,18 @@ Mimir = {}
 ---@alias TokenIds TokenId[]
 ---@alias TokenText string
 
----@alias ModelType
----| "t2i_autoencoder"
----| "ponyxl_ddpm"
----| "ponyxl_sdxl_stub"
----| "ponyxl_sdxl_unet2d"
----| "ponyxl_sdxl"
----| "basic_mlp"
----| "transformer"
----| "vae_text"
----| "vae_text_decode"
----| "vit"
----| "vae"
----| "vae_conv"
----| "vae_conv_decode"
----| "resnet"
----| "unet"
----| "mobilenet"
----| "vgg16"
----| "vgg19"
----| "diffusion"
----| "cond_diffusion"
----| "sd3_5"
----| "neuropulse"
----| "gan_latent"
----| "external_safetensors_base"
----| "hf_clip_text_encoder_1"
----| "hf_clip_text_encoder_2"
----| "hf_vae_decoder"
----| "hf_sdxl_transformer_block"
+---@class MimirBenchmarkAPI
+Mimir.Benchmark = {}
+
+---Retourne le temps mural monotone en secondes avec une résolution haute précision.
+---Cette valeur sert à mesurer des intervalles; son origine est volontairement non définie.
+---@return number seconds
+function Mimir.Benchmark.now() end
 
 ---@alias ArchitectureName
 ---| "basic_mlp"
+---| "causal_lm"
+---| "deeplab"
 ---| "transformer"
 ---| "vae_text"
 ---| "vae_text_decode"
@@ -93,11 +76,17 @@ Mimir = {}
 ---| "resnet"
 ---| "unet"
 ---| "mobilenet"
+---| "patch_discriminator"
+---| "r_cnn"
+---| "ssd"
+---| "yolo"
 ---| "vgg16"
+---| "vgg16_feat"
 ---| "vgg19"
----| "ponyxl_ddpm"
 ---| "diffusion"
+---| "lumen_diffusion"
 ---| "gan_latent"
+---| "Gan_Style"
 ---| "cond_diffusion"
 ---| "sd3_5"
 ---| "external_safetensors_base"
@@ -106,17 +95,7 @@ Mimir = {}
 ---| "hf_vae_decoder"
 ---| "hf_sdxl_transformer_block"
 
----Lire un JSON depuis le disque.
----@param path string
----@return table|nil json
-function read_json(path) end
-
----Écrire un fichier (bytes string) sur le disque.
----@param path string
----@param content string
----@return boolean ok
----@return string? err
-function write_file(path, content) end
+---@alias ModelType ArchitectureName
 
 ---@alias ActivationType
 ---| "relu"
@@ -162,10 +141,14 @@ function write_file(path, content) end
 ---@field dtype? DTypeName @Préférence dtype du modèle (si supporté par la runtime)
 ---@field dropout? float @Dropout générique (si supporté par l'architecture)
 ---@field optimizer? string @"sgd"|"adam"|"adamw" (utilisé par `Model.train()`)
----@field beta1? float
----@field beta2? float
----@field epsilon? float
----@field weight_decay? float
+---@field beta1? float @Modifiable en direct si un optimiseur courant est publié; 0 <= valeur < 1
+---@field beta2? float @Modifiable en direct si un optimiseur courant est publié; 0 <= valeur < 1
+---@field epsilon? float @Modifiable en direct si un optimiseur courant est publié; valeur > 0
+---@field weight_decay? float @Modifiable en direct si un optimiseur courant est publié; valeur >= 0
+---@field rmsprop_alpha? float @Modifiable en direct si un optimiseur courant est publié; 0 <= valeur < 1
+---@field grad_clip_norm? float @Clipping global modifiable en direct; 0 désactive le clipping
+---@field clip_norm? float @Alias historique utilisé comme valeur initiale de grad_clip_norm
+---@field use_kv_cache? boolean @Modifiable en direct lorsque la clé existe dans la configuration
 ---@field min_lr? float
 ---@field decay_rate? float
 ---@field decay_steps? int
@@ -179,7 +162,7 @@ function write_file(path, content) end
 ---@field autosave_every_epoch? int @Alias de autosave_every_epochs
 ---@field csv_file? string @Chemin CSV htop explicite (ex: "runs/myrun/metrics.csv") — appliqué par `Model.train()` à tous les types de modèles
 ---@field csv_path? string @Alias de csv_file
----@field csv_dir? string @Dossier CSV : génère `{csv_dir}/{name}_htop_metrics.csv` (htop) ou `{csv_dir}/{name}_partN_epochM.csv` (ponyxl_ddpm)
+---@field csv_dir? string @Dossier CSV : génère `{csv_dir}/{name}_htop_metrics.csv`
 ---@field viz_taps_max_frames? int @Limite frames "viz taps" (si viz active)
 ---@field viz_taps_max_side? int @Limite taille preview "viz taps" (si viz active)
 ---@field validate_every_steps? int @Validation toutes les N étapes d'optimizer (0 = désactivé)
@@ -188,6 +171,17 @@ function write_file(path, content) end
 ---@field validate_holdout_frac? float @Fraction du dataset allouée au holdout
 ---@field validate_holdout_items? int @Nombre d'items holdout (optionnel, selon script)
 ---@field validate_save_debug? bool @Sauvegarde un checkpoint debug (ex: _val_debug.json) lors des validations
+---@field kl_beta? float @Coefficient KL modifiable en direct pour les modèles VAE
+---@field vae_kl_beta? float @Valeur initiale historique de kl_beta
+---@field kl_warmup_steps? int @Warmup KL modifiable en direct pour les modèles VAE
+---@field recon_loss? string @Loss VAE modifiable en direct: mse, mae/l1, huber, charbonnier, gaussian_nll ou bce
+---@field ssim_weight? float @Poids SSIM modifiable en direct pour les VAE image
+---@field spectral_weight? float @Poids spectral modifiable en direct pour les VAE image
+---@field marker_wass_scale? float @Échelle Wasserstein modifiable en direct pour les VAE image
+---@field marker_temp_scale? float @Échelle temporelle modifiable en direct pour les VAE image
+---@field huber_delta? float @Delta Huber modifiable en direct; valeur > 0
+---@field charbonnier_eps? float @Epsilon Charbonnier modifiable en direct; valeur > 0
+---@field gaussian_nll_sigma? float @Sigma Gaussian NLL modifiable en direct; valeur > 0
 ---@field triple_fault? bool @Active le mécanisme de rollback sur dernier checkpoint "bon"
 ---@field triple_fault_every_steps? int @Intervalle (en steps) de sauvegarde des checkpoints triple-fault
 
@@ -208,6 +202,18 @@ function write_file(path, content) end
 ---@field output_dim? int
 ---@field causal? bool
 
+---@class CausalLMConfig: ModelConfig
+---@field vocab_size? int
+---@field padding_idx? int
+---@field seq_len? int
+---@field d_model? int
+---@field num_layers? int
+---@field num_heads? int
+---@field num_kv_heads? int @Nombre de têtes K/V; doit diviser num_heads (GQA)
+---@field mlp_hidden? int @Largeur intermédiaire SwiGLU
+---@field norm_eps? float
+---@field rope_theta? float
+
 ---@class VAETextConfig: ModelConfig
 ---@field vocab_size? int
 ---@field padding_idx? int
@@ -224,6 +230,19 @@ function write_file(path, content) end
 ---@field image_dim? int
 ---@field output_dim? int
 ---@field target_tensor? string
+---@field bbox_input_w? integer
+---@field bbox_input_h? integer
+---@field bbox_input_c? integer
+---@field bbox_input_layout? string @HWC ou CHW
+---@field bbox_input_prefix_tokens? integer @Tokens globaux préservés ; défaut 1 pour ViT
+---@field bbox_output_w? integer
+---@field bbox_output_h? integer
+---@field bbox_output_c? integer
+---@field bbox_output_layout? string @HWC ou CHW
+---@field relation_primary_weight? float @Poids relationnel du sujet principal ; défaut 3
+---@field relation_secondary_weight? float @Poids relationnel du sujet secondaire ; défaut 2
+---@field relation_other_weight? float @Poids relationnel des autres rôles ; défaut 1
+---@field bbox_loss_weight? float @Pondération des régions annotées ; défaut 1, 0 désactive
 ---@field align_weight? float
 ---@field kl_beta? float
 ---@field kl_warmup_steps? int
@@ -256,8 +275,8 @@ function write_file(path, content) end
 ---@field latent_c? int
 ---@field base_channels? int
 ---@field stochastic_latent? boolean
----@field use_attention? boolean
----@field use_attn? boolean
+---@field resnet? boolean
+---@field attention? boolean
 ---@field enc_norm? string
 ---@field enc_gn_groups? int
 ---@field dec_norm? string
@@ -297,6 +316,25 @@ function write_file(path, content) end
 ---@field base_channels? int
 ---@field num_classes? int
 
+---@class MedicalDetectorConfig: ModelConfig
+---@field image_w? int
+---@field image_h? int
+---@field image_c? int
+---@field base_channels? int
+---@field num_classes? int
+---@field class_names? string[]
+---@field object_loss_weight? number
+---@field box_loss_weight? number
+---@field class_loss_weight? number
+---@field object_pos_weight? number
+---@field validation_fraction? number
+---@field validation_items? int
+---@field validate_every_epochs? int
+---@field score_threshold? number
+---@field nms_iou_threshold? number
+---@field match_iou_threshold? number
+---@field max_detections? int
+
 ---@class VGG16Config: ModelConfig
 ---@field image_w? int
 ---@field image_h? int
@@ -313,12 +351,43 @@ function write_file(path, content) end
 ---@field num_classes? int
 ---@field fc_hidden? int
 
+---@class VGG16FeatConfig: ModelConfig
+---@field image_w? int
+---@field image_h? int
+---@field image_c? int
+---@field base_channels? int
+---@field enc_norm? 'groupnorm'|'lineargroup' Normalisation appliquée après les convolutions.
+---@field enc_gn_groups? int Nombre maximal de groupes pour GroupNorm.
+
 ---@class DiffusionConfig: ModelConfig
 ---@field image_w? int
 ---@field image_h? int
 ---@field image_c? int
 ---@field time_dim? int
 ---@field hidden_dim? int
+
+---@class LumenDiffusionConfig: ModelConfig
+---@field image_w? int
+---@field image_h? int
+---@field image_c? int
+---@field latent_w? int
+---@field latent_h? int
+---@field latent_c? int
+---@field vae_checkpoint? string
+---@field vae_scale? float
+---@field vae_shift? float
+---@field patch_size? int
+---@field hidden_size? int
+---@field depth? int
+---@field mlp_ratio? float
+---@field vocab_size? int
+---@field text_seq_len? int
+---@field text_layers? int
+---@field num_heads? int
+---@field diffusion_steps? int
+---@field beta_start? float
+---@field beta_end? float
+---@field preview_timestep? int
 
 ---@class CondDiffusionConfig: ModelConfig
 ---@field prompt_dim? int
@@ -344,46 +413,6 @@ function write_file(path, content) end
 ---@field num_layers? int
 ---@field mlp_hidden? int
 ---@field causal? bool
-
----@class PonyXLDDPMConfig: ModelConfig
----@field d_model? int @Dimension embedding texte
----@field max_vocab? int @Capacité max du tokenizer (important: aligner avec Tokenizer.get_max_vocab())
----@field text_ctx_len? int @Contexte texte max (tokens)
----@field text_bottleneck_meanpool? bool @Compression du prompt long en 1 token contexte (mean-pool)
----@field latent_seq_len? int @Séquence latente (ex: 64*64=4096)
----@field latent_in_dim? int @Canaux latents (ex: 64)
----@field num_heads? int
----@field sdxl_time_cond? bool @Injecte le timestep via petit MLP (SDXL-like)
----@field unet_layers? int
----@field text_layers? int
----@field mlp_hidden? int
----@field latent_h? int @0=auto (inféré depuis latent_seq_len)
----@field latent_w? int @0=auto
----@field unet_depth? int @Nombre de niveaux down/up (UNet 2D)
----@field image_w? int @Largeur image attendue côté dataset
----@field image_h? int @Hauteur image
----@field image_c? int @Canaux image (3=RGB)
----@field ddpm_steps? int @T timesteps
----@field ddpm_beta_start? float
----@field ddpm_beta_end? float
----@field ddpm_steps_per_image? int @Nb updates diffusion par image (1=standard)
----@field peltier_noise? bool @DÉPRÉCIÉ/IGNORÉ: ancien "bruit peltier" (corrélé). DDPM latent standard utilise eps~N(0,I).
----@field peltier_mix? float @DÉPRÉCIÉ/IGNORÉ
----@field peltier_blur_radius? int @DÉPRÉCIÉ/IGNORÉ
----@field vae_arch? string @Archi VAE externe (ex: "vae_conv")
----@field vae_checkpoint? string @Chemin checkpoint VAE
----@field vae_scale? float @Échelle latents VAE
----@field vae_base_channels? int @Optionnel: aligner l'archi VAE avec le checkpoint
----@field cfg_dropout_prob? float @Dropout prompt (CFG training)
----@field max_text_chars? int @Clamp taille texte en chars (pré-tokenization)
----@field caption_structured_enable? bool @Active le parsing des captions multi-sections (`--- TAGS ---`, etc.)
----@field caption_structured_canonicalize? bool @Recompose un prompt canonique `TAGS:/CONTEXTE:/MENTALITE:/TEXTE:`
----@field caption_tags_dropout_prob? float @Dropout de la section TAGS (train uniquement)
----@field caption_contexte_dropout_prob? float @Dropout de la section CONTEXTE (train uniquement)
----@field caption_mentalite_dropout_prob? float @Dropout de la section MENTALITÉ (train uniquement)
----@field caption_texte_dropout_prob? float @Dropout de la section TEXTE (train uniquement)
----@field viz_ddpm_every_steps? int @0=off, sinon: toutes les N steps on affiche des frames DDPM
----@field viz_ddpm_num_steps? int @Nb timesteps affichés
 
 ---@class ExternalSafeTensorsBaseConfig: ModelConfig
 ---@field source_safetensors string @Chemin vers le fichier safetensors source à refléter
@@ -443,7 +472,20 @@ function write_file(path, content) end
 -- Stats / Structs
 --=============================================================================
 
+---@class FpgaCaps
+---@field detected boolean
+---@field connected boolean
+---@field status string
+---@field device? string
+---@field protocol? string
+---@field layer_acceleration boolean @false: FPGA used for I/O, not model layers
+---@field dataset_buffer? boolean
+---@field checkpoint_controller? boolean
+---@field tensor_conversion? boolean @F32 <-> F16/BF16 on FPGA
+---@field buffer_input_bytes? integer @256-byte blocks (BRAM, not SDRAM)
+
 ---@class HardwareCaps
+---@field fpga? FpgaCaps
 ---@field avx2 bool @Support AVX2 SIMD instructions
 ---@field fma bool @Support FMA (Fused Multiply-Add)
 ---@field f16c bool @Support Half-precision floats
@@ -495,9 +537,13 @@ function write_file(path, content) end
 ---@field opt_beta2? float
 ---@field opt_eps? float
 ---@field opt_weight_decay? float
+---@field recon_loss_type? string @Label effectif de la loss de reconstruction
+---@field optimizer? string|table @Nom ou table {type,step,beta1,beta2,eps,weight_decay}
 
 ---@class HtopCreateConfig
----@field enable_viz? boolean @Active la viz SFML (alias: viz)
+---@field enable_htop? boolean @Active l'interface terminal; défaut true
+---@field defer_htop? boolean @Diffère l'interface terminal jusqu'à la première métrique; défaut false
+---@field enable_viz? boolean @Active le backend Viz compilé (alias: viz)
 ---@field viz? boolean @Alias de enable_viz
 ---@field viz_config? table @Config passée au Visualizer (mêmes clés que config.json/visualization)
 ---@field csv? boolean @Active l'export CSV des métriques côté htop
@@ -508,18 +554,83 @@ function write_file(path, content) end
 ---@class VizMetrics
 ---@field epoch? int
 ---@field total_epochs? int
+---@field batch? int
+---@field total_batches? int
+---@field step? int @Alias utilisé comme batch si batch est absent
 ---@field loss? float
 ---@field avg_loss? float
 ---@field lr? float
+---@field batch_time_ms? int
 ---@field memory_mb? float
----@field tokens_per_sec? float
----@field custom? table<string, number>
+---@field bps? float
+---@field params? int
+---@field mse? float
+---@field kl? float
+---@field wass? float
+---@field ent? float
+---@field mom? float
+---@field spat? float
+---@field temp? float
+---@field timestep? float
+---@field grad_norm? float
+---@field grad_max? float
+---@field kl_beta_effective? float
+---@field recon_loss_type? string @Label effectif de la loss de reconstruction
+
+---@class LumenVaeCalibrationStats
+---@field items integer
+---@field values integer
+---@field shift float
+---@field scale float
+
+---@class LumenStepStats
+---@field skeleton_region_count integer @Régions des points, segments et associations du squelette
+---@field mse_unweighted float @MSE globale avant pondération spatiale
+---@field bbox_count integer
+---@field bbox_loss_weight float
+---@field relation_count integer @Relations entre deux régions utilisées
+---@field relation_loss float @Contribution de la perte relationnelle
+---@field loss float
+---@field mse float
+---@field kl float
+---@field kl_beta_effective float
+---@field grad_norm float
+---@field grad_max_abs float
+---@field reconstruction_mae float
+---@field reconstruction_mse float
+---@field wasserstein float
+---@field entropy_diff float
+---@field moment_mismatch float
+---@field spatial_coherence float
+---@field temporal_consistency float
+---@field timestep integer
+---@field stop_requested boolean
+---@field learning_rate? float @LR réellement appliqué après contrôle live Viz
+
+---@class LumenStepMonitorOptions
+---@field annotation? DatasetAnnotation
+---@field bbox_loss_weight? number @Défaut 1 ; 0 désactive la pondération
+---@field epoch? integer
+---@field total_epochs? integer
+---@field batch? integer
+---@field total_batches? integer
+---@field step? integer
+---@field completed_steps? integer
+---@field loss_sum_before? float
+---@field lr_warmup_steps? integer
 
 --=============================================================================
 -- Module: Mimir.Model
 --=============================================================================
 
-Mimir = {}
+---@class GanStyleConfig
+---@field image_w? integer
+---@field image_h? integer
+---@field image_c? integer @3 (RGB CHW, valeurs [-1,1])
+---@field base_channels? integer @Largeur du générateur (16)
+---@field discriminator_channels? integer @Largeur du discriminateur (16)
+---@field content_weight? number @Poids L1 (10)
+---@field discriminator_lr? number @SGD discriminateur (0.001)
 
 ---@class MimirModelAPI
 Mimir.Model = {}
@@ -528,7 +639,10 @@ Mimir.Model = {}
 ---Le modèle est construit via le registre C++ immédiatement.
 ---Note: `Mimir.Model.create()` ne fait plus allocate/init automatiquement.
 ---Utilisez ensuite `Mimir.Model.allocate_params()` et `Mimir.Model.init_weights()` si nécessaire.
+---Un chemin finissant par `.mpk` est décodé, vérifié puis créé via le registre C++.
+---@overload fun(model_type: string, config?: nil): (boolean, string?)
 ---@overload fun(model_type: "basic_mlp", config?: BasicMLPConfig): (boolean, string?)
+---@overload fun(model_type: "causal_lm", config?: CausalLMConfig): (boolean, string?)
 ---@overload fun(model_type: "transformer", config?: TransformerConfig): (boolean, string?)
 ---@overload fun(model_type: "vae_text", config?: VAETextConfig): (boolean, string?)
 ---@overload fun(model_type: "vae_text_decode", config?: VAETextConfig): (boolean, string?)
@@ -541,21 +655,37 @@ Mimir.Model = {}
 ---@overload fun(model_type: "mobilenet", config?: MobileNetConfig): (boolean, string?)
 ---@overload fun(model_type: "vgg16", config?: VGG16Config): (boolean, string?)
 ---@overload fun(model_type: "vgg19", config?: VGG19Config): (boolean, string?)
+---@overload fun(model_type: "vgg16_feat", config?: VGG16FeatConfig): (boolean, string?)
 ---@overload fun(model_type: "diffusion", config?: DiffusionConfig): (boolean, string?)
+---@overload fun(model_type: "lumen_diffusion", config?: LumenDiffusionConfig): (boolean, string?)
 ---@overload fun(model_type: "cond_diffusion", config?: CondDiffusionConfig): (boolean, string?)
 ---@overload fun(model_type: "gan_latent", config?: GanLatentConfig): (boolean, string?)
+---@overload fun(model_type: "Gan_Style", config?: GanStyleConfig): (boolean, string?)
 ---@overload fun(model_type: "sd3_5", config?: SD35Config): (boolean, string?)
----@overload fun(model_type: "ponyxl_ddpm", config?: PonyXLDDPMConfig): (boolean, string?)
 ---@overload fun(model_type: "external_safetensors_base", config: ExternalSafeTensorsBaseConfig): (boolean, string?)
 ---@overload fun(model_type: "hf_clip_text_encoder_1", config?: HFCLIPTextEncoder1Config): (boolean, string?)
 ---@overload fun(model_type: "hf_clip_text_encoder_2", config?: HFCLIPTextEncoder2Config): (boolean, string?)
 ---@overload fun(model_type: "hf_vae_decoder", config?: HFVaeDecoderConfig): (boolean, string?)
 ---@overload fun(model_type: "hf_sdxl_transformer_block", config?: HFSDXLTransformerBlockConfig): (boolean, string?)
 ---@param model_type ModelType
----@param config? ModelConfig|BasicMLPConfig|TransformerConfig|ViTConfig|VAEConfig|ResNetConfig|UNetConfig|MobileNetConfig|VGG16Config|VGG19Config|DiffusionConfig|PonyXLDDPMConfig|ExternalSafeTensorsBaseConfig|HFCLIPTextEncoder1Config|HFCLIPTextEncoder2Config|HFVaeDecoderConfig|HFSDXLTransformerBlockConfig|table
+---@param config? ModelConfig|BasicMLPConfig|CausalLMConfig|TransformerConfig|ViTConfig|VAEConfig|ResNetConfig|UNetConfig|MobileNetConfig|VGG16Config|VGG19Config|DiffusionConfig|ExternalSafeTensorsBaseConfig|HFCLIPTextEncoder1Config|HFCLIPTextEncoder2Config|HFVaeDecoderConfig|HFSDXLTransformerBlockConfig|table
 ---@return boolean ok
 ---@return string? err
 function Mimir.Model.create(model_type, config) end
+
+---Retourner la configuration effective du modèle construit.
+---Elle peut différer de la requête lorsque le modèle s'adapte à un checkpoint externe.
+---@return ModelConfig|table|nil config
+---@return string? err
+function Mimir.Model.get_config() end
+
+---Créer un modèle vide (hors registre) pour importer une architecture nodale custom.
+---Utilisé pour les MPK standalone quand le type n'existe pas dans le registre.
+---@param model_type string
+---@param config? table
+---@return boolean ok
+---@return string? err
+function Mimir.Model.create_empty(model_type, config) end
 
 ---Créer un modèle à partir d'une config "complète" (injection de conf externe).
 ---Retourne (ok, arch_or_err).
@@ -568,8 +698,7 @@ function Mimir.Model.create_from_config(cfg) end
 ---Préférez `Mimir.Model.create(type, cfg)`.
 ---Retour: ok + nombre de paramètres (scalars).
 ---@return boolean ok
----@return integer? params
----@return string? err
+---@return integer|string params_or_err
 function Mimir.Model.build() end
 
 ---Entraîner le modèle courant.
@@ -577,13 +706,30 @@ function Mimir.Model.build() end
 ---@param epochs integer @Nombre d'epochs
 ---@param learning_rate number @LR (ex: 3e-4)
 ---@return boolean ok
----@return string? err
+---@return integer|string? step_or_err @Step global final si ok, message sinon
 function Mimir.Model.train(epochs, learning_rate) end
 
+---@class VisionStepOptions
+---@field annotation? DatasetAnnotation
+---@field learning_rate? number @Défaut 0.0001
+---@field optimizer? string @Défaut adamw
+---@field loss_weights? number[] @Masque ou pondération supplémentaire
+---@field text_ids? integer[] @Conditionnement VAE optionnel
+
+---Entraîner un modèle de vision natif avec des tensors dans son format d'entrée/sortie.
+---@param input number[] @Valeurs déjà normalisées ; disposition attendue par le modèle
+---@param target number[] @Cible propre à la tâche du modèle
+---@param options? VisionStepOptions
+---@return table|nil stats
+---@return string? error
+function Mimir.Model.vision_train_step(input, target, options) end
+
+
 ---Inférence sur un prompt (string) ou une séquence de tokens.
----Retour: string (texte) ou nil si échec.
+---Retour: string (texte), nil pour une entrée invalide, ou `(false, err)` sans modèle.
 ---@param input string|TokenIds
----@return string|nil output
+---@return string|nil|false output
+---@return string? err
 function Mimir.Model.infer(input) end
 
 ---[Alias] `Mimir.model` (lowercase) pointe vers `Mimir.Model`.
@@ -593,73 +739,9 @@ Mimir.model = Mimir.Model
 
 ---[Alias] Stub explicite pour l'EmmyLua: `Mimir.model.dtype`.
 ---Voir `Mimir.Model.dtype` pour la doc complète.
----@overload fun(): DTypeName
+---@overload fun(): DTypeName|false, string?
 ---@overload fun(dtype: DTypeName|string): (boolean, string)
 function Mimir.model.dtype(dtype) end
-
--- --------------------------------------------------------------------------
--- Helpers spécifiques: PonyXL-DDPM (diffusion)
--- --------------------------------------------------------------------------
-
----Effectue un train step PonyXL-DDPM (API spécialisée côté C++).
----@param cfg table @config/état (voir scripts/training/ponyxl_ddpm_train.lua)
----@return boolean ok
----@return string? err
-function Mimir.Model.ponyxl_ddpm_train_step(cfg) end
-
----Validation step PonyXL-DDPM.
----@param cfg table
----@return boolean ok
----@return string? err
-function Mimir.Model.ponyxl_ddpm_validate_step(cfg) end
-
----Step utilitaire pour reconstruire/visualiser (viz) pendant training.
----@param cfg table
----@return boolean ok
----@return string? err
-function Mimir.Model.ponyxl_ddpm_viz_reconstruct_step(cfg) end
-
----Génération texte→image PonyXL-DDPM.
----@param prompt string
----@param seed? integer
----@param sample_steps? integer
----@param guidance_scale? number
----@param max_side? integer
----@return integer[]? pixels_u8
----@return integer? w
----@return integer? h
----@return integer|string? channels_or_err
-function Mimir.Model.ponyxl_ddpm_text2img(prompt, seed, sample_steps, guidance_scale, max_side) end
-
----Génération texte→latent PonyXL-DDPM.
----Retourne le latent final x0 au format tokens HWC aplati.
----@param prompt string
----@param seed? integer
----@param sample_steps? integer
----@param guidance_scale? number
----@return number[]? latent
----@return integer? latent_w
----@return integer? latent_h
----@return integer|string? latent_c_or_err
-function Mimir.Model.ponyxl_ddpm_text2img_latent(prompt, seed, sample_steps, guidance_scale) end
-
----Définir un facteur d'échelle VAE utilisé par PonyXL-DDPM.
----@param scale number
----@return boolean ok
----@return string? err
-function Mimir.Model.ponyxl_ddpm_set_vae_scale(scale) end
-
----Récupérer le facteur d'échelle VAE actuel.
----@return number scale
-function Mimir.Model.ponyxl_ddpm_get_vae_scale() end
-
----Retourne des moments (mu) du VAE (API PonyXL-DDPM).
----@param image_u8 integer[]
----@param w integer
----@param h integer
----@return {sum:number, sumsq:number, n:integer}? moments
----@return string? err
-function Mimir.Model.ponyxl_ddpm_vae_mu_moments(image_u8, w, h) end
 
 ---[DÉPRÉCIÉ] Sauvegarder le modèle (ancienne API).
 ---⚠️  Utilisez Mimir.Serialization.save() pour la nouvelle API v2.4
@@ -679,8 +761,7 @@ function Mimir.Model.load(dir) end
 
 ---Allouer explicitement les paramètres (si supporté).
 ---@return boolean ok
----@return integer? params @Nombre total de paramètres alloués (si ok)
----@return string? err
+---@return integer|string params_or_err @Nombre alloué si ok, message sinon
 function Mimir.Model.allocate_params() end
 
 ---Initialiser les poids du modèle (si supporté).
@@ -694,14 +775,25 @@ function Mimir.Model.init_weights(init, seed) end
 ---@return integer params
 function Mimir.Model.total_params() end
 
+---Retourne la liste des layers du modèle courant.
+---@return table layers
+function Mimir.Model.get_layers() end
+
+---Supprime tous les layers du modèle courant.
+---Utile avant de ré-appliquer un graphe nodal importé.
+---@return boolean ok
+---@return integer|string? old_count_or_err
+function Mimir.Model.clear_layers() end
+
 ---Pousser une couche (API bas niveau / description) dans le modèle.
 ---Note: cette fonction est surtout utilisée par les builders d'architectures.
 ---@param name string
 ---@param layer_type string
 ---@param params_count integer
+---@param params? table @Configuration propre au layer, utilisée par les graphes MPK dynamiques
 ---@return boolean ok
 ---@return string? err
-function Mimir.Model.push_layer(name, layer_type, params_count) end
+function Mimir.Model.push_layer(name, layer_type, params_count, params) end
 
 ---Configure les entrées et sortie d'un layer pour le support multi-input/branch.
 ---Permet de créer des architectures avec skip connections, concat, split, etc.
@@ -730,36 +822,11 @@ function Mimir.Model.set_layer_io(layer_name, inputs, output) end
 
 ---Forward pass (si exposé par l'implémentation).
 ---Mode training activé par défaut pour permettre le backward pass.
----@param input TokenIds|float[] @Données d'entrée (table d'entiers -> chemin token ids, table de floats -> chemin float)
+---@param input TokenIds|float[]|table<string, number[]> @Liste simple ou tenseurs nommés; `text_ids` conserve le chemin entier
 ---@param training? bool @Mode training (défaut: true) pour calculer les gradients
 ---@return float[]|nil @Sortie du modèle
 ---@return string? err
 function Mimir.Model.forward(input, training) end
-
----Forward pass utilitaire pour les modèles texte→image: fournit explicitement
----un prompt déjà encodé, une image (entrée conditionnelle), et une seed.
----La seed sert à rendre déterministes les opérations stochastiques du forward (si présentes).
----@param text_vec float[] @Vecteur texte (len = d_model)
----@param image_vec float[] @Image (len = image_w*image_h*image_c) normalisée [-1,1]
----@param seed integer
----@param training? bool @Défaut: false
----@return float[]|nil output
----@return string? err
-function Mimir.Model.forward_prompt_image_seed(text_vec, image_vec, seed, training) end
-
----Encode un prompt texte en vecteur embedding (utile pour les modèles type PonyXL).
----Note: cette fonction dépend d'un modèle courant déjà créé via `Mimir.Model.create()`.
----Retour: table de floats (len = d_model) ou (nil, err).
----@param prompt string
----@return float[]|nil text_vec
----@return string? err
-function Mimir.Model.encode_prompt(prompt) end
-
----Alias camelCase de `encode_prompt`.
----@param prompt string
----@return float[]|nil text_vec
----@return string? err
-function Mimir.Model.encodePrompt(prompt) end
 
 ---Backward pass pour calculer les gradients.
 ---@param loss_gradient float[] @Gradient de la loss
@@ -778,6 +845,53 @@ function Mimir.Model.zero_grads() end
 ---@return string? err
 function Mimir.Model.get_gradients() end
 
+---Commencer une calibration globale des latents du VAE associé à Lumen.
+---@return boolean ok
+---@return string? err
+function Mimir.Model.lumen_begin_vae_calibration() end
+
+---Ajouter une image RGB u8 à la calibration VAE courante.
+---@param image integer[]
+---@return LumenVaeCalibrationStats|nil stats
+---@return string? err
+function Mimir.Model.lumen_add_vae_calibration_image(image) end
+
+---Finaliser et persister la calibration VAE courante.
+---@return LumenVaeCalibrationStats|nil stats
+---@return string? err
+function Mimir.Model.lumen_finish_vae_calibration() end
+
+---Effectuer un step de diffusion Lumen et publier ses métriques vers Htop/Viz.
+---@param image integer[]
+---@param prompt string
+---@param seed integer
+---@param learning_rate float
+---@param optimizer? string @"sgd"|"adam"|"adamw"
+---@param monitor? LumenStepMonitorOptions
+---@return LumenStepStats|nil stats
+---@return string? err
+function Mimir.Model.lumen_train_step(image, prompt, seed, learning_rate, optimizer, monitor) end
+
+---Générer une image avec le modèle Lumen chargé, en mode inférence.
+---@param prompt string
+---@param seed? integer
+---@param steps? integer
+---@param guidance? number
+---@return integer[]|nil pixels @Octets entrelacés HWC ; nil en cas d'erreur.
+---@return integer|string width_or_error
+---@return integer? height
+---@return integer? channels
+function Mimir.Model.lumen_text2img(prompt, seed, steps, guidance) end
+
+---Effectuer une validation Lumen et publier ses previews vers Viz.
+---@param image integer[]
+---@param prompt string
+---@param seed integer
+---@return LumenStepStats|nil stats
+---@return string? err
+---@param options? LumenStepMonitorOptions @Annotation et pondération spatiale
+function Mimir.Model.lumen_validate_step(image, prompt, seed, options) end
+
 ---Step optimiseur (si exposé). Le LR peut être transmis.
 ---@param learning_rate number
 ---@param opt_type? string @"sgd"|"adam"|"adamw" (défaut: "adamw")
@@ -785,47 +899,48 @@ function Mimir.Model.get_gradients() end
 ---@return string? err
 function Mimir.Model.optimizer_step(learning_rate, opt_type) end
 
----Récupérer la configuration/état courant de l'optimizer.
----Best-effort: lit le serialized optimizer si présent, sinon reconstruit depuis la config.
----@return table opts @Champs: optimizer, type, beta1, beta2, epsilon, weight_decay, step, decay_strategy, initial_lr, min_lr, decay_rate, decay_steps, total_steps, warmup_steps
----@return string? err
-function Mimir.Model.get_optimizer() end
-
----Mettre à jour l'optimizer depuis Lua.
----Applique les valeurs dans la config du modèle (persistant pour `Model.train()`)
----et, si un modèle courant existe, met à jour son optimizer sérialisé.
----
----Champs supportés (table opts):
----  optimizer = "sgd"|"adam"|"adamw" (ou type=0/1/2)
----  beta1, beta2, epsilon (ou eps), weight_decay
----  min_lr, decay_rate, decay_steps, total_steps, warmup_steps, decay_strategy
----  reset_state=true (optionnel) pour effacer moments + step
----@param opts table
----@return boolean ok
----@return string? err
-function Mimir.Model.set_optimizer(opts) end
-
----Réinitialiser l'état interne de l'optimizer (moments + step).
----Conserve les hyperparamètres courants.
----@return boolean ok
----@return string? err
-function Mimir.Model.reset_optimizer_state() end
-
 ---Active/désactive l'accélération matérielle côté modèle.
 ---Note: le binding actuel prend un booléen (il ne sélectionne pas un backend nommé).
 ---@param enable boolean @true pour activer l'accélération (si dispo), false pour forcer CPU
 ---@return boolean ok
 function Mimir.Model.set_hardware(enable) end
 
----Retourne les capacités détectées (AVX2/FMA/F16C/BMI2).
+---Retourne les capacités CPU et le statut de connexion/contrôle FPGA.
 ---@return HardwareCaps caps
 function Mimir.Model.hardware_caps() end
+
+---Construire le contexte natif : entités, bbox, squelettes, relations, attributs et description.
+---Indépendant du poids de loss spatiale ; le modèle tokenise ensuite ce texte.
+---@param caption string
+---@param annotation? table @Annotation structurée du dataset
+---@return string|nil prompt
+---@return string? err
+function Mimir.Model.conditioning_prompt(caption, annotation) end
+
+
+---@alias RuntimeOperationCapability 'Unsupported'|'HostFallback'|'Native'|'NativeOptimized'
+
+---@class RuntimeOperationInfo
+---@field type string @Type de couche enregistré
+---@field forward RuntimeOperationCapability
+---@field backward RuntimeOperationCapability
+
+---@class RuntimeOperationsInfo
+---@field name 'CPU'|'CUDA'|'ROCM'|'VULKAN'|'OPENCL'
+---@field compiled boolean @Backend inclus dans cette compilation
+---@field scope string @Portée des déclarations de capacités
+---@field ops RuntimeOperationInfo[]
+
+---Lister les capacités déclarées par type de couche pour les cinq backends.
+---Les périphériques, configurations et formes de tenseurs ne sont pas testés par cet appel.
+---@return RuntimeOperationsInfo[] runtimes
+function Mimir.Model.runtime_ops() end
+
 
 ---Lire ou définir le dtype par défaut du modèle courant.
 ---Getter: `Mimir.Model.dtype()` -> string
 ---Setter: `Mimir.Model.dtype("float16")` -> (ok, dtype|err)
----Note: cette valeur est une préférence (la runtime reste majoritairement float32-first).
----@overload fun(): DTypeName
+---@overload fun(): DTypeName|false, string?
 ---@overload fun(dtype: DTypeName|string): (boolean, string)
 function Mimir.Model.dtype(dtype) end
 
@@ -843,6 +958,7 @@ function Mimir.Architectures.available() end
 
 ---Retourner la config par défaut d'une architecture.
 ---@overload fun(name: "basic_mlp"): BasicMLPConfig
+---@overload fun(name: "causal_lm"): CausalLMConfig
 ---@overload fun(name: "transformer"): TransformerConfig
 ---@overload fun(name: "vae_text"): VAETextConfig
 ---@overload fun(name: "vae_text_decode"): VAETextConfig
@@ -855,11 +971,12 @@ function Mimir.Architectures.available() end
 ---@overload fun(name: "mobilenet"): MobileNetConfig
 ---@overload fun(name: "vgg16"): VGG16Config
 ---@overload fun(name: "vgg19"): VGG19Config
+---@overload fun(name: "vgg16_feat"): VGG16FeatConfig
 ---@overload fun(name: "diffusion"): DiffusionConfig
 ---@overload fun(name: "cond_diffusion"): CondDiffusionConfig
 ---@overload fun(name: "gan_latent"): GanLatentConfig
+---@overload fun(name: "Gan_Style"): GanStyleConfig
 ---@overload fun(name: "sd3_5"): SD35Config
----@overload fun(name: "ponyxl_ddpm"): PonyXLDDPMConfig
 ---@overload fun(name: "external_safetensors_base"): ExternalSafeTensorsBaseConfig
 ---@overload fun(name: "hf_clip_text_encoder_1"): HFCLIPTextEncoder1Config
 ---@overload fun(name: "hf_clip_text_encoder_2"): HFCLIPTextEncoder2Config
@@ -874,6 +991,8 @@ function Mimir.Architectures.default_config(name) end
 ---@field name string @Nom canonique de l'architecture (clé du registry).
 ---@field description string @Description courte (peut être vide).
 ---@field config table @Config par défaut complète (peut contenir un champ `dtype`).
+---@field origin "native"|"mpk" @Origine explicite de l'entrée du registre.
+---@field source_path? string @Chemin du package pour une architecture MPK.
 
 ---Lire toutes les infos du registry pour une (ou toutes les) architecture(s).
 ---Sans argument: renvoie la liste complète des entrées du registry.
@@ -896,50 +1015,302 @@ function Mimir.Architectures.info(name) end
 function Mimir.Architectures.dtypes() end
 
 --=============================================================================
--- Module: Mimir.Layers (placeholder / low-level)
+-- Module: Mimir.Layers (inspection read-only du modèle courant)
 --=============================================================================
 
 ---@class MimirLayersAPI
 Mimir.Layers = {}
 
----Conv2D low-level (placeholder). Utiliser `Mimir.Model.forward()` à la place.
----@return boolean ok
----@return string err
+---Lister tous les types de layers supportés par le framework, basés sur `LayerType`.
+---@return string[] layer_types
+function Mimir.Layers.available() end
+
+---Lister les layers du modèle courant pour un type canonique donné.
+---Exemple: `Mimir.Layers.by_type("Conv2d")`.
+---@param layer_type string
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.by_type(layer_type) end
+
+---@class MimirLayerInfo
+---@field index integer
+---@field name string
+---@field type string
+---@field param_count integer
+---@field output string
+---@field inputs string[]
+---@field in_features integer
+---@field out_features integer
+---@field in_channels integer
+---@field out_channels integer
+---@field kernel_size integer
+---@field stride integer
+---@field padding integer
+---@field seq_len integer
+---@field embed_dim integer
+---@field num_heads integer
+---@field vocab_size integer
+---@field input_height integer
+---@field input_width integer
+---@field kernel_h? integer
+---@field kernel_w? integer
+---@field stride_h? integer
+---@field stride_w? integer
+---@field pad_h? integer
+---@field pad_w? integer
+---@field dilation? integer
+---@field groups? integer
+---@field eps? number
+---@field num_groups? integer
+---@field dropout_p? number
+---@field axis? integer
+---@field concat_axis? integer
+---@field split_axis? integer
+---@field num_splits? integer
+---@field scale_h? number
+---@field scale_w? number
+---@field out_h? integer
+---@field out_w? integer
+---@field head_dim? integer
+---@field causal? boolean
+---@field use_bias? boolean
+---@field nms_iou_threshold? number
+---@field nms_score_threshold? number
+---@field nms_max_detections? integer
+---@field nms_class_agnostic? boolean
+---@field target_shape? integer[]
+---@field permute_dims? integer[]
+---@field split_sizes? integer[]
+
+---Liste les layers de type convolution présents dans le modèle courant.
+---API en lecture seule: ne modifie jamais le modèle.
+---@return MimirLayerInfo[] layers
 function Mimir.Layers.conv2d(...) end
 
----Linear low-level (placeholder). Utiliser `Mimir.Model.forward()` à la place.
----@return boolean ok
----@return string err
+---Liste les layers `Conv2d` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Conv2d() end
+
+---Liste les layers `ConvTranspose2d` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.ConvTranspose2d() end
+
+---Liste les layers `Conv1d` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Conv1d() end
+
+---Liste les layers `DepthwiseConv2d` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.DepthwiseConv2d() end
+
+---Liste les layers linéaires du modèle courant.
+---@return MimirLayerInfo[] layers
 function Mimir.Layers.linear(...) end
 
----MaxPool2D low-level (placeholder).
----@return boolean ok
----@return string err
+---Liste les layers `Linear` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Linear() end
+
+---Liste les layers `Bilinear` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Bilinear() end
+
+---Liste les layers `Embedding` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Embedding() end
+
+---Liste les layers `EmbeddingBag` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.EmbeddingBag() end
+
+---Liste les layers `BatchNorm2d` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.BatchNorm2d() end
+
+---Liste les layers `BatchNorm1d` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.BatchNorm1d() end
+
+---Liste les layers `LayerNorm` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.LayerNorm() end
+
+---Liste les layers `GroupNorm` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.GroupNorm() end
+
+---Liste les layers `InstanceNorm2d` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.InstanceNorm2d() end
+
+---Liste les layers `RMSNorm` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.RMSNorm() end
+
+---Liste les layers `ReLU` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.ReLU() end
+
+---Liste les layers `LeakyReLU` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.LeakyReLU() end
+
+---Liste les layers `GELU` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.GELU() end
+
+---Liste les layers `GEGLU` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.GEGLU() end
+
+---Liste les layers `SiLU` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.SiLU() end
+
+---Liste les layers `Tanh` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Tanh() end
+
+---Liste les layers `Sigmoid` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Sigmoid() end
+
+---Liste les layers `Softmax` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Softmax() end
+
+---Liste les layers `LogSoftmax` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.LogSoftmax() end
+
+---Liste les layers `Softplus` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Softplus() end
+
+---Liste les layers `Mish` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Mish() end
+
+---Liste les layers `HardSigmoid` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.HardSigmoid() end
+
+---Liste les layers `HardSwish` du modèle courant.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.HardSwish() end
+
+-- Chaque type canonique retourné par `Mimir.Layers.available()` est aussi
+-- enregistré comme fonction d'inspection `Mimir.Layers.<Type>()`.
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.MaxPool2d() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.AvgPool2d() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.AdaptiveAvgPool2d() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.GlobalAvgPool2d() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.MaxPool1d() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.AvgPool1d() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.TokenMeanPool() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Dropout() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Dropout2d() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.AlphaDropout() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Flatten() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Reshape() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Transpose() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Permute() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Squeeze() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Unsqueeze() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.View() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Add() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Subtract() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Multiply() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Divide() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Concat() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Split() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Chunk() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Stack() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.MatMul() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.BatchMatMul() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.NMS() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.SelfAttention() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.MultiHeadAttention() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.CrossAttention() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.UpsampleNearest() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.UpsampleBilinear() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.UpsampleBicubic() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.PixelShuffle() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.LSTM() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.GRU() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.RNN() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.ZeroPad2d() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.ReflectionPad2d() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.ReplicationPad2d() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Identity() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Constant() end
+---@return MimirLayerInfo[] layers
+function Mimir.Layers.Lambda() end
+
+---Liste les layers de pooling max du modèle courant.
+---@return MimirLayerInfo[] layers
 function Mimir.Layers.maxpool2d(...) end
 
----AvgPool2D low-level (placeholder).
----@return boolean ok
----@return string err
+---Liste les layers de pooling moyen du modèle courant.
+---@return MimirLayerInfo[] layers
 function Mimir.Layers.avgpool2d(...) end
 
----Activation low-level (placeholder).
----@return boolean ok
----@return string err
+---Liste les layers d'activation du modèle courant.
+---@return MimirLayerInfo[] layers
 function Mimir.Layers.activation(...) end
 
----BatchNorm low-level (placeholder).
----@return boolean ok
----@return string err
+---Liste les layers de normalisation de type batch/instance du modèle courant.
+---@return MimirLayerInfo[] layers
 function Mimir.Layers.batchnorm(...) end
 
----LayerNorm low-level (placeholder).
----@return boolean ok
----@return string err
+---Liste les layers de normalisation de type layer/group/rms du modèle courant.
+---@return MimirLayerInfo[] layers
 function Mimir.Layers.layernorm(...) end
 
----Attention low-level (placeholder).
----@return boolean ok
----@return string err
+---Liste les layers d'attention du modèle courant.
+---@return MimirLayerInfo[] layers
 function Mimir.Layers.attention(...) end
 
 --=============================================================================
@@ -1114,14 +1485,35 @@ function Mimir.Tokenizer.extract_keywords(text, top_k) end
 -- Module: Mimir.Dataset
 --=============================================================================
 
+---@class DatasetAnnotationEntity
+---@field class_id? integer @Classe du détecteur ; défaut 0
+---@field id string
+---@field phrase string
+---@field role string
+---@field bbox? number[] @Coordonnées [x_min, y_min, x_max, y_max] dans [0,1]
+
+---@class DatasetAnnotation
+---@field image string @Nom de fichier de l'image associée
+---@field captions {primary: string, alternatives?: string[]}
+---@field entities? DatasetAnnotationEntity[]
+---@field attributes? {entity: string, property: string, value: string}[]
+---@field relations? {subject: string, predicate: string, object: string}[]
+---@field lighting? {description: string, source: string, target: string}
+---@field composition? {description: string}
+---@field quality? {caption_verified: boolean, relations_verified: boolean}
+
 ---@class DatasetItem
 ---@field text_file? string Chemin du fichier texte
 ---@field image_file? string Chemin du fichier image
 ---@field audio_file? string Chemin du fichier audio
 ---@field video_file? string Chemin du fichier vidéo
----@field text? string Contenu texte (si chargé)
+---@field text? string @Description captions.primary si annotation JSON, sinon texte historique
+---@field annotation_file? string @Chemin du JSON structuré prioritaire
+---@field annotation? DatasetAnnotation @Document complet chargé à la demande, champs supplémentaires conservés
+---@field image? integer[] Pixels RGB u8 redimensionnés, si demandés et décodables
 ---@field width? int Largeur de l'image
 ---@field height? int Hauteur de l'image
+---@field channels? int Nombre de canaux de l'image retournée
 ---@field size? int Taille du fichier en bytes
 
 ---@class TextAnalysisResult
@@ -1155,11 +1547,19 @@ Mimir.Dataset = {}
 function Mimir.Dataset.load(dir, target_w, target_h, min_modalities, use_cache, cache_path, max_ram_mb, lazy_loading) end
 
 ---Récupérer un item du dataset par son index (1-based).
----Retourne une table avec les chemins et métadonnées de l'item.
+---Charge les pixels RGB par défaut; passer false pour ne lire que texte et métadonnées.
+---Une annotation JSON structurée est prioritaire sur le .txt; son captions.primary devient item.text.
 ---@param index integer Index de l'item (commence à 1)
+---@param load_image? boolean Charge et retourne le tableau image (défaut: true)
 ---@return DatasetItem|nil item Item du dataset
 ---@return string? err Message d'erreur si échec
-function Mimir.Dataset.get(index) end
+function Mimir.Dataset.get(index, load_image) end
+
+---Libérer les données lazy actuellement chargées pour un item.
+---@param index integer Index de l'item (commence à 1)
+---@return boolean ok
+---@return string? err
+function Mimir.Dataset.release(index) end
 
 ---Préparer les séquences (stockées dans le contexte interne).
 ---La séquence length est utilisée ensuite par Mimir.Model.train().
@@ -1306,6 +1706,7 @@ Mimir.MemoryGuard = {}
 
 ---Définir la limite de mémoire RAM stricte.
 ---Accepte des valeurs en bytes (grands nombres) ou en GB (si <= 1000).
+---Active automatiquement l'éviction LRU avec spill disque.
 ---@param limit number @Limite en bytes ou en GB (si valeur <= 1000)
 ---@return boolean ok @true si succès
 ---
@@ -1447,14 +1848,18 @@ Mimir.Htop = {} --avec configuration optionnelle.
 ---- `Mimir.Htop.create({ ... })` : options avancées
 ---
 ---Notes:
----- Si `enable_viz=true`, le CSV htop est désactivé par défaut (sauf si `csv=true` ou `csv_path` fourni).
+---- L'export CSV est unique: Viz le porte lorsqu'elle est active, Htop sinon.
+---- `csv` active/désactive cet export commun; `csv_path`/`csv_file` choisit son chemin.
+---- `C` ouvre le panneau de configuration du modèle courant; `Entrée` édite puis valide.
+---- Les changements sont consommés par le thread d'entraînement à une frontière de calcul sûre.
 ---
 ---@param config? boolean|HtopCreateConfig
 ---@return boolean ok
 ---@return string? err
 function Mimir.Htop.create(config) end
 
----Activer/désactiver l'affichage htop.
+---Arrêter le monitor si `enabled=false`.
+---Avec `enabled=true`, la fonction confirme seulement l'état; utilisez `create()` pour démarrer.
 ---@param enabled boolean
 ---@return boolean ok
 ---@return string? err
@@ -1468,7 +1873,7 @@ function Mimir.Htop.enable(enabled) end
 ---@return string? err
 function Mimir.Htop.update(metrics, ...) end
 
----Forcer un render (si supporté).
+---Compatibilité: le rendu est automatique, cette fonction est un no-op qui retourne true.
 ---@return boolean ok
 ---@return string? err
 function Mimir.Htop.render() end
@@ -1479,20 +1884,45 @@ function Mimir.Htop.render() end
 function Mimir.Htop.clear() end
 
 --=============================================================================
--- Module: Mimir.Viz (SFML Visualizer)
+-- Module: Mimir.Viz (SFML / QT / GTK / WEB)
 --=============================================================================
 
 ---@class MimirVizAPI
 Mimir.Viz = {}
 
----Créer la fenêtre visualiseur SFML avec titre et dimensions optionnels.
+---Créer la fenêtre visualiseur avec titre et dimensions optionnels.
 ---Argument réel: table de configuration (passée à AsyncMonitor.start()).
+---`C` ouvre le panneau de configuration du modèle courant; `Entrée` édite puis valide.
 ---@param config? table @Ex: {visualization={enabled=true, window_title="..."}}
 ---@return boolean ok
 ---@return string? err
 function Mimir.Viz.create(config) end
 
----Initialiser le visualiseur (ouvre la fenêtre SFML).
+---Backend compilé, y compris avant create().
+---@return string backend @SFML, QT, GTK, WEB ou NONE
+function Mimir.Viz.backend() end
+
+---Modifier la scène sur le thread Viz ; seuls les champs fournis changent.
+---panels: {id=0..6,x?,y?,w?,h?,title?,visible?}[]
+---controls: {id=string,label?,x?,y?,w?,h?}[] (boutons, liste remplacée)
+---help: texte d'aide du script. events: activer clavier/texte/pointeur.
+---image_size: taille des aperçus Generated en pixels (32..1024, défaut 200).
+---@param scene table
+---@return boolean ok
+---@return string? err
+function Mimir.Viz.configure(scene) end
+
+---Retirer les événements de la file (256 entrées max, anciennes supprimées).
+---Types: configured, click (id,x,y), close, resize (width,height).
+---Avec events=true: key (code,control,shift,alt), text (unicode),
+---pointer_move/down/up (x,y,button pour down/up). Coordonnées fenêtre en pixels.
+---Les callbacks Lua sont à exécuter par le script, jamais sur le thread Viz.
+---@param timeout_ms? integer @0..1000, défaut 0
+---@return table[] events
+function Mimir.Viz.poll_events(timeout_ms) end
+
+
+---Vérifier que le visualiseur est créé et que sa fenêtre est ouverte.
 ---@return boolean ok
 ---@return string? err
 function Mimir.Viz.initialize() end
@@ -1501,21 +1931,56 @@ function Mimir.Viz.initialize() end
 ---@return boolean open
 function Mimir.Viz.is_open() end
 
----Traiter les événements fenêtre (fermeture, clavier, souris).
+---Compatibilité: les événements sont traités automatiquement par AsyncMonitor; no-op.
+---@return boolean ok
 function Mimir.Viz.process_events() end
 
----Mettre à jour et afficher le rendu de la fenêtre.
+---Compatibilité: le rendu est mis à jour automatiquement par AsyncMonitor; no-op.
+---@return boolean ok
 function Mimir.Viz.update() end
 
 ---Ajouter/afficher une image dans le visualiseur.
 ---Les pixels sont fournis sous forme de tableau plat (row-major).
 ---@param pixels number[] @Tableau de valeurs pixel [0-255], RGBA ou RGB
+---@overload fun(pixels: number[], prompt?: string, width?: integer, height?: integer, channels?: integer): boolean, string?
 ---@param width integer @Largeur de l'image
 ---@param height integer @Hauteur de l'image
----@param channels integer @Nombre de canaux (3=RGB, 4=RGBA)
+---@param channels? integer @Nombre de canaux
+---@param prompt? string
 ---@return boolean ok
 ---@return string? err
-function Mimir.Viz.add_image(pixels, width, height, channels) end
+function Mimir.Viz.add_image(pixels, width, height, channels, prompt) end
+
+---@class VizDetection
+---@field x1 number @Bord gauche normalisé [0,1]
+---@field y1 number @Bord haut normalisé [0,1]
+---@field x2 number @Bord droit normalisé [0,1]
+---@field y2 number @Bord bas normalisé [0,1]
+---@field score? number @Confiance, généralement [0,1]
+---@field class_id? integer @Identifiant de classe utilisé pour la couleur
+---@field label? string @Nom de classe affiché
+
+---Publier les détections à superposer sur l'image dataset, la sortie, ou les deux.
+---Un tableau vide efface les détections précédentes. Les coordonnées sont normalisées.
+---@param detections VizDetection[]
+---@param target? 'dataset'|'output'|'both' @Défaut: dataset
+---@return boolean ok
+---@return string? err
+function Mimir.Viz.set_detections(detections, target) end
+
+---Afficher ou masquer l'overlay de détection sans effacer ses données.
+---@param enabled boolean
+---@return boolean ok
+---@return string? err
+function Mimir.Viz.show_detections(enabled) end
+
+---Définir le seuil de confiance des détections affichées dans VIZ.
+---Une valeur non finie ou hors de [0,1] déclenche une erreur Lua.
+---@param threshold number @Nombre fini entre 0 et 1
+---@return boolean ok @false si le visualiseur n’est pas créé
+---@return string? err
+function Mimir.Viz.set_detection_threshold(threshold) end
+
 
 ---Mettre à jour les métriques d'entraînement affichées.
 ---@param metrics VizMetrics|table @Métriques: epoch, loss, lr, memory_mb, etc.
@@ -1533,6 +1998,7 @@ function Mimir.Viz.update_metrics(metrics) end
 ---@field recon? float @Métrique principale (ex: recon/img_mse)
 ---@field kl? float @Métrique secondaire (ex: kl/eps_mse)
 ---@field align? float @Métrique optionnelle (ex: align/margin)
+---@field enabled? boolean @Modifie l'état de validation live avant de publier les métriques
 
 ---Mettre à jour l'état/progression de validation affichée (sans écraser les métriques train).
 ---@param state VizValidationState|table
@@ -1540,8 +2006,12 @@ function Mimir.Viz.update_metrics(metrics) end
 ---@return string? err
 function Mimir.Viz.set_validation(state) end
 
----Ajouter un point à l'historique de loss (pour graphe).
+---@return boolean enabled
+function Mimir.Viz.validation_enabled() end
+
+---Compatibilité: l'historique est alimenté par update_metrics; no-op retournant true.
 ---@param loss number @Valeur de loss
+---@return boolean ok
 function Mimir.Viz.add_loss_point(loss) end
 
 ---Clear viz.
@@ -1549,7 +2019,8 @@ function Mimir.Viz.add_loss_point(loss) end
 ---@return string? err
 function Mimir.Viz.clear() end
 
----Activer/désactiver la viz (NO-OP si non compilée).
+---Arrêter le monitor si `enabled=false`.
+---Avec `enabled=true`, la fonction confirme seulement l'état; utilisez `create()` pour démarrer.
 ---@param enabled boolean
 ---@return boolean ok
 ---@return string? err
@@ -1568,36 +2039,35 @@ function Mimir.Viz.save_loss_history(path) end
 ---@class MimirIOAPI
 Mimir.IO = {}
 
----Charger une image depuis le disque et retourner des pixels RGB u8 redimensionnés.
+---Charger et redimensionner une image en RGB u8.
 ---Supporte les formats `png/jpg/jpeg/bmp/tiff/webp` via stb_image.
 ---
----Signature réelle: retourne soit `(pixels, w, h, c)` soit `(nil, err)`.
 ---@param path string
----@param target_w integer
----@param target_h integer
----@return number[]|nil pixels
----@return integer|string w_or_err
----@return integer? h
----@return integer? c
+---@param target_w? integer @Défaut: 256
+---@param target_h? integer @Défaut: 256
+---@return {image: integer[], width: integer, height: integer, channels: 3}|nil image
+---@return string? err
 function Mimir.IO.read_image_rgb_u8(path, target_w, target_h) end
 
 ---Alias camelCase de `read_image_rgb_u8`.
 ---@param path string
----@param target_w integer
----@param target_h integer
----@return number[]|nil pixels
----@return integer|string w_or_err
----@return integer? h
----@return integer? c
+---@param target_w? integer
+---@param target_h? integer
+---@return {image: integer[], width: integer, height: integer, channels: 3}|nil image
+---@return string? err
 function Mimir.IO.readImageRGBU8(path, target_w, target_h) end
 
----[COMPAT] Ancien helper global (préférez `Mimir.IO.read_image_rgb_u8`).
----@deprecated
-function read_image_rgb_u8(path, target_w, target_h) end
+---Lire ou définir la suppression des logs framework vers stdout/stderr pendant l'exécution Lua.
+---Getter: `Mimir.IO.suppress_stdout_logs()` -> boolean
+---Setter: `Mimir.IO.suppress_stdout_logs(true)` -> (previous, current)
+---@overload fun(): boolean
+---@overload fun(enabled: boolean): (boolean, boolean)
+function Mimir.IO.suppress_stdout_logs(enabled) end
 
--- Alias FR (même API): Mimir.visualiser
----@type MimirVizAPI
-Mimir.visualiser = Mimir.Viz
+---Alias camelCase de `suppress_stdout_logs`.
+---@overload fun(): boolean
+---@overload fun(enabled: boolean): (boolean, boolean)
+function Mimir.IO.suppressStdoutLogs(enabled) end
 
 --=============================================================================
 -- Mimir.Serialization API (v2.4.0)
@@ -1611,29 +2081,34 @@ Mimir.visualiser = Mimir.Viz
 Mimir.Serialization = {}
 
 ---@alias SerializationFormat
----| "safetensors"  # Format production (défaut)
----| "raw_folder"    # Format debug avec checksums
----| "debug_json"    # Format inspection avec stats
+---| "safetensors"|"st" # Format production (défaut)
+---| "raw_folder"|"raw"|"folder" # Dossier brut avec checksums
+---| "debug_json"|"debug"|"json" # JSON d'inspection
+
+---@alias DetectedSerializationFormat "SAFETENSORS"|"RAWFOLDER"|"DEBUGJSON"
 
 ---@class SaveOptions
----@field format? SerializationFormat @Format de sauvegarde (défaut: SAFETENSORS)
 ---@field save_tokenizer? boolean @Sauvegarder le tokenizer (défaut: true)
 ---@field save_encoder? boolean @Sauvegarder l'encoder (défaut: true)
 ---@field save_optimizer? boolean @Sauvegarder l'état optimizer (défaut: false)
 ---@field debug_max_values? integer @Nombre max de valeurs debug (legacy, défaut: 100)
 ---@field include_git_info? boolean @Inclure info git (défaut: true)
----@field include_gradients? boolean @[DebugJson v1.1] Inclure gradients (défaut: false)
----@field include_optimizer_state? boolean @[DebugJson v1.1] Inclure optimizer state (défaut: false)
----@field max_values_per_tensor? integer @[DebugJson v1.1] Nb valeurs par tensor (défaut: 20)
----@field include_activations? boolean @[DebugJson v1.1] Inclure activations (défaut: false)
----@field include_checksums? boolean @[DebugJson v1.1] Inclure checksums (défaut: false)
----@field include_weight_deltas? boolean @[DebugJson v1.1] Inclure weight deltas (défaut: false)
+---@field include_gradients? boolean @[DebugJson v1.3] Inclure gradients (défaut: false)
+---@field training_state? table @État de la boucle (curseur, RNG, feedback), restauré dans Model.get_config().training_state.
+---@field include_optimizer_state? boolean @[DebugJson v1.3] Inclure optimizer state (défaut: false)
+---@field max_values_per_tensor? integer @[DebugJson v1.3] Nb valeurs par tensor (défaut: 20)
+---@field include_activations? boolean @[DebugJson v1.3] Inclure activations (défaut: false)
+---@field include_checksums? boolean @[DebugJson v1.3] Inclure checksums (défaut: false)
+---@field include_weight_deltas? boolean @[DebugJson v1.3] Inclure weight deltas (défaut: false)
 
 ---@class LoadOptions
 ---@field load_tokenizer? boolean @Charger le tokenizer (défaut: true)
 ---@field load_encoder? boolean @Charger l'encoder (défaut: true)
 ---@field load_optimizer? boolean @Charger l'état optimizer (défaut: false)
----@field verify_checksums? boolean @Vérifier checksums SHA256 (défaut: true, RawFolder uniquement)
+---@field strict_mode? boolean @Refuser les tensors inconnus ou incompatibles
+---@field validate_checksums? boolean @Vérifier les checksums disponibles
+---@field mapping_json? string @Chemin du mapping de noms de tensors
+---@field tensor_mapping_json? string @Alias de mapping_json
 
 ---Sauvegarder un checkpoint avec le nouveau système de sérialisation v2.4.
 ---
@@ -1659,7 +2134,7 @@ Mimir.Serialization = {}
 --- -- DebugJson (inspection)
 --- Mimir.Serialization.save("debug.json", "debug_json", {debug_max_values = 20})
 --- 
---- -- DebugJson Enhanced v1.1 (diagnostic entraînement)
+--- -- DebugJson Enhanced v1.3 (diagnostic entraînement + snapshot framework_state)
 --- Mimir.Serialization.save("debug.json", "debug_json", {
 ---     include_gradients = true,
 ---     include_optimizer_state = true,
@@ -1699,88 +2174,24 @@ function Mimir.Serialization.save(path, format, options) end
 --- 
 --- -- Avec vérification checksums
 --- Mimir.Serialization.load("checkpoint/", "raw_folder", {
----     verify_checksums = true
+---     validate_checksums = true
 --- })
 ---```
 function Mimir.Serialization.load(path, format, options) end
 
 ---Détecter automatiquement le format d'un checkpoint.
 ---@param path string @Chemin du fichier/dossier
----@return SerializationFormat? format @Format détecté ou nil si inconnu
+---@return DetectedSerializationFormat? format @Format détecté ou nil si inconnu
 ---@return string? err @Message d'erreur si échec
 function Mimir.Serialization.detect_format(path) end
 
----Sauvegarder un checkpoint avec Enhanced Debug JSON v1.1.0.
----Fonction spécialisée pour le diagnostic d'entraînement avec toutes les options v1.1.
+---Sauvegarder un checkpoint avec Enhanced Debug JSON v1.3.0.
+---Fonction spécialisée pour le diagnostic d'entraînement avec snapshot `framework_state`.
 ---@param path string @Chemin du fichier JSON
----@param options? SaveOptions @Options Enhanced Debug JSON v1.1
+---@param options? SaveOptions @Options Enhanced Debug JSON v1.3
 ---@return boolean ok @true si succès
 ---@return string? err @Message d'erreur si échec
 function Mimir.Serialization.save_enhanced_debug(path, options) end
-
---=============================================================================
--- Mimir.NeuroPulse API (texte -> audio/lumière)
---=============================================================================
--- Ce module génère des signaux (fichier WAV + enveloppe "lumière" en CSV) à partir
--- d'un texte. Il s'agit d'un générateur déterministe (pas une thérapie, pas un dispositif
--- médical). Par défaut, la "lumière" est une variation lente et lisse (safe_light=true)
--- pour éviter les effets stroboscopiques.
-
----@class MimirNeuroPulseAPI
-Mimir.NeuroPulse = {}
-
----@class NeuroPulseOptions
----@field duration_s? number @Durée en secondes (défaut: 10)
----@field sample_rate? integer @Hz (défaut: 48000)
----@field carrier_hz? number @Fréquence porteuse audio (défaut: 220)
----@field audio_mod_depth? number @Profondeur modulation AM 0..1 (défaut: 0.8)
----@field binaural_hz? number @Décalage binaural (0=off) (défaut: 0)
----@field cognitive_band? string @"auto"|"delta"|"theta"|"alpha"|"beta"|"gamma" (défaut: auto)
----@field cognitive_hz? number @Override fréquence (0=auto)
----@field safe_light? boolean @Clamp + enveloppe lisse (défaut: true)
----@field light_fps? integer @Échantillonnage CSV lumière (défaut: 60)
----@field light_hz? number @Fréquence enveloppe lumière (défaut: 0.2, clamp <=2 si safe)
----@field light_depth? number @Profondeur 0..1 (défaut: 0.6)
----@field out_wav? string @Chemin sortie WAV (défaut: neuropulse.wav)
----@field out_light_csv? string @Chemin sortie CSV lumière (défaut: neuropulse_light.csv)
----@field organic_nn? boolean @Activer modulation "organique" via petit MLP interne (défaut: true)
----@field nn_control_fps? integer @Résolution temporelle du contrôle NN (défaut: 200)
----@field nn_hidden_dim? integer @Largeur hidden du MLP (défaut: 32)
----@field nn_hidden_layers? integer @Nombre de couches hidden (défaut: 2)
----@field nn_dropout? number @Dropout (0..0.95, surtout utile en training) (défaut: 0)
----@field nn_strength? number @Force de modulation (0..1) (défaut: 0.35)
----@field nn_smooth? number @Lissage IIR des sorties (0..0.999) (défaut: 0.85)
----@field nn_seed? integer @Seed (0=auto dérivé du sha256) (défaut: 0)
-
----@class NeuroPulseMeta
----@field sha256 string
----@field band string
----@field cognitive_hz number
----@field carrier_hz number
----@field binaural_hz number
----@field sample_rate integer
----@field duration_s number
----@field light_fps integer
----@field light_hz number
----@field out_wav string
----@field out_light_csv string
----@field organic_nn boolean
----@field nn_seed integer
----@field nn_control_fps integer
----@field warnings string[]
-
----Générer un WAV + un CSV "lumière" depuis un texte.
----@param text string
----@param opts? NeuroPulseOptions
----@return boolean ok
----@return NeuroPulseMeta|string meta_or_err
-function Mimir.NeuroPulse.render(text, opts) end
-
----Calculer les paramètres (band/frequences) qui seraient utilisés.
----@param text string
----@param opts? NeuroPulseOptions
----@return NeuroPulseMeta meta
-function Mimir.NeuroPulse.params(text, opts) end
 
 --=============================================================================
 -- Fonctions globales utilitaires
@@ -1806,6 +2217,103 @@ function write_json(path, obj) end
 ---Print (redirigé) — peut être surchargé par le runtime.
 ---@param ... any
 function print(...) end
+
+--=============================================================================
+-- Modules Lua (`dofile(ROOTWORK.."/scripts/modules/...")`)
+--=============================================================================
+-- Ces types décrivent des helpers écrits en Lua. Ils ne sont pas membres de
+-- `Mimir` et leur chargement reste explicite.
+
+---@class MimirScriptArgs
+---@field override? string[]
+---@field [string] string|boolean|string[]
+
+---@class MimirArgsModule
+---@field parse fun(argv?:string[]):MimirScriptArgs, string[]
+---@field apply_overrides fun(cfg?:table, opts?:MimirScriptArgs):table
+---@field apply_validation_config fun(cfg?:table, opts?:MimirScriptArgs, defaults?:table):table
+---@field has fun(opts:MimirScriptArgs, key:string):boolean
+---@field get_str fun(opts:MimirScriptArgs, key:string, default?:string):string?
+---@field get_num fun(opts:MimirScriptArgs, key:string, default?:number):number?
+---@field get_int fun(opts:MimirScriptArgs, key:string, default?:integer):integer?
+---@field get_bool fun(opts:MimirScriptArgs, key:string, default?:boolean):boolean?
+---@field opt_str fun(key:string, default?:string):string?
+---@field opt_num fun(key:string, default?:number):number?
+---@field opt_int fun(key:string, default?:integer):integer?
+---@field opt_bool fun(key:string, default?:boolean):boolean?
+
+---@class MimirFSModule
+---@field is_windows fun():boolean
+---@field sep fun():string
+---@field quote fun(path:string):string
+---@field normalize fun(path:string):string
+---@field join fun(...:string):string
+---@field dirname fun(path:string):string?
+---@field file_exists fun(path:string):boolean
+---@field is_dir fun(path:string):boolean
+---@field exists fun(path:string):boolean
+---@field mkdir_p fun(path:string):boolean
+---@field list_dir fun(path:string):string[]
+
+---@class MimirCheckpointResumeModule
+---@field file_exists fun(path:string):boolean
+---@field find_latest_epoch_dir fun(base:string):string?
+---@field resolve_dir fun(base:string):string?
+
+---@class MimirBaseTokenizerOptions
+---@field path? string
+---@field require? boolean
+---@field max_vocab? integer
+
+---@class MimirBaseTokenizerModule
+---@field default_path fun():string
+---@field load_base fun(opts?:MimirBaseTokenizerOptions):boolean, string?
+---@field vocab_size fun():integer
+---@field save_current_as_base fun(path?:string):boolean, string?
+
+---@class MimirCausalTokenizerOptions
+---@field corpus string
+---@field vocab_size integer
+---@field padding_idx? integer
+---@field seq_len? integer
+---@field path? string
+---@field bpe_merges? integer
+
+---@class MimirCausalTokenizerInfo
+---@field generated boolean
+---@field replaced_loaded_tokenizer? boolean
+---@field reason? string
+---@field path? string
+---@field vocab_size integer
+---@field max_vocab integer
+
+---@class MimirCausalTokenizerModule
+---@field ensure fun(options:MimirCausalTokenizerOptions):TokenIds, MimirCausalTokenizerInfo
+
+---@class MimirHelpModule
+---@field should_show_help fun(argv?:string[]):boolean
+---@field find_script_from_stack fun(start_level?:integer, max_level?:integer):string?
+---@field print_help fun(params?:table)
+---@field auto_exit_help fun(params?:table)
+
+---@class MimirMPKModule
+---@field build fun(spec:table):table
+---@field compile fun(source_path:string, output_path:string):boolean?, string?
+---@field read fun(path:string):table?, string?
+---@field write fun(path:string, pkg:table, opts?:table):boolean?, string?
+---@field verify_checksum fun(pkg:table):boolean, string?
+---@field decode_payload fun(pkg:table):table?, string?
+---@field to_registry_full_config fun(pkg:table):table?, string?
+---@field model_structure_template fun(kind?:string):table
+---@field encode_pseudocode fun(value:table):string
+---@field decode_pseudocode fun(source:string):table
+
+---@class MimirMPKLayersModule
+---@field available_layer_types fun():string[]
+---@field infer_layer_type fun(layer_name:string):string
+---@field canonical_layer_type fun(raw_type:string, params?:table):string?, string?
+---@field predict_params_count fun(layer_type:string, params?:table, context?:table):integer, string
+---@field normalize_graph_in_place fun(model_structure:table, opts?:table):boolean, string?
 
 --=============================================================================
 -- Pipeline API (optionnel)
@@ -1932,6 +2440,22 @@ Mimir.model = Mimir.Model
 ---@type MimirModelAPI
 model = Mimir.Model
 ---@type MimirArchitecturesAPI
+architectures = Mimir.Architectures
+---@type MimirTokenizerAPI
+tokenizer = Mimir.Tokenizer
+---@type MimirDatasetAPI
+dataset = Mimir.Dataset
+---@type MimirMemoryAPI
+Memory = Mimir.Memory
+---@type MimirMemoryGuardAPI
+MemoryGuard = Mimir.MemoryGuard
+---@type MimirAllocatorAPI
+Allocator = Mimir.Allocator
+---@type MimirHtopAPI
+htop = Mimir.Htop
+---@type MimirVizAPI
+viz = Mimir.Viz
+---@type MimirArchitecturesAPI
 Mimir.Architectures = Mimir.Architectures
 ---@type MimirLayersAPI
 Mimir.Layers = Mimir.Layers
@@ -1941,6 +2465,10 @@ Mimir.Checkpoint = Mimir.Checkpoint
 Mimir.Tokenizer = Mimir.Tokenizer
 ---@type MimirDatasetAPI
 Mimir.Dataset = Mimir.Dataset
+---@type MimirDatabaseAPI
+Mimir.Database = Mimir.Database
+---@type MimirIOAPI
+Mimir.IO = Mimir.IO
 ---@type MimirMemoryAPI
 Mimir.Memory = Mimir.Memory
 ---@type MimirGuardAPI
@@ -1954,11 +2482,5 @@ Mimir.Htop = Mimir.Htop
 ---@type MimirVizAPI
 Mimir.Viz = Mimir.Viz
 
----@type MimirVizAPI
-Mimir.visualiser = Mimir.visualiser
-
 ---@type MimirSerializationAPI
 Mimir.Serialization = Mimir.Serialization
-
----@type MimirNeuroPulseAPI
-Mimir.NeuroPulse = Mimir.NeuroPulse

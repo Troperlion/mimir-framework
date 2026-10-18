@@ -1,0 +1,2243 @@
+{
+  "default_dtype": "float32",
+  "encoder": {
+    "architecture": "ViT",
+    "has_encoder": true
+  },
+  "features": [
+    "layer_config",
+    "real_shapes",
+    "layer_io",
+    "extended_layer_types",
+    "framework_state",
+    "checksums"
+  ],
+  "format": "mimir_debug_dump",
+  "format_version": "1.3.0",
+  "framework_state": {
+    "memory": {
+      "advanced_ram_manager": {
+        "allocations_blocked": false,
+        "current_bytes": 0,
+        "current_mb": 0.0,
+        "freeze_mode": false,
+        "peak_bytes": 0,
+        "peak_mb": 0.0,
+        "usage_percent": 0.0
+      },
+      "dynamic_tensor_allocator": {
+        "loaded_count": 18,
+        "tensor_count": 18
+      },
+      "memory_guard": {
+        "allocations_blocked": false,
+        "current_bytes": 1263456,
+        "current_mb": 1.204925537109375,
+        "freeze_mode": false,
+        "limit_bytes": 10737418240,
+        "limit_mb": 10240.0,
+        "peak_bytes": 1263456,
+        "peak_mb": 1.204925537109375,
+        "usage_percent": 0.01176685094833374
+      }
+    },
+    "model": {
+      "default_dtype": "float32",
+      "has_encoder": true,
+      "image_height": 64,
+      "image_width": 64,
+      "model_config": {
+        "base_channels": 8,
+        "image_c": 3,
+        "image_h": 64,
+        "image_w": 64,
+        "type": "vgg16_feat"
+      },
+      "model_name": "VGG16FeatModel",
+      "num_layers": 63,
+      "parameters_frozen": false,
+      "tokenizer_vocab_size": 47,
+      "total_params": 315864
+    },
+    "registry": {
+      "supported_layer_count": 70,
+      "supported_layer_types": [
+        "Conv2d",
+        "ConvTranspose2d",
+        "Conv1d",
+        "DepthwiseConv2d",
+        "Linear",
+        "Bilinear",
+        "Embedding",
+        "EmbeddingBag",
+        "BatchNorm2d",
+        "BatchNorm1d",
+        "LayerNorm",
+        "GroupNorm",
+        "InstanceNorm2d",
+        "RMSNorm",
+        "ReLU",
+        "LeakyReLU",
+        "GELU",
+        "GEGLU",
+        "SiLU",
+        "Tanh",
+        "Sigmoid",
+        "Softmax",
+        "LogSoftmax",
+        "Softplus",
+        "Mish",
+        "HardSigmoid",
+        "HardSwish",
+        "MaxPool2d",
+        "AvgPool2d",
+        "AdaptiveAvgPool2d",
+        "GlobalAvgPool2d",
+        "MaxPool1d",
+        "AvgPool1d",
+        "TokenMeanPool",
+        "Dropout",
+        "Dropout2d",
+        "AlphaDropout",
+        "Flatten",
+        "Reshape",
+        "Transpose",
+        "Permute",
+        "Squeeze",
+        "Unsqueeze",
+        "View",
+        "Add",
+        "Subtract",
+        "Multiply",
+        "Divide",
+        "Concat",
+        "Split",
+        "Chunk",
+        "Stack",
+        "MatMul",
+        "BatchMatMul",
+        "SelfAttention",
+        "MultiHeadAttention",
+        "CrossAttention",
+        "UpsampleNearest",
+        "UpsampleBilinear",
+        "UpsampleBicubic",
+        "PixelShuffle",
+        "LSTM",
+        "GRU",
+        "RNN",
+        "ZeroPad2d",
+        "ReflectionPad2d",
+        "ReplicationPad2d",
+        "Identity",
+        "Constant",
+        "Lambda"
+      ]
+    },
+    "runtime": {
+      "backends": {
+        "cpu": {
+          "available": true,
+          "compiled": true,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CPU",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "cuda": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CUDA",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "opencl": {
+          "available": false,
+          "compiled": true
+        },
+        "rocm": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "ROCM",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "vulkan": {
+          "available": true,
+          "compiled": true
+        }
+      },
+      "cpu_features": {
+        "avx2": true,
+        "bmi2": true,
+        "f16c": true,
+        "fma": true
+      },
+      "environment_overrides": {},
+      "framework_logs_suppressed": false
+    },
+    "snapshot_timestamp": 1783546806,
+    "snapshot_version": "1.0.0"
+  },
+  "git": {
+    "branch": "unknown",
+    "commit": "unknown"
+  },
+  "layers": [
+    {
+      "index": 0,
+      "inputs": [
+        "__input__"
+      ],
+      "name": "vgg16_feat/raw_in",
+      "output": "vgg16_feat/in_vec",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Identity"
+    },
+    {
+      "config": {
+        "target_shape": [
+          64,
+          64,
+          3
+        ]
+      },
+      "index": 1,
+      "inputs": [
+        "vgg16_feat/in_vec"
+      ],
+      "name": "vgg16_feat/in_reshape",
+      "output": "vgg16_feat/in_hwc",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Reshape"
+    },
+    {
+      "config": {
+        "permute_dims": [
+          2,
+          0,
+          1
+        ],
+        "shape": [
+          64,
+          64,
+          3
+        ]
+      },
+      "index": 2,
+      "inputs": [
+        "vgg16_feat/in_hwc"
+      ],
+      "name": "vgg16_feat/in_to_chw",
+      "output": "vgg16_feat/in_chw",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Permute"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 3,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 8,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 3,
+      "inputs": [
+        "vgg16_feat/in_chw"
+      ],
+      "name": "vgg16_feat/b1/c1",
+      "output": "vgg16_feat/b1/y1",
+      "params_count": 216,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b1/c1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            8,
+            3,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 216,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 8,
+        "in_features": 32768,
+        "input_height": 64,
+        "input_width": 64,
+        "momentum": 0.10000000149011612,
+        "num_features": 8,
+        "num_groups": 1
+      },
+      "index": 4,
+      "inputs": [
+        "vgg16_feat/b1/y1"
+      ],
+      "name": "vgg16_feat/b1/c1/ln",
+      "output": "vgg16_feat/b1/y1_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 5,
+      "inputs": [
+        "vgg16_feat/b1/y1_ln"
+      ],
+      "name": "vgg16_feat/b1/c1/act",
+      "output": "vgg16_feat/b1/y1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 8,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 8,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 6,
+      "inputs": [
+        "vgg16_feat/b1/y1_act"
+      ],
+      "name": "vgg16_feat/b1/c2",
+      "output": "vgg16_feat/b1/y2",
+      "params_count": 576,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b1/c2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            8,
+            8,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 576,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 8,
+        "in_features": 32768,
+        "input_height": 64,
+        "input_width": 64,
+        "momentum": 0.10000000149011612,
+        "num_features": 8,
+        "num_groups": 1
+      },
+      "index": 7,
+      "inputs": [
+        "vgg16_feat/b1/y2"
+      ],
+      "name": "vgg16_feat/b1/c2/ln",
+      "output": "vgg16_feat/b1/y2_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 8,
+      "inputs": [
+        "vgg16_feat/b1/y2_ln"
+      ],
+      "name": "vgg16_feat/b1/c2/act",
+      "output": "vgg16_feat/b1/y2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 8,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 8,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 9,
+      "inputs": [
+        "vgg16_feat/b1/y2_act"
+      ],
+      "name": "vgg16_feat/b1/down",
+      "output": "vgg16_feat/b1/down_y",
+      "params_count": 576,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b1/down.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            8,
+            8,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 576,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 8,
+        "in_features": 8192,
+        "input_height": 32,
+        "input_width": 32,
+        "momentum": 0.10000000149011612,
+        "num_features": 8,
+        "num_groups": 1
+      },
+      "index": 10,
+      "inputs": [
+        "vgg16_feat/b1/down_y"
+      ],
+      "name": "vgg16_feat/b1/down/ln",
+      "output": "vgg16_feat/b1/down_y_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 11,
+      "inputs": [
+        "vgg16_feat/b1/down_y_ln"
+      ],
+      "name": "vgg16_feat/b1/down/act",
+      "output": "vgg16_feat/b1/down_y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "in_channels": 8,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_size": 0,
+        "padding": 0,
+        "stride": 1
+      },
+      "index": 12,
+      "inputs": [
+        "vgg16_feat/b1/down_y_act"
+      ],
+      "name": "vgg16_feat/b1/gap",
+      "output": "vgg16_feat/b1/gap_y",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GlobalAvgPool2d"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 8,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 16,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 13,
+      "inputs": [
+        "vgg16_feat/b1/down_y_act"
+      ],
+      "name": "vgg16_feat/b2/c1",
+      "output": "vgg16_feat/b2/y1",
+      "params_count": 1152,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b2/c1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            16,
+            8,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1152,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 16,
+        "in_features": 16384,
+        "input_height": 32,
+        "input_width": 32,
+        "momentum": 0.10000000149011612,
+        "num_features": 16,
+        "num_groups": 1
+      },
+      "index": 14,
+      "inputs": [
+        "vgg16_feat/b2/y1"
+      ],
+      "name": "vgg16_feat/b2/c1/ln",
+      "output": "vgg16_feat/b2/y1_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 15,
+      "inputs": [
+        "vgg16_feat/b2/y1_ln"
+      ],
+      "name": "vgg16_feat/b2/c1/act",
+      "output": "vgg16_feat/b2/y1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 16,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 16,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 16,
+      "inputs": [
+        "vgg16_feat/b2/y1_act"
+      ],
+      "name": "vgg16_feat/b2/c2",
+      "output": "vgg16_feat/b2/y2",
+      "params_count": 2304,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b2/c2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            16,
+            16,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2304,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 16,
+        "in_features": 16384,
+        "input_height": 32,
+        "input_width": 32,
+        "momentum": 0.10000000149011612,
+        "num_features": 16,
+        "num_groups": 1
+      },
+      "index": 17,
+      "inputs": [
+        "vgg16_feat/b2/y2"
+      ],
+      "name": "vgg16_feat/b2/c2/ln",
+      "output": "vgg16_feat/b2/y2_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 18,
+      "inputs": [
+        "vgg16_feat/b2/y2_ln"
+      ],
+      "name": "vgg16_feat/b2/c2/act",
+      "output": "vgg16_feat/b2/y2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 16,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 16,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 19,
+      "inputs": [
+        "vgg16_feat/b2/y2_act"
+      ],
+      "name": "vgg16_feat/b2/down",
+      "output": "vgg16_feat/b2/down_y",
+      "params_count": 2304,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b2/down.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            16,
+            16,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2304,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 16,
+        "in_features": 4096,
+        "input_height": 16,
+        "input_width": 16,
+        "momentum": 0.10000000149011612,
+        "num_features": 16,
+        "num_groups": 1
+      },
+      "index": 20,
+      "inputs": [
+        "vgg16_feat/b2/down_y"
+      ],
+      "name": "vgg16_feat/b2/down/ln",
+      "output": "vgg16_feat/b2/down_y_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 21,
+      "inputs": [
+        "vgg16_feat/b2/down_y_ln"
+      ],
+      "name": "vgg16_feat/b2/down/act",
+      "output": "vgg16_feat/b2/down_y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "in_channels": 16,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_size": 0,
+        "padding": 0,
+        "stride": 1
+      },
+      "index": 22,
+      "inputs": [
+        "vgg16_feat/b2/down_y_act"
+      ],
+      "name": "vgg16_feat/b2/gap",
+      "output": "vgg16_feat/b2/gap_y",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GlobalAvgPool2d"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 16,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 23,
+      "inputs": [
+        "vgg16_feat/b2/down_y_act"
+      ],
+      "name": "vgg16_feat/b3/c1",
+      "output": "vgg16_feat/b3/y1",
+      "params_count": 4608,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b3/c1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            16,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 4608,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 32,
+        "in_features": 8192,
+        "input_height": 16,
+        "input_width": 16,
+        "momentum": 0.10000000149011612,
+        "num_features": 32,
+        "num_groups": 1
+      },
+      "index": 24,
+      "inputs": [
+        "vgg16_feat/b3/y1"
+      ],
+      "name": "vgg16_feat/b3/c1/ln",
+      "output": "vgg16_feat/b3/y1_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 25,
+      "inputs": [
+        "vgg16_feat/b3/y1_ln"
+      ],
+      "name": "vgg16_feat/b3/c1/act",
+      "output": "vgg16_feat/b3/y1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 32,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 26,
+      "inputs": [
+        "vgg16_feat/b3/y1_act"
+      ],
+      "name": "vgg16_feat/b3/c2",
+      "output": "vgg16_feat/b3/y2",
+      "params_count": 9216,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b3/c2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            32,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 9216,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 32,
+        "in_features": 8192,
+        "input_height": 16,
+        "input_width": 16,
+        "momentum": 0.10000000149011612,
+        "num_features": 32,
+        "num_groups": 1
+      },
+      "index": 27,
+      "inputs": [
+        "vgg16_feat/b3/y2"
+      ],
+      "name": "vgg16_feat/b3/c2/ln",
+      "output": "vgg16_feat/b3/y2_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 28,
+      "inputs": [
+        "vgg16_feat/b3/y2_ln"
+      ],
+      "name": "vgg16_feat/b3/c2/act",
+      "output": "vgg16_feat/b3/y2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 32,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 29,
+      "inputs": [
+        "vgg16_feat/b3/y2_act"
+      ],
+      "name": "vgg16_feat/b3/c3",
+      "output": "vgg16_feat/b3/y3",
+      "params_count": 9216,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b3/c3.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            32,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 9216,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 32,
+        "in_features": 8192,
+        "input_height": 16,
+        "input_width": 16,
+        "momentum": 0.10000000149011612,
+        "num_features": 32,
+        "num_groups": 1
+      },
+      "index": 30,
+      "inputs": [
+        "vgg16_feat/b3/y3"
+      ],
+      "name": "vgg16_feat/b3/c3/ln",
+      "output": "vgg16_feat/b3/y3_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 31,
+      "inputs": [
+        "vgg16_feat/b3/y3_ln"
+      ],
+      "name": "vgg16_feat/b3/c3/act",
+      "output": "vgg16_feat/b3/y3_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 32,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 32,
+      "inputs": [
+        "vgg16_feat/b3/y3_act"
+      ],
+      "name": "vgg16_feat/b3/down",
+      "output": "vgg16_feat/b3/down_y",
+      "params_count": 9216,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b3/down.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            32,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 9216,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 32,
+        "in_features": 2048,
+        "input_height": 8,
+        "input_width": 8,
+        "momentum": 0.10000000149011612,
+        "num_features": 32,
+        "num_groups": 1
+      },
+      "index": 33,
+      "inputs": [
+        "vgg16_feat/b3/down_y"
+      ],
+      "name": "vgg16_feat/b3/down/ln",
+      "output": "vgg16_feat/b3/down_y_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 34,
+      "inputs": [
+        "vgg16_feat/b3/down_y_ln"
+      ],
+      "name": "vgg16_feat/b3/down/act",
+      "output": "vgg16_feat/b3/down_y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "in_channels": 32,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_size": 0,
+        "padding": 0,
+        "stride": 1
+      },
+      "index": 35,
+      "inputs": [
+        "vgg16_feat/b3/down_y_act"
+      ],
+      "name": "vgg16_feat/b3/gap",
+      "output": "vgg16_feat/b3/gap_y",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GlobalAvgPool2d"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 32,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 36,
+      "inputs": [
+        "vgg16_feat/b3/down_y_act"
+      ],
+      "name": "vgg16_feat/b4/c1",
+      "output": "vgg16_feat/b4/y1",
+      "params_count": 18432,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b4/c1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            32,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 18432,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 64,
+        "in_features": 4096,
+        "input_height": 8,
+        "input_width": 8,
+        "momentum": 0.10000000149011612,
+        "num_features": 64,
+        "num_groups": 1
+      },
+      "index": 37,
+      "inputs": [
+        "vgg16_feat/b4/y1"
+      ],
+      "name": "vgg16_feat/b4/c1/ln",
+      "output": "vgg16_feat/b4/y1_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 38,
+      "inputs": [
+        "vgg16_feat/b4/y1_ln"
+      ],
+      "name": "vgg16_feat/b4/c1/act",
+      "output": "vgg16_feat/b4/y1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 39,
+      "inputs": [
+        "vgg16_feat/b4/y1_act"
+      ],
+      "name": "vgg16_feat/b4/c2",
+      "output": "vgg16_feat/b4/y2",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b4/c2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 64,
+        "in_features": 4096,
+        "input_height": 8,
+        "input_width": 8,
+        "momentum": 0.10000000149011612,
+        "num_features": 64,
+        "num_groups": 1
+      },
+      "index": 40,
+      "inputs": [
+        "vgg16_feat/b4/y2"
+      ],
+      "name": "vgg16_feat/b4/c2/ln",
+      "output": "vgg16_feat/b4/y2_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 41,
+      "inputs": [
+        "vgg16_feat/b4/y2_ln"
+      ],
+      "name": "vgg16_feat/b4/c2/act",
+      "output": "vgg16_feat/b4/y2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 42,
+      "inputs": [
+        "vgg16_feat/b4/y2_act"
+      ],
+      "name": "vgg16_feat/b4/c3",
+      "output": "vgg16_feat/b4/y3",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b4/c3.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 64,
+        "in_features": 4096,
+        "input_height": 8,
+        "input_width": 8,
+        "momentum": 0.10000000149011612,
+        "num_features": 64,
+        "num_groups": 1
+      },
+      "index": 43,
+      "inputs": [
+        "vgg16_feat/b4/y3"
+      ],
+      "name": "vgg16_feat/b4/c3/ln",
+      "output": "vgg16_feat/b4/y3_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 44,
+      "inputs": [
+        "vgg16_feat/b4/y3_ln"
+      ],
+      "name": "vgg16_feat/b4/c3/act",
+      "output": "vgg16_feat/b4/y3_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 45,
+      "inputs": [
+        "vgg16_feat/b4/y3_act"
+      ],
+      "name": "vgg16_feat/b4/down",
+      "output": "vgg16_feat/b4/down_y",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b4/down.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 64,
+        "in_features": 1024,
+        "input_height": 4,
+        "input_width": 4,
+        "momentum": 0.10000000149011612,
+        "num_features": 64,
+        "num_groups": 1
+      },
+      "index": 46,
+      "inputs": [
+        "vgg16_feat/b4/down_y"
+      ],
+      "name": "vgg16_feat/b4/down/ln",
+      "output": "vgg16_feat/b4/down_y_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 47,
+      "inputs": [
+        "vgg16_feat/b4/down_y_ln"
+      ],
+      "name": "vgg16_feat/b4/down/act",
+      "output": "vgg16_feat/b4/down_y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "in_channels": 64,
+        "input_height": 4,
+        "input_width": 4,
+        "kernel_size": 0,
+        "padding": 0,
+        "stride": 1
+      },
+      "index": 48,
+      "inputs": [
+        "vgg16_feat/b4/down_y_act"
+      ],
+      "name": "vgg16_feat/b4/gap",
+      "output": "vgg16_feat/b4/gap_y",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GlobalAvgPool2d"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 4,
+        "input_width": 4,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 49,
+      "inputs": [
+        "vgg16_feat/b4/down_y_act"
+      ],
+      "name": "vgg16_feat/b5/c1",
+      "output": "vgg16_feat/b5/y1",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b5/c1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 64,
+        "in_features": 1024,
+        "input_height": 4,
+        "input_width": 4,
+        "momentum": 0.10000000149011612,
+        "num_features": 64,
+        "num_groups": 1
+      },
+      "index": 50,
+      "inputs": [
+        "vgg16_feat/b5/y1"
+      ],
+      "name": "vgg16_feat/b5/c1/ln",
+      "output": "vgg16_feat/b5/y1_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 51,
+      "inputs": [
+        "vgg16_feat/b5/y1_ln"
+      ],
+      "name": "vgg16_feat/b5/c1/act",
+      "output": "vgg16_feat/b5/y1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 4,
+        "input_width": 4,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 52,
+      "inputs": [
+        "vgg16_feat/b5/y1_act"
+      ],
+      "name": "vgg16_feat/b5/c2",
+      "output": "vgg16_feat/b5/y2",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b5/c2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 64,
+        "in_features": 1024,
+        "input_height": 4,
+        "input_width": 4,
+        "momentum": 0.10000000149011612,
+        "num_features": 64,
+        "num_groups": 1
+      },
+      "index": 53,
+      "inputs": [
+        "vgg16_feat/b5/y2"
+      ],
+      "name": "vgg16_feat/b5/c2/ln",
+      "output": "vgg16_feat/b5/y2_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 54,
+      "inputs": [
+        "vgg16_feat/b5/y2_ln"
+      ],
+      "name": "vgg16_feat/b5/c2/act",
+      "output": "vgg16_feat/b5/y2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 4,
+        "input_width": 4,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 55,
+      "inputs": [
+        "vgg16_feat/b5/y2_act"
+      ],
+      "name": "vgg16_feat/b5/c3",
+      "output": "vgg16_feat/b5/y3",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b5/c3.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 64,
+        "in_features": 1024,
+        "input_height": 4,
+        "input_width": 4,
+        "momentum": 0.10000000149011612,
+        "num_features": 64,
+        "num_groups": 1
+      },
+      "index": 56,
+      "inputs": [
+        "vgg16_feat/b5/y3"
+      ],
+      "name": "vgg16_feat/b5/c3/ln",
+      "output": "vgg16_feat/b5/y3_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 57,
+      "inputs": [
+        "vgg16_feat/b5/y3_ln"
+      ],
+      "name": "vgg16_feat/b5/c3/act",
+      "output": "vgg16_feat/b5/y3_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 4,
+        "input_width": 4,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 58,
+      "inputs": [
+        "vgg16_feat/b5/y3_act"
+      ],
+      "name": "vgg16_feat/b5/down",
+      "output": "vgg16_feat/b5/down_y",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg16_feat/b5/down.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_channels": 64,
+        "in_features": 256,
+        "input_height": 2,
+        "input_width": 2,
+        "momentum": 0.10000000149011612,
+        "num_features": 64,
+        "num_groups": 1
+      },
+      "index": 59,
+      "inputs": [
+        "vgg16_feat/b5/down_y"
+      ],
+      "name": "vgg16_feat/b5/down/ln",
+      "output": "vgg16_feat/b5/down_y_ln",
+      "params_count": 0,
+      "tensors": [],
+      "type": "LayerNorm"
+    },
+    {
+      "index": 60,
+      "inputs": [
+        "vgg16_feat/b5/down_y_ln"
+      ],
+      "name": "vgg16_feat/b5/down/act",
+      "output": "vgg16_feat/b5/down_y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "in_channels": 64,
+        "input_height": 2,
+        "input_width": 2,
+        "kernel_size": 0,
+        "padding": 0,
+        "stride": 1
+      },
+      "index": 61,
+      "inputs": [
+        "vgg16_feat/b5/down_y_act"
+      ],
+      "name": "vgg16_feat/b5/gap",
+      "output": "vgg16_feat/b5/gap_y",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GlobalAvgPool2d"
+    },
+    {
+      "config": {
+        "concat_axis": 0
+      },
+      "index": 62,
+      "inputs": [
+        "vgg16_feat/b1/gap_y",
+        "vgg16_feat/b2/gap_y",
+        "vgg16_feat/b3/gap_y",
+        "vgg16_feat/b4/gap_y",
+        "vgg16_feat/b5/gap_y"
+      ],
+      "name": "vgg16_feat/out",
+      "output": "x",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Concat"
+    }
+  ],
+  "model_config": {
+    "base_channels": 8,
+    "dtype": "float32",
+    "image_c": 3,
+    "image_h": 64,
+    "image_w": 64,
+    "type": "vgg16_feat"
+  },
+  "model_name": "VGG16FeatModel",
+  "num_layers": 63,
+  "timestamp": 1783546806,
+  "tokenizer": {
+    "has_vocab": true,
+    "vocab_size": 47
+  },
+  "total_params": 315864,
+  "default_params": {
+    "base_channels": 8,
+    "image_c": 3,
+    "image_h": 64,
+    "image_w": 64
+  }
+}

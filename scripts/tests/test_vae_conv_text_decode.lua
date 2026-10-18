@@ -21,10 +21,11 @@
 --   --interp-alpha <f>        Coefficient d'interpolation [0..1] (défaut: 0.5)
 --   --alloc-gb <n>            RAM max pour l'allocateur (défaut: 8)
 
----@diagnostic disable: need-check-nil, inject-field
+---@diagnostic disable: need-check-nil, inject-field, undefined-global
 
-local Args = dofile("scripts/modules/args.lua")
+local Args = dofile(ROOTWORK.."/scripts/modules/args.lua")
 local opts = Args.parse(arg) or {}
+local FS = dofile(ROOTWORK.."/scripts/modules/fs.lua")
 
 -- ---------------------------------------------------------------------------
 -- Logging / erreur
@@ -62,6 +63,13 @@ local function opt_int(k, d)
     return math.floor(opt_num(k, d))
 end
 
+local function first_defined(values, keys)
+    for _, key in ipairs(keys) do
+        if values[key] ~= nil then return values[key] end
+    end
+    return nil
+end
+
 local function clamp(x, a, b)
     if x < a then return a end
     if x > b then return b end
@@ -69,13 +77,11 @@ local function clamp(x, a, b)
 end
 
 local function mkdir_p(dir)
-    if dir == nil or dir == "" then return end
-    os.execute("mkdir -p '" .. tostring(dir):gsub("'", "'\\''") .. "' 2>/dev/null")
+    FS.mkdir_p(dir)
 end
 
 local function dirname(path)
-    path = tostring(path or "")
-    local p = path:match("^(.*)/[^/]+$")
+    local p = FS.dirname(path)
     if p == nil or p == "" then return "." end
     return p
 end
@@ -238,7 +244,10 @@ local function infer_cfg_from_checkpoint(ckpt_dir)
 
     local mc = arch.model_config or arch.modelConfig
     if type(mc) == "table" and (tonumber(mc.image_w) or 0) > 0 then
-        local function mci(k) return math.floor(tonumber(mc[k] or 0)) end
+        local function mci(k)
+            local v = tonumber(mc[k])
+            return math.floor(v or 0)
+        end
         return {
             image_w              = mci("image_w"),
             image_h              = mci("image_h"),
@@ -247,7 +256,8 @@ local function infer_cfg_from_checkpoint(ckpt_dir)
             latent_w             = mci("latent_w"),
             latent_c             = mci("latent_c"),
             base_channels        = mci("base_channels"),
-            use_attention        = mc.use_attention,
+            resnet               = first_defined(mc, {"resnet", "use_resnet", "use_attention"}),
+            attention            = first_defined(mc, {"attention", "use_attn"}),
             resnet_max_tokens    = mc.resnet_max_tokens,
             use_skip_connections = mc.use_skip_connections,
             use_encoder_prior    = mc.use_encoder_prior,
@@ -417,7 +427,7 @@ if type(cfg) ~= "table" then die("default_config(vae_conv) échoué") end
 local cfg_fields = {
     "image_w", "image_h", "image_c",
     "latent_h", "latent_w", "latent_c", "base_channels",
-    "use_attention", "resnet_max_tokens",
+    "resnet", "attention", "resnet_max_tokens",
     "use_skip_connections", "use_encoder_prior", "decoder_upsample",
 }
 for _, k in ipairs(cfg_fields) do

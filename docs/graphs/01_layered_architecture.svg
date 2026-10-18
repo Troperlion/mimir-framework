@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1050" viewBox="0 0 1600 1050" role="img" aria-labelledby="title desc">
+<title id="title">Architecture en couches</title><desc id="desc">Diagramme vectoriel éditable généré depuis les dumps du framework.</desc>
+<defs>
+<marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#475569"/></marker>
+<marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#2563eb"/></marker>
+<style><![CDATA[text{font-family:Inter,Segoe UI,Arial,sans-serif}.title{font-size:34px;font-weight:800;fill:#0f172a}.subtitle{font-size:16px;fill:#475569}.label{font-size:17px;font-weight:700;fill:#0f172a}.small{font-size:13px;fill:#475569}.tiny{font-size:11px;fill:#64748b}.box{stroke:#94a3b8;stroke-width:1.4;rx:14}.edge{stroke:#475569;stroke-width:2.2;fill:none;marker-end:url(#arrow)}.edgeB{stroke:#2563eb;stroke-width:2.4;fill:none;marker-end:url(#arrowBlue)}.dash{stroke-dasharray:7 7}.note{font-size:12px;fill:#475569}]]></style>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="60" y="62" class="title" text-anchor="start">Architecture en couches</text>
+<text x="60" y="92" class="subtitle" text-anchor="start">Séparation stricte entre orchestration, registre, modèles, runtime, mémoire et backend matériel.</text>
+<line x1="60" y1="112" x2="1540" y2="112" stroke="#e2e8f0" stroke-width="2"/>
+<rect x="240" y="150" width="1120" height="78" rx="14" fill="#dbeafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="800.0" y="175" class="label" text-anchor="middle">Couche Utilisateur</text>
+<text x="800.0" y="200" class="small" text-anchor="middle">CLI, scripts Lua, configurations JSON, API C++</text>
+<rect x="240" y="270" width="1120" height="78" rx="14" fill="#ede9fe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="800.0" y="295" class="label" text-anchor="middle">Orchestration</text>
+<text x="800.0" y="320" class="small" text-anchor="middle">parse arguments, load config, templates, pipelines</text>
+<path d="M800,230 L800,270" class="edgeB"/>
+<rect x="240" y="390" width="1120" height="78" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="800.0" y="415" class="label" text-anchor="middle">Registre central</text>
+<text x="800.0" y="440" class="small" text-anchor="middle">architectures nommées, overrides, model factory</text>
+<path d="M800,350 L800,390" class="edgeB"/>
+<rect x="240" y="510" width="1120" height="78" rx="14" fill="#cffafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="800.0" y="535" class="label" text-anchor="middle">Modèles</text>
+<text x="800.0" y="560" class="small" text-anchor="middle">MLP, CNN, VAE, UNet, Diffusion, Transformers, GAN</text>
+<path d="M800,470 L800,510" class="edgeB"/>
+<rect x="240" y="630" width="1120" height="78" rx="14" fill="#ffedd5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="800.0" y="655" class="label" text-anchor="middle">Runtime de graphe</text>
+<text x="800.0" y="680" class="small" text-anchor="middle">forward, backward, planner, scheduler</text>
+<path d="M800,590 L800,630" class="edgeB"/>
+<rect x="240" y="750" width="1120" height="78" rx="14" fill="#fef3c7" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="800.0" y="775" class="label" text-anchor="middle">Mémoire &amp; Sérialisation</text>
+<text x="800.0" y="800" class="small" text-anchor="middle">tensor allocator, memory guard, checkpoints, safetensors</text>
+<path d="M800,710 L800,750" class="edgeB"/>
+<rect x="240" y="870" width="1120" height="78" rx="14" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="800.0" y="895" class="label" text-anchor="middle">Backend CPU-first</text>
+<text x="800.0" y="920" class="small" text-anchor="middle">AVX2, FMA, fallback robuste; GPU détecté si disponible</text>
+<path d="M800,830 L800,870" class="edgeB"/>
+<text x="1540" y="1026" class="tiny" text-anchor="end">Mímir Framework — SVG vectoriel éditable</text>
+</svg>

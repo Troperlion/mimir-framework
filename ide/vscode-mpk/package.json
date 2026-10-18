@@ -1,0 +1,45 @@
+{
+  "name": "mimir-mpk",
+  "displayName": "Mímir MPK",
+  "description": "Aide IDE pour le pseudocode Mímir Package (.mpk).",
+  "version": "1.0.0",
+  "publisher": "mimir",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "activationEvents": [
+    "onLanguage:mimir-mpk"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "mimir-mpk",
+        "aliases": ["Mímir MPK", "MPK"],
+        "extensions": [".mpk"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "mimir-mpk",
+        "scopeName": "source.mimir-mpk",
+        "path": "./syntaxes/mimir-mpk.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "mimir-mpk",
+        "path": "./snippets/mimir-mpk.code-snippets"
+      }
+    ]
+  },
+  "scripts": {
+    "check": "node --check extension.js"
+  },
+  "license": "MIT"
+}

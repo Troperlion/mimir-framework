@@ -1,20 +1,12 @@
-# Tutoriel pas-à-pas : Ajouter une entrée scripting Python
-
-## Pour qui
-
-Contributeur du projet.
-
-## Objectif
+# Ajouter une entrée de scripting Python
 
 Contribuer avec des changements cohérents et maintenables.
 
-## Avant de commencer
+**Public concerné :** Contributeur du projet.
 
-Connaître le workflow Git et les bases du projet.
-
-## Résultat attendu
-
-Tu sais proposer des changements alignés avec les conventions du framework.
+> **Prérequis**
+>
+> Connaître le workflow Git et les bases du projet.
 
 
 Ce guide montre comment ajouter une entrée Python minimale en reprenant le design de l'intégration Lua.
@@ -24,6 +16,20 @@ But :
 - exécuter `./bin/mimir --python script.py -- args...`,
 - exposer une API framework proche de `Mimir.*`,
 - conserver la compatibilité avec le mode config-driven (`--conf`).
+
+## Sur cette page
+
+- [1. Préparation](#1-préparation)
+- [2. Créer le bridge Python](#2-créer-le-bridge-python)
+- [3. Exposer l'API framework](#3-exposer-lapi-framework)
+- [4. Ajouter l'entrée CLI](#4-ajouter-lentrée-cli)
+- [5. Compatibilité mode conf](#5-compatibilité-mode-conf)
+- [6. Smoke test minimal](#6-smoke-test-minimal)
+- [7. Plan d'implémentation incrémental](#7-plan-dimplémentation-incrémental)
+- [8. Pseudo-code de robustesse (erreurs)](#8-pseudo-code-de-robustesse-erreurs)
+- [9. Étendre vers d'autres langages](#9-étendre-vers-dautres-langages)
+- [10. Checklist de revue PR](#10-checklist-de-revue-pr)
+- [Étapes suivantes](#étapes-suivantes)
 
 ## 1. Préparation
 
@@ -206,3 +212,9 @@ Principe central : un seul noyau framework, plusieurs portes d'entrée scripting
 - `--conf` compatible,
 - smoke test reproductible,
 - doc Contributing et index mis à jour.
+
+## Étapes suivantes
+
+- [Page précédente : Chapitre développeur complet : Étendre le framework](03-Extending-Models-Runtimes-And-Features.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Revenir à la documentation](../00-INDEX.md)

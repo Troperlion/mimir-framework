@@ -24,6 +24,15 @@ enum class DType : uint8_t {
     F64,
 };
 
+inline constexpr bool dtype_is_floating(DType dtype) {
+    return dtype == DType::F16 || dtype == DType::BF16 ||
+           dtype == DType::F32 || dtype == DType::F64;
+}
+
+inline constexpr bool dtype_is_integral(DType dtype) {
+    return dtype >= DType::BOOL && dtype <= DType::I64;
+}
+
 inline constexpr size_t dtype_size_bytes(DType dt) {
     switch (dt) {
         case DType::BOOL: return 1;

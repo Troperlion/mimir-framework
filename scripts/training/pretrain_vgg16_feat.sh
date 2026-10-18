@@ -49,7 +49,7 @@ LUA_SCRIPT="${LUA_SCRIPT:-scripts/training/pretrain_vgg16_feat.lua}"
 #  Données
 # ----------------------------------------------------------------------------
 # Répertoire racine du dataset images (chargé par Mimir.Dataset.load).
-DATASET_ROOT="${DATASET_ROOT:-/media/brito/e580aa2a-30ca-4577-bc30-240b479f3af4/Datasets/coco}"
+DATASET_ROOT="${DATASET_ROOT:-datasets/coco}"
 
 # Vocabulaire de référence (tags/captions) — fichier unique imposé.
 # Utilisé pour le contexte de tags/captions associé à la perception ; il sert

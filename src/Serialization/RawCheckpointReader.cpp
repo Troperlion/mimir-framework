@@ -1,11 +1,15 @@
+#include "runtimes/fpga/FpgaIo.hpp"
 #include "RawCheckpointReader.hpp"
 #include "../Model.hpp"
+#include "CheckpointState.hpp"
 #include "../Tokenizer.hpp"
 #include "../Encoder.hpp"
 #include "HardwareOpt.hpp"
 #include "../Sha256.hpp"
 #include <fstream>
 #include <algorithm>
+#include <iomanip>
+#include <iostream>
 
 namespace Mimir {
 namespace Serialization {
@@ -19,11 +23,18 @@ RawCheckpointReader::~RawCheckpointReader() {
 bool RawCheckpointReader::load(
     Model& model,
     const std::string& path,
-    const LoadOptions& options,
+    const LoadOptions& requested_options,
     std::string* error
 ) {
+    hash_tree_.begin(path);
+    CheckpointHashTree::Scope hash_scope{hash_tree_};
+    auto options = requested_options;
     try {
         fs::path root(path);
+        std::cerr << "[serialization] raw load path=" << root.string()
+                  << " load_tokenizer=" << options.load_tokenizer
+                  << " load_encoder=" << options.load_encoder
+                  << " load_optimizer=" << options.load_optimizer << std::endl;
         
         // Check if directory exists
         if (!fs::exists(root) || !fs::is_directory(root)) {
@@ -39,9 +50,25 @@ bool RawCheckpointReader::load(
             return false;
         }
         
+        if (manifest.contains("components")) {
+            const auto& components = manifest["components"];
+            if (components.value("encoder", true) == false && options.load_encoder) {
+                options.load_encoder = false;
+                model.setHasEncoder(false);
+            }
+            if (components.value("tokenizer", true) == false && options.load_tokenizer) {
+                options.load_tokenizer = false;
+                model.setHasTokenizer(false);
+            }
+        }
+
         // Load architecture
         if (!load_architecture(root.string(), model, options, error)) {
             return false;
+        }
+
+        if (options.metadata_only) {
+            return true;
         }
         
         // Load tokenizer if requested
@@ -75,7 +102,15 @@ bool RawCheckpointReader::load(
         }
         
         // Apply tensors to model
-        return apply_tensors_to_model(root.string(), model, manifest, options, error);
+        if (!apply_tensors_to_model(root.string(), model, manifest, options, error)) return false;
+        if (options.load_optimizer && model.getSerializedOptimizer()) {
+            std::ifstream input(root / "model" / "training.json");
+            if (input) {
+                json metadata; input >> metadata;
+                validate_optimizer_state(model, *model.getSerializedOptimizer(), metadata);
+            }
+        }
+        return true;
         
     } catch (const std::exception& e) {
         if (error) {
@@ -92,6 +127,7 @@ bool RawCheckpointReader::load_training(
 ) {
     try {
         fs::path training_path = fs::path(root) / "model" / "training.json";
+        std::cerr << "[serialization] raw load_training path=" << training_path.string() << std::endl;
         if (!fs::exists(training_path)) {
             if (error) {
                 *error = "training.json not found";
@@ -110,26 +146,14 @@ bool RawCheckpointReader::load_training(
         json j;
         file >> j;
 
+        if (j.contains("loop")) model.modelConfig["training_state"] = j["loop"];
         if (!j.value("has_optimizer", false)) {
             model.clearSerializedOptimizer();
             return true;
         }
 
-        Optimizer opt;
-        opt.type = static_cast<OptimizerType>(j.value("type", static_cast<int>(OptimizerType::ADAMW)));
-        opt.step = static_cast<size_t>(j.value("step", 0));
-        opt.beta1 = j.value("beta1", opt.beta1);
-        opt.beta2 = j.value("beta2", opt.beta2);
-        opt.eps = j.value("eps", opt.eps);
-        opt.weight_decay = j.value("weight_decay", opt.weight_decay);
-        opt.decay_strategy = static_cast<LRDecayStrategy>(j.value("decay_strategy", static_cast<int>(opt.decay_strategy)));
-        opt.initial_lr = j.value("initial_lr", opt.initial_lr);
-        opt.min_lr = j.value("min_lr", opt.min_lr);
-        opt.decay_rate = j.value("decay_rate", opt.decay_rate);
-        opt.decay_steps = j.value("decay_steps", opt.decay_steps);
-        opt.total_steps = j.value("total_steps", opt.total_steps);
-        opt.warmup_steps = j.value("warmup_steps", opt.warmup_steps);
-
+        Optimizer opt = optimizer_from_metadata(j);
+        if (j.contains("loop")) model.modelConfig["training_state"] = j["loop"];
         model.setSerializedOptimizer(opt);
         return true;
     } catch (const std::exception& e) {
@@ -147,6 +171,7 @@ bool RawCheckpointReader::load_manifest(
 ) {
     try {
         fs::path manifest_path = fs::path(root) / "manifest.json";
+        std::cerr << "[serialization] raw load_manifest path=" << manifest_path.string() << std::endl;
         
         if (!fs::exists(manifest_path)) {
             if (error) {
@@ -182,6 +207,7 @@ bool RawCheckpointReader::load_architecture(
 ) {
     try {
         fs::path arch_path = fs::path(root) / "model" / "architecture.json";
+        std::cerr << "[serialization] raw load_architecture path=" << arch_path.string() << std::endl;
         
         if (!fs::exists(arch_path)) {
             if (error) {
@@ -243,13 +269,15 @@ bool RawCheckpointReader::load_architecture(
         // IMPORTANT: l'architecture sauvegardée ne contient pas toutes les métadonnées
         // (in_features/out_features, kernels, etc.). Si le caller a déjà construit
         // l'architecture via un builder (recommandé), on ne l'écrase pas.
-        if (arch.contains("layers") && model.getLayers().empty()) {
+        if (!options.metadata_only && arch.contains("layers") && model.getLayers().empty()) {
             model.getMutableLayers().clear();
             for (const auto& layer_obj : arch["layers"]) {
                 const std::string name = layer_obj.value("name", "");
                 const std::string type = layer_obj.value("type", "");
                 const size_t params_count = layer_obj.value("params_count", 0);
                 Layer layer(name, type, params_count); // initialise type_enum + normalise le type
+                layer.trainable_parameter = layer_obj.value("trainable_parameter", false);
+                layer.skip_input_index = layer_obj.value("skip_input_index", -1);
                 model.getMutableLayers().push_back(std::move(layer));
             }
 
@@ -257,6 +285,15 @@ bool RawCheckpointReader::load_architecture(
             model.allocateParams();
         }
         
+        if (!options.metadata_only && arch.contains("layers")) {
+            for (const auto& entry : arch["layers"]) {
+                if (entry.contains("skip_input_index")) {
+                    if (auto* layer = model.getLayerByName(entry.value("name", "")))
+                        layer->skip_input_index = entry["skip_input_index"].get<int>();
+                }
+            }
+        }
+
         // Load I/O dimensions
         // Note: tw and th are read-only via width()/height(), set during model construction
         
@@ -277,6 +314,7 @@ bool RawCheckpointReader::load_tokenizer(
 ) {
     try {
         fs::path tok_path = fs::path(root) / "tokenizer" / "tokenizer.json";
+        std::cerr << "[serialization] raw load_tokenizer path=" << tok_path.string() << std::endl;
         
         if (!fs::exists(tok_path)) {
             if (error) {
@@ -298,6 +336,7 @@ bool RawCheckpointReader::load_tokenizer(
         
         auto& tokenizer = model.getMutableTokenizer();
         tokenizer.from_json(tok_json);
+        model.setHasTokenizer(true);
         
         return true;
         
@@ -316,6 +355,7 @@ bool RawCheckpointReader::load_encoder(
 ) {
     try {
         fs::path enc_path = fs::path(root) / "encoder" / "encoder.json";
+        std::cerr << "[serialization] raw load_encoder path=" << enc_path.string() << std::endl;
         
         if (!fs::exists(enc_path)) {
             if (error) {
@@ -431,6 +471,14 @@ bool RawCheckpointReader::load_tensor_data(
             }
             return false;
         }
+
+        const std::string checksum_algo = metadata.checksum_algo.empty()
+            ? "sha256"
+            : metadata.checksum_algo;
+        const std::string checksum = metadata.checksum.empty()
+            ? sha256(dest_buffer, metadata.byte_size)
+            : metadata.checksum;
+        hash_tree_.add(metadata.name, checksum_algo, checksum);
         
         return true;
         
@@ -573,7 +621,7 @@ bool RawCheckpointReader::apply_tensors_to_model(
                             }
                         }
 
-                        HardwareOpt::fp16_to_fp32_f16c(dst->data(), tmp.data(), expected_size);
+                        if (!Mimir::fpgaDecode16(dst->data(), tmp.data(), expected_size, false)) HardwareOpt::fp16_to_fp32_f16c(dst->data(), tmp.data(), expected_size);
                     } else if (t_metadata.dtype == DType::BFloat16) {
                         if (t_metadata.byte_size != expected_size * sizeof(uint16_t)) {
                             if (error) *error = "Byte size mismatch for: " + tensor_name;
@@ -601,7 +649,7 @@ bool RawCheckpointReader::apply_tensors_to_model(
                             }
                         }
 
-                        HardwareOpt::bf16_to_fp32(dst->data(), tmp.data(), expected_size);
+                        if (!Mimir::fpgaDecode16(dst->data(), tmp.data(), expected_size, true)) HardwareOpt::bf16_to_fp32(dst->data(), tmp.data(), expected_size);
                     } else if (t_metadata.dtype == DType::Float64) {
                         if (t_metadata.byte_size != expected_size * sizeof(double)) {
                             if (error) *error = "Byte size mismatch for: " + tensor_name;
@@ -642,6 +690,7 @@ bool RawCheckpointReader::apply_tensors_to_model(
                     continue;
                 }
 
+                if (tensor_name == "encoder_token_embeddings" && !options.load_encoder) continue;
                 // Check if it's encoder embeddings
                 if (tensor_name == "encoder_token_embeddings" && options.load_encoder) {
                     auto& enc = model.getMutableEncoder();
@@ -705,7 +754,7 @@ bool RawCheckpointReader::apply_tensors_to_model(
                             }
                         }
 
-                        HardwareOpt::fp16_to_fp32_f16c(enc.token_embeddings.data(), tmp.data(), expected_size);
+                        if (!Mimir::fpgaDecode16(enc.token_embeddings.data(), tmp.data(), expected_size, false)) HardwareOpt::fp16_to_fp32_f16c(enc.token_embeddings.data(), tmp.data(), expected_size);
                     } else if (t_metadata.dtype == DType::BFloat16) {
                         if (t_metadata.byte_size != expected_size * sizeof(uint16_t)) {
                             if (error) *error = "Byte size mismatch for: " + tensor_name;
@@ -733,7 +782,7 @@ bool RawCheckpointReader::apply_tensors_to_model(
                             }
                         }
 
-                        HardwareOpt::bf16_to_fp32(enc.token_embeddings.data(), tmp.data(), expected_size);
+                        if (!Mimir::fpgaDecode16(enc.token_embeddings.data(), tmp.data(), expected_size, true)) HardwareOpt::bf16_to_fp32(enc.token_embeddings.data(), tmp.data(), expected_size);
                     } else if (t_metadata.dtype == DType::Float64) {
                         if (t_metadata.byte_size != expected_size * sizeof(double)) {
                             if (error) *error = "Byte size mismatch for: " + tensor_name;
@@ -866,7 +915,7 @@ bool RawCheckpointReader::apply_tensors_to_model(
                     }
                 }
 
-                HardwareOpt::fp16_to_fp32_f16c(data_ptr, tmp.data(), actual_size);
+                if (!Mimir::fpgaDecode16(data_ptr, tmp.data(), actual_size, false)) HardwareOpt::fp16_to_fp32_f16c(data_ptr, tmp.data(), actual_size);
             } else if (t_metadata.dtype == DType::BFloat16) {
                 if (t_metadata.byte_size != actual_size * sizeof(uint16_t)) {
                     if (error) *error = "Byte size mismatch for: " + tensor_name;
@@ -895,7 +944,7 @@ bool RawCheckpointReader::apply_tensors_to_model(
                     }
                 }
 
-                HardwareOpt::bf16_to_fp32(data_ptr, tmp.data(), actual_size);
+                if (!Mimir::fpgaDecode16(data_ptr, tmp.data(), actual_size, true)) HardwareOpt::bf16_to_fp32(data_ptr, tmp.data(), actual_size);
             } else if (t_metadata.dtype == DType::Float64) {
                 if (t_metadata.byte_size != actual_size * sizeof(double)) {
                     if (error) *error = "Byte size mismatch for: " + tensor_name;

@@ -1,23 +1,36 @@
-# Runtime - Modifier Et Ajouter Un Backend
-
-## Pour qui
-
-Développeur framework (C/C++/runtime/scripting).
-
-## Objectif
+# Modifier ou ajouter un backend
 
 Implémenter ou modifier des briques techniques sans casser le contrat global.
 
-## Avant de commencer
+**Public concerné :** Développeur framework (C/C++/runtime/scripting).
 
-Comprendre le registre d'architectures et les conventions I/O.
-
-## Résultat attendu
-
-Tu peux livrer des évolutions compatibles avec la base existante.
+> **Prérequis**
+>
+> Comprendre le registre d'architectures et les conventions I/O.
 
 
 Ce chapitre explique comment modifier un runtime existant ou en ajouter un nouveau.
+
+## Sur cette page
+
+- [Etat des runtimes de scripting](#etat-des-runtimes-de-scripting)
+- [1. Contrat runtime](#1-contrat-runtime)
+- [2. Modifier un runtime existant](#2-modifier-un-runtime-existant)
+- [3. Ajouter un nouveau runtime](#3-ajouter-un-nouveau-runtime)
+- [4. Conventions de qualite](#4-conventions-de-qualite)
+- [5. Tuning via variables d'environnement](#5-tuning-via-variables-denvironnement)
+- [6. Matrice de validation minimale](#6-matrice-de-validation-minimale)
+- [7. Erreurs frequentes](#7-erreurs-frequentes)
+- [8. Demo metier - fast-path sur Add avec fallback propre](#8-demo-metier---fast-path-sur-add-avec-fallback-propre)
+- [9. Demo metier - toggles runtime pour rollout progressif](#9-demo-metier---toggles-runtime-pour-rollout-progressif)
+- [10. Definition de done pour un nouveau runtime](#10-definition-de-done-pour-un-nouveau-runtime)
+- [Étapes suivantes](#étapes-suivantes)
+
+## Etat des runtimes de scripting
+
+- Lua reste la reference fonctionnelle pour le scripting metier.
+- Les runtimes JS, C# et Rust servent de couches de transition et de validation progressive.
+- Ils ne doivent pas etre presents comme des remplacements complets de Lua tant que la parite n'est pas atteinte.
 
 ## 1. Contrat runtime
 
@@ -125,8 +138,9 @@ Lecture metier :
 
 ```bash
 export MIMIR_ACCEL_VERBOSE=1
+export MIMIR_RUNTIME_TRACE=1
 export MIMIR_CUDA_LINEAR=1
-export MIMIR_CUDA_LINEAR_MIN_OPS=1048576
+export MIMIR_CUDA_LINEAR_MIN_OPS=0
 ./bin/mimir --lua scripts/benchmarks/benchmark.lua
 ```
 
@@ -134,7 +148,13 @@ But metier :
 
 - activer un fast-path progressivement,
 - observer son impact,
-- garder une marche arriere immediate via variables d'environnement.
+- garder une marche arriere immediate via variables d'environnement,
+- verifier le backend reellement selectionne a l'execution (trace layer-par-layer).
+
+En pratique:
+
+- `MIMIR_ACCEL_VERBOSE=1` donne une vue "plan/decision" (materiel choisi, scan layers, cartographie planner).
+- `MIMIR_RUNTIME_TRACE=1` donne la vue "execution reelle" (backend effectif et call path par layer).
 
 ## 10. Definition de done pour un nouveau runtime
 
@@ -143,3 +163,10 @@ But metier :
 3. Test de fallback (retour `false`) sur op non supportee.
 4. Logs exploitables en mode verbose.
 5. Pas de regression sur scripts de smoke existants.
+6. Si le runtime est un bridge de scripting non-Lua, documenter explicitement les APIs non encore supportees.
+
+## Étapes suivantes
+
+- [Page précédente : Config Et Registre D'Architectures](03-Config-And-Registry.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Contrat API Scripting Inter-Langages](05-Scripting-System-Contract.md)

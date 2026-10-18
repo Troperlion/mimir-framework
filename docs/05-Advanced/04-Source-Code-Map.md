@@ -1,20 +1,12 @@
-# Advanced — Carte du code source (C/C++)
-
-## Pour qui
-
-Utilisateur intermédiaire à avancé.
-
-## Objectif
+# Carte du code source (C/C++)
 
 Optimiser, diagnostiquer et stabiliser des runs complexes.
 
-## Avant de commencer
+**Public concerné :** Utilisateur intermédiaire à avancé.
 
-Avoir déjà exécuté au moins un pipeline complet.
-
-## Résultat attendu
-
-Tu peux investiguer les problèmes de perf et de stabilité.
+> **Prérequis**
+>
+> Avoir déjà exécuté au moins un pipeline complet.
 
 
 Cette page sert de « table des matières technique » : comment le framework est structuré côté C/C++, fichier par fichier.
@@ -30,6 +22,20 @@ Objectif : quand une fonctionnalité est mentionnée dans la doc (mémoire stric
 > Notes
 > - La plupart des features sont exposées via l’API Lua (bindings dans `src/scriptings/Lua/luaScripting/LuaScripting.cpp`).
 > - Les modèles « prêts à l’emploi » sont construits via le registre d’architectures (`src/Models/Registry/ModelArchitectures.*`).
+
+## Sur cette page
+
+- [1) Point d’entrée et exposition API](#1-point-dentrée-et-exposition-api)
+- [2) Noyau du runtime : Model + exécution](#2-noyau-du-runtime-model-exécution)
+- [3) Tenseurs : stockage et allocations](#3-tenseurs-stockage-et-allocations)
+- [4) Tokenizer et encodage](#4-tokenizer-et-encodage)
+- [5) Registry d’architectures et modèles built-in](#5-registry-darchitectures-et-modèles-built-in)
+- [6) Sérialisation / debug](#6-sérialisation-debug)
+- [7) Hardware, SIMD et backends compute](#7-hardware-simd-et-backends-compute)
+- [8) Monitoring / visualisation](#8-monitoring-visualisation)
+- [9) Utilitaires](#9-utilitaires)
+- [Lecture guidée (par tâche)](#lecture-guidée-par-tâche)
+- [Étapes suivantes](#étapes-suivantes)
 
 ## 1) Point d’entrée et exposition API
 
@@ -50,7 +56,7 @@ Objectif : quand une fonctionnalité est mentionnée dans la doc (mémoire stric
   - Mémoire :
     - `Mimir.MemoryGuard.setLimit(...)`, `getCurrentUsage()`, `getPeakUsage()`, `getLimit()`, `printStats()`, etc.
     - `Mimir.Allocator.configure({max_ram_gb, enable_compression})` configure le `DynamicTensorAllocator`
-  - Debug JSON : `Mimir.Serialization.save_enhanced_debug(path, options)` (voir aussi `src/Serialization/DebugJsonDump.*`).
+  - Debug JSON : `Mimir.Serialization.save_enhanced_debug(path, options)` (v1.3 inclut `framework_state`) (voir aussi `src/Serialization/DebugJsonDump.*`).
 
 À lire quand :
 
@@ -75,7 +81,7 @@ Points à connaître :
   - `forwardPass(const std::vector<float>&, training)`
   - `forwardPass(const std::vector<int>&, training)` (chemin tokens : `Embedding` lit dans l’IntTensorStore)
   - `forwardPassNamed(float_inputs, int_inputs, training)` (multi-input)
-- **Optimiseur** : `optimizerStep(Optimizer&, learning_rate)` gère SGD/Adam/AdamW, avec protections (epsilon non-fini -> fallback), warmup/decay, et *grad clipping optionnel* via `modelConfig` (`grad_clip_norm` / `clip_norm`).
+- **Optimiseur** : `optimizerStep(Optimizer&, learning_rate)` gère SGD, Adam, AdamW, Lion, Adafactor, RAdam, NAdam, RMSprop et LAMB, avec protections (epsilon non-fini -> fallback), warmup/decay, et *grad clipping optionnel* via `modelConfig` (`grad_clip_norm` / `clip_norm`).
 - **Accélération compute** (en inférence, opt-in) :
   - certaines ops (ex: `Linear`) peuvent être dispatchées vers Vulkan/OpenCL si activé via variables d’environnement (voir plus bas).
 
@@ -96,7 +102,7 @@ Points à connaître :
 - Rôle : enum central `LayerType` + normalisation d’alias (rétrocompat).
 - À lire quand : vous voulez la **liste canonique** des layers supportés par le runtime, et les alias acceptés.
 
-### `src/LayerOps.hpp` / `src/LayerOpsExt.hpp`
+### `src/runtimes/cpu/LayerOps.hpp` / `src/runtimes/cpu/LayerOpsExt.hpp`
 
 - Rôle : implémentations CPU des opérations (forward/backward) utilisées par `Model`.
 - `LayerOpsExt` regroupe souvent des implémentations plus spécialisées/étendues.
@@ -120,12 +126,12 @@ Points à connaître :
 - Rôle : garde-fou strict (comptabilisation courant/pic + limite) pour éviter OOM silencieux.
 - Utilisé par : runtime, allocateurs, wrappers (ex: allocations stb_image routées).
 
-### `src/DynamicTensorAllocator.hpp`
+### `src/runtimes/cpu/DynamicTensorAllocator.hpp`
 
 - Rôle : allocateur dynamique global (singleton) utilisé par `tensor(dynamic=true)` et certains chemins runtime.
 - Fonctionnalités : réservations, stats, (optionnel) compression/éviction selon config.
 
-### `src/RuntimeAllocator.hpp`
+### `src/runtimes/cpu/RuntimeAllocator.hpp`
 
 - Rôle : allocateur runtime RAII (handles auto-release) + pool scratchpad.
 - Utilisé dans des chemins `Model.cpp` pour gérer buffers temporaires (ex: conv im2col/tiles, scratch buffers).
@@ -175,14 +181,14 @@ Points à connaître :
 Chaque modèle “builder” sait pousser une séquence de layers cohérente (noms, routage, paramètres) :
 
 - NLP :
+  - `src/Models/NLP/CausalLMModel.hpp` / `.cpp` : decoder-only causal (RoPE/GQA/SwiGLU/RMSNorm)
   - `src/Models/NLP/TransformerModel.hpp` / `.cpp` : builder Transformer (peut être causal)
   - `src/Models/NLP/VAETextModel.hpp` / `.cpp` : VAE sur texte (encode/decode)
 - Vision :
   - `src/Models/Vision/ViTModel.*`, `VAEModel.*`, `VAEConvModel.*`, `UNetModel.*`
   - CNN : `ResNetModel.*`, `MobileNetModel.*`, `VGG16Model.*`, `VGG19Model.*`
 - Diffusion :
-  - `src/Models/Diffusion/DiffusionModel.*`, `PonyXLDDPMModel.*`, `SD35Model.*`
-- Autres : `src/Models/NeuroPulse.*`
+  - `src/Models/Diffusion/DiffusionModel.*`, `CondDiffusionModel.*`, `SD35Model.*`
 
 À lire quand : vous voulez voir comment une architecture “réaliste” se traduit en layers, et quelles conventions de noms sont utilisées.
 
@@ -204,24 +210,30 @@ Chaque modèle “builder” sait pousser une séquence de layers cohérente (no
 ### `src/Serialization/DebugJsonDump.hpp` / `.cpp`
 
 - Rôle : export debug JSON “amélioré” (statistiques, gradients, checksums, infos git, tokenizer/encoder… selon options).
+- Depuis v1.3 : ajoute `framework_state` (runtime, mémoire, registre layers, état modèle) au moment du dump.
 - Exposé via `Mimir.Serialization.save_enhanced_debug(path, options)`.
 
 ## 7) Hardware, SIMD et backends compute
 
-### `src/HardwareOpt.hpp`
+### `src/runtimes/cpu/HardwareOpt.hpp`
 
 - Rôle : détection capacités CPU et helpers (AVX2/FMA/F16C/BMI2, etc.).
 - Exposé via `Mimir.Model.hardware_caps()`.
 
-### `src/SIMD_Ops.hpp`
+### `src/runtimes/cpu/SIMD_Ops.hpp`
 
 - Rôle : primitives SIMD (CPU) utilisées par des ops.
 
-### `src/VulkanCompute.hpp` et `src/OpenCLCompute.hpp`
+### `src/runtimes/vulkan/VulkanCompute.hpp` et `src/runtimes/opencl/OpenCLCompute.hpp`
 
-- Rôle : engines compute legacy (si compilés) pour accélérer Linear uniquement.
+- Rôle : engines compute GPU pour Vulkan/OpenCL (si compilés).
 - Build flags : `ENABLE_VULKAN`, `ENABLE_OPENCL`.
-- Variables d'environnement (legacy Vulkan/OpenCL) : `MIMIR_VULKAN_LINEAR_SPV`, `MIMIR_OPENCL_LINEAR=1`.
+- Variables d'environnement (Vulkan/OpenCL) : `MIMIR_VULKAN_LINEAR_SPV`, `MIMIR_VULKAN_LINEAR`, `MIMIR_OPENCL_LINEAR`.
+
+Portée actuelle:
+
+- Vulkan : `Linear`, `MatMul`, `BatchMatMul`, `Add`, `Multiply`, `ReLU`, `SiLU`, `GELU`, `Sigmoid`, `Tanh`.
+- OpenCL : `Linear`, `MatMul`, `BatchMatMul`.
 
 ### `src/runtimes/AbstractRuntime.hpp`
 
@@ -251,6 +263,7 @@ Documentation détaillée : [docs/04-Architecture-Internals/03-Hardware-Backends
 ### `src/Planning/Planner.hpp`
 
 - Rôle : analyse statique du graphe — durées de vie des tenseurs, fusions Conv2d+ReLU, pré-calcul des scratchpads.
+- Au lancement : le plan est construit au premier forward (ou reconstruit si invalidé), puis réutilisé tant que le graphe et le mode training restent compatibles.
 - Documentation : [docs/04-Architecture-Internals/22-Planning.md](../04-Architecture-Internals/22-Planning.md).
 
 ## 8) Monitoring / visualisation
@@ -289,7 +302,13 @@ Documentation détaillée : [docs/04-Architecture-Internals/03-Hardware-Backends
 
 - "Je veux activer l'accélération GPU" : lire [docs/05-Advanced/05-GPU-Acceleration.md](05-GPU-Acceleration.md), puis variables d'environnement `MIMIR_CUDA_*` / `MIMIR_ROCM_*`, puis internals dans `src/runtimes/cuda/CudaRuntime.cpp`.
 - "Je veux comprendre l'exécution d'un forward multi-input" : `src/scriptings/Lua/luaScripting/LuaScripting.cpp` (forward), puis `src/Model.cpp` (forwardPassNamed), puis `src/Layers.hpp` (inputs/output).
-- "Je veux comprendre la mémoire stricte (OOM explicites)" : `src/MemoryGuard.hpp`, `src/DynamicTensorAllocator.hpp`, `src/RuntimeAllocator.hpp`, et les usages dans `src/Model.cpp` et `src/tensors.cpp`.
+- "Je veux comprendre la mémoire stricte (OOM explicites)" : `src/MemoryGuard.hpp`, `src/runtimes/cpu/DynamicTensorAllocator.hpp`, `src/runtimes/cpu/RuntimeAllocator.hpp`, et les usages dans `src/Model.cpp` et `src/tensors.cpp`.
 - "Je veux comprendre le Transformer causal" : `src/Models/NLP/TransformerModel.cpp` (builder) + ops dans `src/LayerOps*` + forward tokens dans `src/Model.cpp`.
 - "Je veux un dump exploitable pour debug" : `src/Serialization/DebugJsonDump.*` + binding `Mimir.Serialization.save_enhanced_debug` dans `src/scriptings/Lua/luaScripting/LuaScripting.cpp`.
 - "Je veux ajouter un nouveau fast-path GPU" : `src/runtimes/AbstractRuntime.hpp` (RuntimeConfig) → `src/runtimes/cuda/CudaRuntime.cpp` (case + DeviceBuf) → `src/runtimes/rocm/RocmRuntime.cpp` (miroir).
+
+## Étapes suivantes
+
+- [Page précédente : LLM readiness (état réel)](03-LLM-Readiness.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Accélération GPU](05-GPU-Acceleration.md)

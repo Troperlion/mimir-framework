@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="820" viewBox="0 0 1800 820" role="img" aria-labelledby="title desc">
+<title id="title">UNetModel — architecture</title><desc id="desc">Diagramme vectoriel éditable généré depuis les dumps du framework.</desc>
+<defs>
+<marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#475569"/></marker>
+<marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#2563eb"/></marker>
+<style><![CDATA[text{font-family:Inter,Segoe UI,Arial,sans-serif}.title{font-size:34px;font-weight:800;fill:#0f172a}.subtitle{font-size:16px;fill:#475569}.label{font-size:17px;font-weight:700;fill:#0f172a}.small{font-size:13px;fill:#475569}.tiny{font-size:11px;fill:#64748b}.box{stroke:#94a3b8;stroke-width:1.4;rx:14}.edge{stroke:#475569;stroke-width:2.2;fill:none;marker-end:url(#arrow)}.edgeB{stroke:#2563eb;stroke-width:2.4;fill:none;marker-end:url(#arrowBlue)}.dash{stroke-dasharray:7 7}.note{font-size:12px;fill:#475569}]]></style>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="60" y="62" class="title" text-anchor="start">UNetModel — architecture</text>
+<text x="60" y="92" class="subtitle" text-anchor="start">Encodeur-décodeur simplifié avec concaténations de saut. 43 couches • 2,14 M paramètres.</text>
+<line x1="60" y1="112" x2="1740" y2="112" stroke="#e2e8f0" stroke-width="2"/>
+<rect x="60" y="350" width="170" height="92" rx="14" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="145.0" y="375" class="label" text-anchor="middle">Input</text>
+<text x="145.0" y="414" class="small" text-anchor="middle">64×64×3</text>
+<rect x="252" y="350" width="170" height="92" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="337.0" y="375" class="label" text-anchor="middle">Down1</text>
+<text x="337.0" y="414" class="small" text-anchor="middle">32 canaux</text>
+<path d="M230,396.0 L252,396.0" class="edgeB"/>
+<rect x="444" y="350" width="170" height="92" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="529.0" y="375" class="label" text-anchor="middle">Down2</text>
+<text x="529.0" y="414" class="small" text-anchor="middle">64 canaux</text>
+<path d="M422,396.0 L444,396.0" class="edgeB"/>
+<rect x="636" y="350" width="170" height="92" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="721.0" y="375" class="label" text-anchor="middle">Down3</text>
+<text x="721.0" y="414" class="small" text-anchor="middle">128 canaux</text>
+<path d="M614,396.0 L636,396.0" class="edgeB"/>
+<rect x="828" y="350" width="170" height="92" rx="14" fill="#ede9fe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="913.0" y="375" class="label" text-anchor="middle">Bottleneck</text>
+<text x="913.0" y="414" class="small" text-anchor="middle">256 canaux</text>
+<path d="M806,396.0 L828,396.0" class="edgeB"/>
+<rect x="1020" y="350" width="170" height="92" rx="14" fill="#dbeafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1105.0" y="375" class="label" text-anchor="middle">Up3</text>
+<text x="1105.0" y="414" class="small" text-anchor="middle">concat skip</text>
+<path d="M998,396.0 L1020,396.0" class="edgeB"/>
+<rect x="1212" y="350" width="170" height="92" rx="14" fill="#dbeafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1297.0" y="375" class="label" text-anchor="middle">Up2</text>
+<text x="1297.0" y="414" class="small" text-anchor="middle">concat skip</text>
+<path d="M1190,396.0 L1212,396.0" class="edgeB"/>
+<rect x="1404" y="350" width="170" height="92" rx="14" fill="#dbeafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1489.0" y="375" class="label" text-anchor="middle">Up1</text>
+<text x="1489.0" y="414" class="small" text-anchor="middle">concat skip</text>
+<path d="M1382,396.0 L1404,396.0" class="edgeB"/>
+<rect x="1596" y="350" width="170" height="92" rx="14" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1681.0" y="375" class="label" text-anchor="middle">Output</text>
+<text x="1681.0" y="414" class="small" text-anchor="middle">RGB + Tanh</text>
+<path d="M1574,396.0 L1596,396.0" class="edgeB"/>
+<path d="M337.0,350.0 L337.0,250 L1489.0,250 L1489.0,350.0" class="edgeB dash"/>
+<path d="M529.0,350.0 L529.0,210 L1297.0,210 L1297.0,350.0" class="edgeB dash"/>
+<path d="M721.0,350.0 L721.0,170 L1105.0,170 L1105.0,350.0" class="edgeB dash"/>
+<text x="1740" y="796" class="tiny" text-anchor="end">Mímir Framework — SVG vectoriel éditable</text>
+</svg>

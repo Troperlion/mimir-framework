@@ -1,29 +1,21 @@
-# Globals & aliases
-
-## Pour qui
-
-Développeur et utilisateur intermédiaire/avancé.
-
-## Objectif
+# Variables globales et alias
 
 Trouver rapidement le contrat API réel et les paramètres utilisables.
 
-## Avant de commencer
+**Public concerné :** Développeur et utilisateur intermédiaire/avancé.
 
-Connaître les commandes de base de Mímir.
-
-## Résultat attendu
-
-Tu peux appeler l'API sans ambiguïté de signature ou de comportement.
+> **Prérequis**
+>
+> Connaître les commandes de base de Mímir.
 
 
-Cette page documente ce que le runtime Lua injecte **automatiquement** quand tu lances un script via `./bin/mimir --lua ...`.
+Cette page documente ce que le runtime Lua injecte **automatiquement** lorsque vous lancez un script via `./bin/mimir --lua ...`.
 
 Objectif :
 
 - te permettre d’écrire des scripts courts (aliases globaux pratiques)
 - rester compatible avec des scripts historiques
-- éviter les ambiguïtés (`arg` vs `Mimir.Args`, collisions de noms, etc.)
+- éviter les ambiguïtés autour de `arg` et les collisions de noms
 
 Source de vérité : `src/scriptings/Lua/luaScripting/LuaScripting.cpp`.
 
@@ -36,7 +28,8 @@ Le binaire remplit une table globale `arg` “à la façon de Lua” :
 - `arg[0]` = chemin du script
 - `arg[1..n]` = arguments
 
-Conseil : préfère `Mimir.Args` (copie explicite) si tu veux être sûr de ne pas marcher sur une variable `arg` modifiée par un module.
+Pour analyser ces valeurs, chargez `scripts/modules/args.lua` puis appelez
+`Args.parse(arg)`. Le runtime n'injecte pas de table `Mimir.Args`.
 
 ### Table `Mimir`
 
@@ -68,13 +61,11 @@ En plus de `Mimir.*`, le runtime publie des **aliases globaux** qui pointent ver
 | `Allocator` | `Mimir.Allocator` | allocateur dynamique | recommandé (stabilité) |
 | `htop` | `Mimir.Htop` | monitoring terminal | optionnel |
 | `viz` | `Mimir.Viz` | visualisation SFML | optionnel |
-| `visualiser` | `Mimir.visualiser` | alias FR de Viz | optionnel |
-| `neuropulse` | `Mimir.NeuroPulse` | démo “texte->audio/lumière” | optionnel |
 
 ## 3) Conseils (éviter les pièges)
 
-- Ne redéfinis pas ces noms globalement (`model = ...`, `MemoryGuard = ...`). Si tu veux une variable, fais `local model = ...`.
-- Pour éviter les collisions, tu peux adopter ce pattern :
+- Ne redéfinis pas ces noms globalement (`model = ...`, `MemoryGuard = ...`). Si vous voulez une variable, fais `local model = ...`.
+- Pour éviter les collisions, vous pouvez adopter ce pattern :
 
 ```lua
 local M = Mimir
@@ -82,4 +73,10 @@ local Model = Mimir.Model
 local Ser = Mimir.Serialization
 ```
 
-- Quand tu as un doute sur l’API, la source de vérité est le fichier `src/scriptings/Lua/luaScripting/LuaScripting.cpp`.
+- Quand vous avez un doute sur l’API, la source de vérité est le fichier `src/scriptings/Lua/luaScripting/LuaScripting.cpp`.
+
+## Étapes suivantes
+
+- [Page précédente : API : `Mimir.Layers` (ops)](18-Layers-Module.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Mapping API Lua → C/C++ (bindings) → sous-systèmes](20-Lua-API-Cpp-Mapping.md)

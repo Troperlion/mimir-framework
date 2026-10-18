@@ -1,44 +1,50 @@
-# Mímir Framework
+# Mímir AI Engine
 
 ![logo](./logo.png)
 
-<div align="center">
+## Framework Philosophy
+
+**[Framework Philosophy](./docs/00-Framework-Philosophy.md)** — pourquoi C++, Lua, JSON, CPU-first, Registry, Planner, runtime independant et architectures compilees.
+
+**[Scripting Contract](./docs/03-API-Reference/00-Scripting-Contract.md)** — specification officielle que tous les bridges doivent implementer.
 
 | Branche | unit-tests | publish-wiki |
 | --- | --- | --- |
 | `main` | [![unit-tests main](https://github.com/brit45/mimir-framework/actions/workflows/unit-tests.yml/badge.svg?branch=main)](https://github.com/brit45/mimir-framework/actions/workflows/unit-tests.yml) | [![publish-wiki main](https://github.com/brit45/mimir-framework/actions/workflows/wiki.yml/badge.svg?branch=main)](https://github.com/brit45/mimir-framework/actions/workflows/wiki.yml) |
 | `develop` | [![unit-tests develop](https://github.com/brit45/mimir-framework/actions/workflows/unit-tests.yml/badge.svg?branch=develop)](https://github.com/brit45/mimir-framework/actions/workflows/unit-tests.yml) | [![publish-wiki develop](https://github.com/brit45/mimir-framework/actions/workflows/wiki.yml/badge.svg?branch=develop)](https://github.com/brit45/mimir-framework/actions/workflows/wiki.yml) |
 
-</div>
+Version engine : **3.5.0**
+Révision documentation : **2026-10-01**
 
-Version framework : **3.1.0**
-Révision documentation : **2026-07-01**
+Consultez d'abord l'[état réel du projet](./docs/00-PROJECT-STATUS.md) : cette
+page distingue les chemins stables, partiels, expérimentaux, placeholders et
+matériels testés dans le checkout courant.
 
-**Mímir est un moteur C++ de conception, d'entraînement et d'analyse d'architectures d'intelligence artificielle, pilotable par Lua ou JSON, intégrant son propre runtime, son gestionnaire mémoire, son système de datasets, ses outils de visualisation et de sérialisation, avec une approche CPU-first orientée recherche et expérimentation.**
+**Mímir est un AI Engine C++ de conception, d'entraînement et d'analyse de systèmes IA, pilotable par Lua ou JSON, avec runtime, mémoire, dataset, visualisation et sérialisation intégrés, dans une approche CPU-first orientée recherche et expérimentation.**
 
 ---
 
 ## Vitrine (FR)
 
-Mímir est un framework de recherche IA **CPU-first** où tu conçois les architectures en **C++**, puis tu pilotes entraînement/inférence via **Lua** ou **JSON (`--conf`)**.
+Mímir est un **AI Engine de recherche IA CPU-first** où tu conçois les architectures en **C++**, puis tu pilotes entraînement/inférence via **Lua** ou **JSON (`--conf`)**.
 
 Points clés:
 
-- moteur de graphes IA autonome (runtime + mémoire + planner),
+- AI engine de graphes autonome (runtime + mémoire + planner),
 - registre central d'architectures (vision, NLP, diffusion),
-- outillage intégré (datasets, viz SFML, sérialisation, benchmarks),
+- outillage intégré (datasets, Viz SFML/Qt/GTK/Web, sérialisation, benchmarks),
 - approche orientée expérimentation et inspection interne des modèles.
 
 ---
 
 ## Showcase (EN)
 
-Mímir is a **CPU-first C++ AI architecture engine**.
-You define models in C++, then orchestrate training/inference with Lua scripts or JSON-driven runs.
+Mímir is a **CPU-first C++ AI Engine**.
+You define model architectures in C++, then orchestrate training/inference with Lua scripts or JSON-driven runs.
 
 Core strengths:
 
-- autonomous graph runtime with integrated memory management,
+- autonomous AI runtime and graph execution core,
 - architecture registry (vision, NLP, diffusion),
 - built-in tooling (datasets, visualization, serialization, benchmarking),
 - research-focused workflow for fast experimentation and deep inspection.
@@ -51,26 +57,26 @@ Core strengths:
 
 Mímir n'est pas un clone de PyTorch ou TensorFlow.
 
-Le projet est pensé comme un **moteur de graphes IA autonome** :
+Le projet est pensé comme un **AI Engine autonome** :
 
 - architecture des modèles en **C++**,
 - orchestration en **Lua**,
 - exécution reproductible via **JSON**,
-- runtime et outillage intégrés dans un seul framework.
+- runtime et outillage intégrés dans un seul engine.
 
 Philosophie:
 
 ```text
 Architecture
-	↓
+  ↓
 C++
-	↓
+  ↓
 Registry
-	↓
+  ↓
 Runtime
-	↓
+  ↓
 Lua / JSON
-	↓
+  ↓
 Entraînement / Inférence / Analyse
 ```
 
@@ -79,21 +85,27 @@ Entraînement / Inférence / Analyse
 ### Architecture générale
 
 ```text
-						Lua / JSON / CLI
-										│
-										▼
-						API publique Mímir
-										│
-										▼
-				Registry d'architectures
-										│
-										▼
-						 Runtime IA
-										│
-				┌───────────┼───────────┐
-				▼           ▼           ▼
-			CPU         CUDA        ROCm
+            Lua / JSON / CLI
+                    │
+                    ▼
+            API Engine Mímir
+                    │
+                    ▼
+        Registry d'architectures
+                    │
+                    ▼
+               Runtime IA
+                    │
+        ┌───────────┼───────────┐
+        ▼           ▼           ▼
+      CPU         CUDA        ROCm
 ```
+
+Schéma visuel (SVG):
+
+![Vue d'ensemble du framework](./docs/graphs/00_framework_overview.svg)
+
+![Exécution CPU-first](./docs/graphs/15_cpu_first_execution.svg)
 
 ---
 
@@ -105,19 +117,99 @@ Guide complet : **[GET STARTED](./docs/01-Getting-Started/00-GET-STARTED.md)**
 # 1) Dépendances minimales (Ubuntu/Debian)
 sudo apt-get install -y cmake build-essential lua5.3 liblua5.3-dev libomp-dev
 
-# 2) Compiler
+# 2) (Option recommande) bootstrap automatique Linux
+./config.sh
+
+# 3) Compiler
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 
-# 3) Vérifier le binaire
+# 4) Vérifier le binaire
 ./bin/mimir --help
 
-# 4) Smoke test
+# 5) Smoke test
 ./bin/mimir --lua scripts/tests/test_serialization_smoke.lua
 
-# 5) Premier modèle
+# 6) Premier modèle
 ./bin/mimir --lua scripts/templates/template_new_model.lua
 ```
+
+Notes rapides sur `config.sh`:
+
+- Script Linux (Debian/Ubuntu) qui installe les dependances et configure CMake dans `build/`.
+- Variables utiles: `BUILD_TYPE=Debug`, `ENABLE_VULKAN=0`, `ENABLE_OPENCL=0`, `ENABLE_SFML=0`, `ENABLE_LZ4=0`.
+- Voir la doc detaillee: `docs/01-Getting-Started/02-Installation.md`.
+
+Notes scripts Lua (cross-plateforme):
+
+- Les scripts doivent utiliser `scripts/modules/fs.lua` pour les opérations fichiers/répertoires (`mkdir_p`, `join`, `dirname`, `list_dir`, `file_exists`).
+- Éviter `os.execute("mkdir ...")`, `io.popen("ls ...")`, `test -d`, etc. dans les scripts métier.
+- Les appels shell restent réservés aux besoins process externes (ex: ouvrir navigateur, lancer un outil), pas au filesystem applicatif.
+
+#### Modules Lua réutilisables
+
+Les fichiers de `scripts/modules/` sont chargés avec `dofile`; ils ne sont pas
+injectés dans `Mimir` et ne sont pas des bindings C++. Le stub
+[`mimir-api.lua`](./mimir-api.lua) décrit à la fois l'API native et les contrats
+publics de ces helpers afin que LuaLS/EmmyLua puisse les compléter.
+
+| Module | État | Rôle et contrainte principale |
+|---|---|---|
+| `args.lua` | actif | Parse la table globale `arg`, normalise `--foo-bar`/`--foo_bar`, applique les overrides et peut initialiser Htop/Viz. Il n'existe pas de `Mimir.Args`. |
+| `fs.lua` | actif | Helpers filesystem portables; certaines opérations passent par les commandes natives de l'OS. |
+| `checkpoint_resume.lua` | actif, ciblé | Résout un checkpoint `raw_folder` direct ou le dernier `epoch_N`; ne charge pas le modèle. |
+| `base_tokenizer.lua` | actif | Charge ou crée le tokenizer partagé via `Mimir.Tokenizer`; exige le binaire Mímir. |
+| `causal_lm_tokenizer.lua` | actif | Vérifie vocabulaire, tokens spéciaux et capacité avant un run causal LM. |
+| `pipeline_api.lua` | expérimental | Façade registry-first et constructeurs historiques; la disponibilité effective dépend du registre compilé. `pipeline.lua` est son alias de compatibilité. |
+| `mpk.lua` / `mpk_layers.lua` | actif, outillage | Lit/écrit/compile MPK et normalise les types de couches; le format écrit est `binary-v4`, les versions historiques sont lecture seule. |
+| `help_cli.lua` | actif | Génère l'aide d'un script à partir de ses commentaires et de ses options détectables. |
+| `api_ws_server.lua` | expérimental | Serveur HTTP/WebSocket autonome; requiert LuaSocket, et LuaSec lorsque TLS est demandé. |
+
+Exemple minimal, lancé depuis la racine du dépôt :
+
+```lua
+local Args = dofile(ROOTWORK.."/scripts/modules/args.lua")
+local FS = dofile(ROOTWORK.."/scripts/modules/fs.lua")
+
+local opts = Args.parse(arg)
+local out_dir = Args.get_str(opts, "out-dir", "checkpoint/demo")
+assert(FS.mkdir_p(out_dir), "création du répertoire impossible")
+```
+
+```bash
+./bin/mimir --lua mon_script.lua -- --out-dir checkpoint/essai
+```
+
+`args.lua` effectue aussi un premier parse lors de son chargement pour fournir
+les helpers `opt_*`; appeler ensuite `Args.parse(arg)` est utile seulement si le
+script a besoin de la table complète et des arguments positionnels.
+
+### Docker (CPU/headless)
+
+L'image Docker générique compile Mímir sans dépendre des instructions CPU de la
+machine de build. Elle active Lua, OpenMP, LZ4 et FFmpeg, mais désactive SFML,
+CUDA, ROCm, Vulkan, OpenCL et les bridges externes.
+
+```bash
+docker build --build-arg BUILD_JOBS=4 -t mimir:3.5.0 .
+docker run --rm mimir:3.5.0 --version
+docker run --rm mimir:3.5.0 \
+  --lua scripts/templates/template_new_model.lua
+```
+
+Pour utiliser des données et conserver les checkpoints :
+
+```bash
+docker run --rm \
+  -v "$PWD/datasets:/workspace/datasets:ro" \
+  -v "$PWD/checkpoint:/workspace/checkpoint" \
+  mimir:3.5.0 \
+  --conf configs/vae_conv-training.json
+```
+
+La configuration JSON peut remplacer `OMP_NUM_THREADS` grâce à sa section
+`env`. Les backends GPU nécessitent des images spécialisées avec leurs SDK et
+un accès explicite au matériel; ce Dockerfile ne revendique pas ce support.
 
 ---
 
@@ -125,45 +217,112 @@ cmake --build build -j
 
 Mímir expose trois modes principaux:
 
-1. **C++** : définition d'architectures, runtime et couches bas niveau.
+1. **C++** : définition d'architectures, noyau runtime et couches bas niveau.
 2. **Lua** : pilotage des runs (train/inference/tools).
 3. **JSON (`--conf`)** : exécution reproductible et scénarios paramétrés.
+
+La [matrice de maturité](./docs/00-PROJECT-STATUS.md) indique pour chaque
+sous-système s'il est actif, partiel, expérimental, placeholder ou en
+construction. Elle doit être consultée avant toute revendication de support
+GPU, FPGA, modèle externe ou bridge de langage.
+
+Schéma des flux d'exécution (SVG):
+
+![Workflow Lua JSON CLI](./docs/graphs/04_workflow_lua_json_cli.svg)
 
 ### CLI essentielle
 
 ```bash
 ./bin/mimir --lua <script.lua>
 ./bin/mimir --conf <config.json>
+./bin/mimir --conf <config.json> --run <task>
 ./bin/mimir --conf <config.json> --override path.to.key=value
 ```
 
-En mode `--conf`, le runtime injecte automatiquement:
+#### Mode `--conf`
 
-- `CONF` (table Lua contenant tout le JSON),
-- `CONF_PATH` (chemin absolu de la config),
-- `CONF_DIR` (répertoire de la config),
-- `arg` (arguments de script, si définis dans `lua.scripts[i].args`).
+Charge un fichier JSON et exécute la section `lua.scripts` séquentiellement.
 
-Exemple de config minimale `--conf`:
+Le runtime injecte automatiquement dans chaque script Lua :
+
+| Variable Lua | Contenu |
+|---|---|
+| `CONF` | Table Lua contenant l'intégralité du JSON (après overrides) |
+| `CONF_PATH` | Chemin absolu du fichier de conf |
+| `CONF_DIR` | Répertoire du fichier de conf |
+| `arg` | Arguments de script (`lua.scripts[i].args`) |
+
+#### Mode `--run <task>` (avec `--conf`)
+
+Sélectionne une tâche nommée définie dans la section `tasks` du fichier de conf.
+Sans `--run`, la section `lua` racine est utilisée (comportement par défaut).
+
+```bash
+# Tâche par défaut (section lua racine)
+./bin/mimir --conf config.json
+
+# Tâche nommée
+./bin/mimir --conf config.json --run train
+./bin/mimir --conf config.json --run infer
+
+# Tâche + override à la volée
+./bin/mimir --conf config.json --run train --override training.learning_rate=5e-6
+```
+
+Si la tâche est introuvable, mimir liste les tâches disponibles avec leur description.
+
+#### Exemple de config `--conf` avec tâches
 
 ```json
 {
-	"lua": {
-		"scripts": [
-			"scripts/templates/template_conf_load_and_train.lua"
-		]
-	},
-	"model": {
-		"architecture": "transformer",
-		"vocab_size": 4096,
-		"seq_len": 128,
-		"d_model": 256,
-		"num_layers": 4,
-		"num_heads": 8,
-		"mlp_hidden": 1024
-	}
+  "lua": {
+    "scripts": ["scripts/training/train_vae_conv.lua"]
+  },
+  "tasks": {
+    "train": {
+      "description": "Entraînement complet",
+      "lua": { "scripts": ["scripts/training/train_vae_conv.lua"] }
+    },
+    "infer": {
+      "description": "Génération d'images",
+      "lua": {
+        "scripts": [{
+          "script": "scripts/inferences/infer_vae_conv.lua",
+          "args": ["--num-samples", "16"]
+        }]
+      }
+    }
+  },
+  "model": {
+    "architecture": "vae_conv",
+    "image_w": 512, "image_h": 512, "image_c": 3,
+    "latent_h": 64, "latent_w": 64, "latent_c": 128,
+    "base_channels": 8
+  },
+  "training": {
+    "num_epochs": 35,
+    "learning_rate": 1e-5,
+    "optimizer": "adamw"
+  },
+  "visualization": { "enabled": true }
 }
 ```
+
+#### JSON Schema (`--conf`)
+
+Le fichier `configs/conf.schema.json` documente toutes les sections acceptées :
+
+| Section | Rôle |
+|---|---|
+| `lua` | Scripts Lua par défaut (sans `--run`) |
+| `tasks` | Tâches nommées sélectionnables via `--run` |
+| `model` | Config architecture — `architecture` détermine les champs valides |
+| `training` | Hyperparamètres d'entraînement |
+| `dataset` | Chemins et paramètres du dataset |
+| `inference` | Paramètres de génération |
+| `visualization` | Fenêtre SFML (lue par le runtime C++) |
+| `logging` | Affichage console (`show_htop_display`, etc.) |
+| `env` | Variables appliquées au processus avant le run; elles remplacent les valeurs héritées du shell |
 
 ---
 
@@ -194,14 +353,14 @@ Le registre inclut notamment:
 - GAN Latent
 - Transformer
 - Diffusion / Conditional Diffusion
-- SDXL / PonyXL
+- SDXL
 - CLIP
 - modèles HuggingFace
 - modèles externes SafeTensors
 
 ---
 
-### Runtime et performances
+### Runtime engine et performances
 
 Capacités clés:
 
@@ -212,13 +371,21 @@ Capacités clés:
 - backends CUDA / ROCm (optionnels, en évolution)
 - accélération Vulkan/OpenCL sur certains chemins
 
-Le framework est **CPU-first** et optimisé pour les processeurs modernes.
+L'engine est **CPU-first** et optimisé pour les processeurs modernes.
+
+Les chemins CPU réduisent les copies et allocations du backward, des convolutions
+et de l’attention. Vulkan/OpenCL disposent aussi de calculs backward natifs,
+sous réserve des formes et budgets acceptés. Voir la
+[documentation performance](docs/05-Advanced/01-Performance.md) et les
+[benchmarks Colab](docs/05-Advanced/07-Colab-Benchmarks.md) : profils partagés,
+mesures distinctes des runtimes GPU, contrôles numériques et mémoire hôte.
+
 
 ---
 
-### Gestion mémoire
+### Gestion mémoire de l'engine
 
-Mímir intègre son propre système mémoire:
+Mímir intègre son propre système mémoire engine:
 
 - `MemoryGuard`
 - `DynamicTensorAllocator`
@@ -235,7 +402,7 @@ Objectifs:
 
 ---
 
-### Planner et exécution de graphe
+### Planner et exécution de graphe engine
 
 Le planner de graphes prend en charge:
 
@@ -244,6 +411,12 @@ Le planner de graphes prend en charge:
 - planification d'allocation des buffers,
 - réutilisation mémoire,
 - préparation du runtime.
+
+Schémas internes (SVG):
+
+![Runtime graphe](./docs/graphs/07_graph_runtime.svg)
+
+![Sous-système mémoire](./docs/graphs/08_memory_subsystem.svg)
 
 ---
 
@@ -267,6 +440,16 @@ Interface SFML temps réel pour:
 - reconstructions et activations,
 - heatmaps et latent,
 - progression d'entraînement.
+
+Nouveautés UI (v3.1.x):
+
+- rendu `Blocks / Layers` en mode `HEATMAP` ou `REEL` (`M`),
+- palettes heatmap cyclables au clavier (`K`) : `CLASSIC`, `TURBO`, `INFERNO`, `VIRIDIS`,
+- mise à jour immédiate de la palette (sans attendre la step suivante),
+- filtrage des tenseurs de packing final (`out_concat` / `out_pack`) pour éviter les faux aperçus,
+- ordre visuel forcé dans `Outputs`: `recon` affiché juste avant `diff/resdiff` quand les deux existent,
+- barre de progression globale (epochs) + barre dédiée batch courant (sous la globale),
+- couleur de la barre batch pilotée par `batch_time_ms` (rapide=vert, plus lent=orange/rouge).
 
 ### Sérialisation
 
@@ -309,8 +492,18 @@ Prérequis principaux:
 Build rapide:
 
 ```bash
+# Bootstrap automatique (installe les dependances puis configure CMake)
+./config.sh
+
+# Compilation
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
+```
+
+Exemple avec options:
+
+```bash
+WORKROOT=/home/user/tensor-2 ENABLE_VULKAN=1 ENABLE_OPENCL=1 ./config.sh
 ```
 
 Installation détaillée (Linux/macOS/Windows, options CMake, troubleshooting):
@@ -324,6 +517,7 @@ Installation détaillée (Linux/macOS/Windows, options CMake, troubleshooting):
 - **[CLI](./docs/01-Getting-Started/03-CLI.md)**
 - **[Config-driven scripting (`--conf`)](./docs/02-User-Guide/08-Config-Driven-Scripting.md)**
 - **[Cycle de vie modèle](./docs/02-User-Guide/02-Model-Lifecycle.md)**
+- **[Packages d’architecture MPK](./docs/02-User-Guide/15-MPK.md)**
 - **[API Reference](./docs/03-API-Reference/00-API-Overview.md)**
 - **[Index complet](./docs/00-INDEX.md)**
 

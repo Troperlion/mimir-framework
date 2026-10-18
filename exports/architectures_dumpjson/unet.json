@@ -1,0 +1,1825 @@
+{
+  "default_dtype": "float32",
+  "encoder": {
+    "architecture": "ViT",
+    "has_encoder": true
+  },
+  "features": [
+    "layer_config",
+    "real_shapes",
+    "layer_io",
+    "extended_layer_types",
+    "framework_state",
+    "checksums"
+  ],
+  "format": "mimir_debug_dump",
+  "format_version": "1.3.0",
+  "framework_state": {
+    "memory": {
+      "advanced_ram_manager": {
+        "allocations_blocked": false,
+        "current_bytes": 0,
+        "current_mb": 0.0,
+        "freeze_mode": false,
+        "peak_bytes": 0,
+        "peak_mb": 0.0,
+        "usage_percent": 0.0
+      },
+      "dynamic_tensor_allocator": {
+        "loaded_count": 18,
+        "tensor_count": 18
+      },
+      "memory_guard": {
+        "allocations_blocked": false,
+        "current_bytes": 8556288,
+        "current_mb": 8.159912109375,
+        "freeze_mode": false,
+        "limit_bytes": 10737418240,
+        "limit_mb": 10240.0,
+        "peak_bytes": 8556288,
+        "peak_mb": 8.159912109375,
+        "usage_percent": 0.07968664169311523
+      }
+    },
+    "model": {
+      "default_dtype": "float32",
+      "has_encoder": true,
+      "image_height": 64,
+      "image_width": 64,
+      "model_config": {
+        "base_channels": 32,
+        "depth": 3,
+        "image_c": 3,
+        "image_h": 64,
+        "image_w": 64,
+        "type": "unet"
+      },
+      "model_name": "UNetModel",
+      "num_layers": 43,
+      "parameters_frozen": false,
+      "tokenizer_vocab_size": 47,
+      "total_params": 2139072
+    },
+    "registry": {
+      "supported_layer_count": 70,
+      "supported_layer_types": [
+        "Conv2d",
+        "ConvTranspose2d",
+        "Conv1d",
+        "DepthwiseConv2d",
+        "Linear",
+        "Bilinear",
+        "Embedding",
+        "EmbeddingBag",
+        "BatchNorm2d",
+        "BatchNorm1d",
+        "LayerNorm",
+        "GroupNorm",
+        "InstanceNorm2d",
+        "RMSNorm",
+        "ReLU",
+        "LeakyReLU",
+        "GELU",
+        "GEGLU",
+        "SiLU",
+        "Tanh",
+        "Sigmoid",
+        "Softmax",
+        "LogSoftmax",
+        "Softplus",
+        "Mish",
+        "HardSigmoid",
+        "HardSwish",
+        "MaxPool2d",
+        "AvgPool2d",
+        "AdaptiveAvgPool2d",
+        "GlobalAvgPool2d",
+        "MaxPool1d",
+        "AvgPool1d",
+        "TokenMeanPool",
+        "Dropout",
+        "Dropout2d",
+        "AlphaDropout",
+        "Flatten",
+        "Reshape",
+        "Transpose",
+        "Permute",
+        "Squeeze",
+        "Unsqueeze",
+        "View",
+        "Add",
+        "Subtract",
+        "Multiply",
+        "Divide",
+        "Concat",
+        "Split",
+        "Chunk",
+        "Stack",
+        "MatMul",
+        "BatchMatMul",
+        "SelfAttention",
+        "MultiHeadAttention",
+        "CrossAttention",
+        "UpsampleNearest",
+        "UpsampleBilinear",
+        "UpsampleBicubic",
+        "PixelShuffle",
+        "LSTM",
+        "GRU",
+        "RNN",
+        "ZeroPad2d",
+        "ReflectionPad2d",
+        "ReplicationPad2d",
+        "Identity",
+        "Constant",
+        "Lambda"
+      ]
+    },
+    "runtime": {
+      "backends": {
+        "cpu": {
+          "available": true,
+          "compiled": true,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CPU",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "cuda": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CUDA",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "opencl": {
+          "available": false,
+          "compiled": true
+        },
+        "rocm": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "ROCM",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "vulkan": {
+          "available": true,
+          "compiled": true
+        }
+      },
+      "cpu_features": {
+        "avx2": true,
+        "bmi2": true,
+        "f16c": true,
+        "fma": true
+      },
+      "environment_overrides": {},
+      "framework_logs_suppressed": false
+    },
+    "snapshot_timestamp": 1783546796,
+    "snapshot_version": "1.0.0"
+  },
+  "git": {
+    "branch": "unknown",
+    "commit": "unknown"
+  },
+  "layers": [
+    {
+      "index": 0,
+      "inputs": [
+        "__input__"
+      ],
+      "name": "unet/raw_in",
+      "output": "unet/in",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Identity"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 3,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 1,
+      "inputs": [
+        "unet/in"
+      ],
+      "name": "unet/down1/conv1",
+      "output": "unet/down1/c1",
+      "params_count": 864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/down1/conv1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            3,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 2,
+      "inputs": [
+        "unet/down1/c1"
+      ],
+      "name": "unet/down1/conv1/relu",
+      "output": "unet/down1/c1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 32,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 3,
+      "inputs": [
+        "unet/down1/c1_act"
+      ],
+      "name": "unet/down1/conv2",
+      "output": "unet/down1/c2",
+      "params_count": 9216,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/down1/conv2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            32,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 9216,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 4,
+      "inputs": [
+        "unet/down1/c2"
+      ],
+      "name": "unet/down1/conv2/relu",
+      "output": "unet/down1/c2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 32,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 5,
+      "inputs": [
+        "unet/down1/c2_act"
+      ],
+      "name": "unet/down1/downsample",
+      "output": "unet/down1/downsample/y",
+      "params_count": 9216,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/down1/downsample.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            32,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 9216,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 6,
+      "inputs": [
+        "unet/down1/downsample/y"
+      ],
+      "name": "unet/down1/downsample/relu",
+      "output": "unet/down1/downsample/y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 32,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 7,
+      "inputs": [
+        "unet/down1/downsample/y_act"
+      ],
+      "name": "unet/down2/conv1",
+      "output": "unet/down2/c1",
+      "params_count": 18432,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/down2/conv1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            32,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 18432,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 8,
+      "inputs": [
+        "unet/down2/c1"
+      ],
+      "name": "unet/down2/conv1/relu",
+      "output": "unet/down2/c1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 9,
+      "inputs": [
+        "unet/down2/c1_act"
+      ],
+      "name": "unet/down2/conv2",
+      "output": "unet/down2/c2",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/down2/conv2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 10,
+      "inputs": [
+        "unet/down2/c2"
+      ],
+      "name": "unet/down2/conv2/relu",
+      "output": "unet/down2/c2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 11,
+      "inputs": [
+        "unet/down2/c2_act"
+      ],
+      "name": "unet/down2/downsample",
+      "output": "unet/down2/downsample/y",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/down2/downsample.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 12,
+      "inputs": [
+        "unet/down2/downsample/y"
+      ],
+      "name": "unet/down2/downsample/relu",
+      "output": "unet/down2/downsample/y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 128,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 13,
+      "inputs": [
+        "unet/down2/downsample/y_act"
+      ],
+      "name": "unet/down3/conv1",
+      "output": "unet/down3/c1",
+      "params_count": 73728,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/down3/conv1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 73728,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 14,
+      "inputs": [
+        "unet/down3/c1"
+      ],
+      "name": "unet/down3/conv1/relu",
+      "output": "unet/down3/c1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 128,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 128,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 15,
+      "inputs": [
+        "unet/down3/c1_act"
+      ],
+      "name": "unet/down3/conv2",
+      "output": "unet/down3/c2",
+      "params_count": 147456,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/down3/conv2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            128,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 147456,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 16,
+      "inputs": [
+        "unet/down3/c2"
+      ],
+      "name": "unet/down3/conv2/relu",
+      "output": "unet/down3/c2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 128,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 128,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 17,
+      "inputs": [
+        "unet/down3/c2_act"
+      ],
+      "name": "unet/down3/downsample",
+      "output": "unet/down3/downsample/y",
+      "params_count": 147456,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/down3/downsample.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            128,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 147456,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 18,
+      "inputs": [
+        "unet/down3/downsample/y"
+      ],
+      "name": "unet/down3/downsample/relu",
+      "output": "unet/down3/downsample/y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 128,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 256,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 19,
+      "inputs": [
+        "unet/down3/downsample/y_act"
+      ],
+      "name": "unet/bottleneck/conv1",
+      "output": "unet/bottleneck/c1",
+      "params_count": 294912,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/bottleneck/conv1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            128,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 294912,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 20,
+      "inputs": [
+        "unet/bottleneck/c1"
+      ],
+      "name": "unet/bottleneck/conv1/relu",
+      "output": "unet/bottleneck/c1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 256,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 256,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 21,
+      "inputs": [
+        "unet/bottleneck/c1_act"
+      ],
+      "name": "unet/bottleneck/conv2",
+      "output": "unet/bottleneck/c2",
+      "params_count": 589824,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/bottleneck/conv2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            256,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 589824,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 22,
+      "inputs": [
+        "unet/bottleneck/c2"
+      ],
+      "name": "unet/bottleneck/conv2/relu",
+      "output": "unet/bottleneck/c2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "in_channels": 256,
+        "input_height": 8,
+        "input_width": 8,
+        "out_h": 16,
+        "out_w": 16,
+        "output_height": 16,
+        "output_width": 16,
+        "scale_h": 2.0,
+        "scale_w": 2.0
+      },
+      "index": 23,
+      "inputs": [
+        "unet/bottleneck/c2_act"
+      ],
+      "name": "unet/up3/up",
+      "output": "unet/up3/up_y",
+      "params_count": 0,
+      "tensors": [],
+      "type": "UpsampleNearest"
+    },
+    {
+      "config": {
+        "concat_axis": 0
+      },
+      "index": 24,
+      "inputs": [
+        "unet/up3/up_y",
+        "unet/down3/c2_act"
+      ],
+      "name": "unet/up3/concat",
+      "output": "unet/up3/cat",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Concat"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 384,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 128,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 25,
+      "inputs": [
+        "unet/up3/cat"
+      ],
+      "name": "unet/up3/conv1",
+      "output": "unet/up3/c1",
+      "params_count": 442368,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/up3/conv1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            384,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 442368,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 26,
+      "inputs": [
+        "unet/up3/c1"
+      ],
+      "name": "unet/up3/conv1/relu",
+      "output": "unet/up3/c1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 128,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 128,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 27,
+      "inputs": [
+        "unet/up3/c1_act"
+      ],
+      "name": "unet/up3/conv2",
+      "output": "unet/up3/c2",
+      "params_count": 147456,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/up3/conv2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            128,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 147456,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 28,
+      "inputs": [
+        "unet/up3/c2"
+      ],
+      "name": "unet/up3/conv2/relu",
+      "output": "unet/up3/c2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "in_channels": 128,
+        "input_height": 16,
+        "input_width": 16,
+        "out_h": 32,
+        "out_w": 32,
+        "output_height": 32,
+        "output_width": 32,
+        "scale_h": 2.0,
+        "scale_w": 2.0
+      },
+      "index": 29,
+      "inputs": [
+        "unet/up3/c2_act"
+      ],
+      "name": "unet/up2/up",
+      "output": "unet/up2/up_y",
+      "params_count": 0,
+      "tensors": [],
+      "type": "UpsampleNearest"
+    },
+    {
+      "config": {
+        "concat_axis": 0
+      },
+      "index": 30,
+      "inputs": [
+        "unet/up2/up_y",
+        "unet/down2/c2_act"
+      ],
+      "name": "unet/up2/concat",
+      "output": "unet/up2/cat",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Concat"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 192,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 31,
+      "inputs": [
+        "unet/up2/cat"
+      ],
+      "name": "unet/up2/conv1",
+      "output": "unet/up2/c1",
+      "params_count": 110592,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/up2/conv1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            192,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 110592,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 32,
+      "inputs": [
+        "unet/up2/c1"
+      ],
+      "name": "unet/up2/conv1/relu",
+      "output": "unet/up2/c1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 33,
+      "inputs": [
+        "unet/up2/c1_act"
+      ],
+      "name": "unet/up2/conv2",
+      "output": "unet/up2/c2",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/up2/conv2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 34,
+      "inputs": [
+        "unet/up2/c2"
+      ],
+      "name": "unet/up2/conv2/relu",
+      "output": "unet/up2/c2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "in_channels": 64,
+        "input_height": 32,
+        "input_width": 32,
+        "out_h": 64,
+        "out_w": 64,
+        "output_height": 64,
+        "output_width": 64,
+        "scale_h": 2.0,
+        "scale_w": 2.0
+      },
+      "index": 35,
+      "inputs": [
+        "unet/up2/c2_act"
+      ],
+      "name": "unet/up1/up",
+      "output": "unet/up1/up_y",
+      "params_count": 0,
+      "tensors": [],
+      "type": "UpsampleNearest"
+    },
+    {
+      "config": {
+        "concat_axis": 0
+      },
+      "index": 36,
+      "inputs": [
+        "unet/up1/up_y",
+        "unet/down1/c2_act"
+      ],
+      "name": "unet/up1/concat",
+      "output": "unet/up1/cat",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Concat"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 96,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 37,
+      "inputs": [
+        "unet/up1/cat"
+      ],
+      "name": "unet/up1/conv1",
+      "output": "unet/up1/c1",
+      "params_count": 27648,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/up1/conv1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            96,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 27648,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 38,
+      "inputs": [
+        "unet/up1/c1"
+      ],
+      "name": "unet/up1/conv1/relu",
+      "output": "unet/up1/c1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 32,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 39,
+      "inputs": [
+        "unet/up1/c1_act"
+      ],
+      "name": "unet/up1/conv2",
+      "output": "unet/up1/c2",
+      "params_count": 9216,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/up1/conv2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            32,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 9216,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 40,
+      "inputs": [
+        "unet/up1/c2"
+      ],
+      "name": "unet/up1/conv2/relu",
+      "output": "unet/up1/c2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 32,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 1,
+        "kernel_w": 1,
+        "out_channels": 3,
+        "pad_h": 0,
+        "pad_w": 0,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 41,
+      "inputs": [
+        "unet/up1/c2_act"
+      ],
+      "name": "unet/out",
+      "output": "unet/out_pre",
+      "params_count": 96,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "unet/out.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3,
+            32,
+            1,
+            1
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 96,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 42,
+      "inputs": [
+        "unet/out_pre"
+      ],
+      "name": "unet/out_tanh",
+      "output": "x",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Tanh"
+    }
+  ],
+  "model_config": {
+    "base_channels": 32,
+    "depth": 3,
+    "dtype": "float32",
+    "image_c": 3,
+    "image_h": 64,
+    "image_w": 64,
+    "type": "unet"
+  },
+  "model_name": "UNetModel",
+  "num_layers": 43,
+  "timestamp": 1783546796,
+  "tokenizer": {
+    "has_vocab": true,
+    "vocab_size": 47
+  },
+  "total_params": 2139072,
+  "default_params": {
+    "base_channels": 32,
+    "depth": 3,
+    "image_c": 3,
+    "image_h": 64,
+    "image_w": 64
+  }
+}

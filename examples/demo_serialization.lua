@@ -1,4 +1,7 @@
 #!/usr/bin/env lua
+local Help = dofile(ROOTWORK.."/scripts/modules/help_cli.lua")
+Help.auto_exit_help()
+
 --[[
     Démonstration du nouveau système de sérialisation Mímir
     

@@ -31,11 +31,8 @@ int main() {
     model->allocateParams();
     model->initializeWeights("xavier", 123u);
 
-    std::unordered_map<std::string, std::vector<float>> fin;
-    std::unordered_map<std::string, std::vector<int>> iin;
-
-    fin["x"] = {0.5f, -1.0f, 0.25f, 2.0f};
-    const auto pred0 = model->forwardPassNamed(fin, iin, /*training=*/false);
+    std::vector<float> input = {0.5f, -1.0f, 0.25f, 2.0f};
+    const auto pred0 = model->forwardPass(input, /*training=*/false);
     TASSERT_TRUE(pred0.size() == 2);
 
     const float w0 = first_weight_value(*model);
@@ -45,8 +42,14 @@ int main() {
     opt.decay_strategy = LRDecayStrategy::NONE;
 
     std::vector<float> target = {0.0f, 1.0f};
-    const auto stats = model->trainStepNamed(fin, iin, target, opt, /*learning_rate=*/1e-2f);
-    TASSERT_TRUE(stats.loss >= 0.0f);
+    Model::TrainStepRequest request;
+    request.float_inputs["__input__"] = &input;
+    request.target = &target;
+    request.optimizer = &opt;
+    request.learning_rate = 1e-2f;
+    const auto stats = model->trainStep(request);
+    TASSERT_TRUE(stats.has_value());
+    TASSERT_TRUE(stats->loss >= 0.0f);
 
     const float w1 = first_weight_value(*model);
     TASSERT_TRUE(w1 != w0);
@@ -55,7 +58,7 @@ int main() {
     model->freezeParameters(true);
     bool threw = false;
     try {
-        (void)model->trainStepNamed(fin, iin, target, opt, /*learning_rate=*/1e-2f);
+        (void)model->trainStep(request);
     } catch (const std::exception&) {
         threw = true;
     }
@@ -64,7 +67,7 @@ int main() {
     model->freezeParameters(false);
     threw = false;
     try {
-        (void)model->trainStepNamed(fin, iin, target, opt, /*learning_rate=*/1e-2f);
+        (void)model->trainStep(request);
     } catch (...) {
         threw = true;
     }

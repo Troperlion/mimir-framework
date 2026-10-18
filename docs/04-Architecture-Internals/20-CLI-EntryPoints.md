@@ -1,31 +1,20 @@
-```markdown
+# CLI et points d’entrée
 
-## Pour qui
+Cette page décrit le parsing de la ligne de commande, les chemins d’exécution
+du binaire `mimir` et les conventions transmises aux systèmes de scripting.
 
-Développeur avancé qui modifie le moteur C/C++.
+**Public concerné :** Développeur avancé qui modifie le moteur C/C++.
 
-## Objectif
-
-Comprendre le fonctionnement interne exact des composants runtime.
-
-## Avant de commencer
-
-Connaître les bases C++ et la structure du dépôt.
-
-## Résultat attendu
-
-Tu peux modifier le code interne en limitant les régressions.
-
-# Internals : CLI (binaire `mimir`) et points d’entrée
-
-Cette page documente le binaire CLI : parsing des arguments, chemins d’exécution, et conventions.
+> **Prérequis**
+>
+> Connaître les bases C++ et la structure du dépôt.
 
 Source de vérité :
 
 - Entry point : `src/main.cpp`
-- Scripting Lua : `src/scriptings/Lua/luaScripting/LuaScripting.hpp/.cpp`
+- Scripting Lua : `src/scriptings/Lua/luaScripting/LuaScripting.hpp` et `src/scriptings/Lua/luaScripting/LuaScripting.cpp`
 - Contrat API système partagé : `src/scriptings/ScriptingContext.hpp`
-- Config → modèle : `src/Models/Registry/ModelArchitectures.hpp/.cpp`
+- Config → modèle : `src/Models/Registry/ModelArchitectures.hpp` et `src/Models/Registry/ModelArchitectures.cpp`
 - Sécurité mémoire : `src/MemorySafety.hpp` + `src/MemoryGuard.hpp`
 
 ## 1) Options supportées
@@ -33,7 +22,8 @@ Source de vérité :
 Dans `src/main.cpp`, la CLI expose :
 
 - `--lua <script.lua>` : exécute un script Lua.
-- `--config <config.json>` : crée un modèle depuis un JSON (via le registre) puis init (training “à implémenter”).
+- `--config <config.json>` : crée un modèle depuis un JSON (via le registre) puis init (chemin starter/legacy).
+- `--conf <config.json>` : charge la config et exécute les scripts `lua.scripts` (chemin recommandé pour workflows).
 - `--help` : usage.
 
 Les arguments après `--lua script.lua` sont passés au script (injectés comme `arg`).
@@ -61,4 +51,15 @@ Au démarrage :
   - section `config[arch_type]` si présente,
 - `ModelArchitectures::create`, puis `allocateParams` + `initializeWeights("he")`.
 
-```
+## 5) Path `--conf`
+
+- lit JSON,
+- résout `lua.scripts` (ou `run.lua.scripts`),
+- injecte `CONF`, `CONF_PATH`, `CONF_DIR`,
+- exécute chaque script Lua dans l'ordre, avec ses `args` éventuels.
+
+## Étapes suivantes
+
+- [Page précédente : Internals : registre d’architectures (`ModelArchitectures`) et builders](19-Models-Registry-And-Builders.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Internals : GPU Runtimes — CUDA & ROCm (C++)](21-GPU-Runtimes.md)

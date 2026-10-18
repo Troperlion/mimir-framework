@@ -15,6 +15,7 @@ public:
         int base_channels = 32;
         int num_classes = 1000;
         int fc_hidden = 512;
+        float dropout = 0.5f;
     };
 
     VGG16Model();
@@ -22,6 +23,9 @@ public:
     const Config& getConfig() const { return cfg_; }
 
     static void buildInto(Model& model, const Config& cfg);
+
+    bool InitVizTips() override;
+    bool UpdateVizTips(const Layer& layer, VizFrame& frame) override;
 
 private:
     Config cfg_;

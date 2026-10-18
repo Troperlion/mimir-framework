@@ -7,6 +7,49 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Non publié]
 
+### Performances, Viz et benchmarks
+
+- CPU : backward Linear/MatMul vectorisé, forward BatchMatMul par blocs,
+  temporaires de convolution réutilisés, copies Concat/Stack supprimées et
+  attention par blocs de 128 requêtes. API et modèles existants conservés.
+- Routage : réutilisation des conteneurs avec rafraîchissement des capacités,
+  contrôle NaN/Inf conservé ; scratchpads non initialisés explicites.
+- Viz Qt/GTK : événements et focus reliés au flux commun, rendu des scènes
+  actualisées et caches de textures encodées/décodées.
+- Colab : sources embarquées synchronisées, helper de mesure autonome,
+  identités distinctes CUDA/Vulkan/OpenCL et profil portable borné commun aux
+  frameworks ; RSS externe et résultats MNIST séparés des microbenchmarks.
+- Documentation : procédures Colab, limites de mesure, chemins forward/backward
+  Vulkan/OpenCL et contrats d’initialisation des scratchpads actualisés.
+
+## [3.5.0] - 2026-10-01
+
+### ✨ Ajouté — CLI `--run <task>` et JSON Schema `--conf`
+
+- **`--run <task>`** : nouvel argument CLI pour sélectionner une tâche nommée depuis la section `tasks` d'un fichier `--conf`.
+  - `mimir --conf config.json --run train` exécute `tasks.train.lua.scripts`.
+  - Si la tâche est introuvable, liste les tâches disponibles avec leur description.
+  - Compatible avec `--override` : les overrides s'appliquent sur le JSON complet avant la résolution de tâche.
+- **Section `tasks`** dans les fichiers `--conf` : chaque tâche est un objet `{ description, lua: { scripts: [...] } }`. Sans `--run`, la section `lua` racine est utilisée (rétrocompatibilité totale).
+- **`configs/conf.schema.json`** : schéma JSON Schema draft-07 complet pour les fichiers `--conf`.
+  - Toutes les architectures du registre documentées (24 architectures) avec leurs champs exacts issus des exports `exports/architectures_dumpjson/`.
+  - Discriminant `if/then/allOf` par `architecture` pour l'autocomplétion IDE.
+  - Nouvelles sections : `tasks`, `logging`, `env`.
+- **`vae_conv-config.json`** : exemple de conf complet avec `_doc` inline, section `tasks` (train / resume / infer) et toutes les sections documentées.
+
+### 🧾 Documentation
+
+- Scripts Lua: documentation du support `--help` unifie pour les scripts executables (`scripts/` et `examples/`), avec description et options detectees.
+- Mise à jour de la documentation `DebugJson` vers **enhanced v1.3**.
+- Ajout de la documentation du bloc `framework_state` (runtime/backends, mémoire, registre layers, état modèle) dans :
+  - `docs/03-API-Reference/16-Serialization.md`
+  - `docs/03-API-Reference/02-Serialization.md`
+  - `docs/05-Advanced/02-Debugging.md`
+  - `docs/04-Architecture-Internals/15-Serialization-Internals.md`
+  - `docs/05-Advanced/04-Source-Code-Map.md`
+  - `docs/03-API-Reference/20-Lua-API-Cpp-Mapping.md`
+- Stub API Lua (`mimir-api.lua`) aligné sur `DebugJson v1.3`.
+
 ## [3.1.0] - 2026-07-01
 
 ### ✨ Ajouté — Nouveaux modèles HuggingFace / SDXL

@@ -1,20 +1,12 @@
-# Internals : classe `Model` (C++)
-
-## Pour qui
-
-Développeur avancé qui modifie le moteur C/C++.
-
-## Objectif
+# Classe `Model` en C++
 
 Comprendre le fonctionnement interne exact des composants runtime.
 
-## Avant de commencer
+**Public concerné :** Développeur avancé qui modifie le moteur C/C++.
 
-Connaître les bases C++ et la structure du dépôt.
-
-## Résultat attendu
-
-Tu peux modifier le code interne en limitant les régressions.
+> **Prérequis**
+>
+> Connaître les bases C++ et la structure du dépôt.
 
 
 Cette page documente la classe C++ `Model` : ce qu’elle stocke, quelles méthodes font quoi, et comment ça correspond à l’API Lua.
@@ -25,6 +17,19 @@ Source de vérité :
 - Implémentation : `src/Model.cpp`
 - Layers : `src/Layers.hpp`, `src/LayerTypes.hpp`
 - Gradients : `src/Autograd.hpp`
+
+## Sur cette page
+
+- [Vue rapide (Lua → C++)](#vue-rapide-lua-c)
+- [Les grandes responsabilités de Model](#les-grandes-responsabilités-de-model)
+- [API C++ principale (méthodes clés)](#api-c-principale-méthodes-clés)
+- [Créer un modèle via le framework (héritage de Model)](#créer-un-modèle-via-le-framework-héritage-de-model)
+- [Construire un graphe manuellement avec push()](#construire-un-graphe-manuellement-avec-push)
+- [Routing (wiring) : inputs / output](#routing-wiring-inputs-output)
+- [Paramétrer les paramètres internes des layers (C++)](#paramétrer-les-paramètres-internes-des-layers-c)
+- [Exemple (C++) — squelette minimal](#exemple-c-squelette-minimal)
+- [Points d’attention](#points-dattention)
+- [Étapes suivantes](#étapes-suivantes)
 
 ## Vue rapide (Lua → C++)
 
@@ -46,7 +51,7 @@ Source de vérité :
 |Paramètres|`Layer::weight_block` + buffers legacy|Réserve/organise les poids + gradients + états (BatchNorm, etc.).|
 |Execution forward|`Model::forwardPass*`|Exécute les layers dans l’ordre avec un `switch (LayerType)` dans `src/Model.cpp`.|
 |Execution backward|`Model::backwardPass` (et variantes)|Best-effort selon layers.|
-|Optimisation|`Optimizer`|Applique SGD/Adam/AdamW + stratégies de LR decay.|
+|Optimisation|`Optimizer`|Applique SGD, Adam, AdamW, Lion, Adafactor, RAdam, NAdam, RMSprop ou LAMB + stratégies de LR decay.|
 |Sécurité mémoire|`MemoryGuard`|Bloque/limite certaines allocations si strict mode.|
 
 ## API C++ principale (méthodes clés)
@@ -81,7 +86,7 @@ Le registre expose 3 opérations simples :
 - `ModelArchitectures::defaultConfig(name)` : retourne la config par défaut.
 - `ModelArchitectures::create(name, cfg)` : instancie **une classe dérivée** et appelle sa routine de build “from config”.
 
-Ensuite, tu fais (en général) :
+Ensuite, vous faites (en général) :
 
 1. Construire la topologie (via `create`)
 2. Allouer les poids (`allocateParams()`)
@@ -131,13 +136,13 @@ Un exemple concret à lire :
 
 Ces “builders” utilisent `Model::push(...)` **et** le routing par noms (`Layer.inputs` / `Layer.output`) pour construire le graphe.
 
-#### Ajouter ta propre architecture au framework
+#### Ajouter votre propre architecture au framework
 
 1. Crée une classe dérivée `MyModel : public Model` (dans `src/Models/...`).
 2. Ajoute une `Config` + `buildFromConfig(const Config&)`.
 3. Implémente un `static void buildInto(Model&, const Config&)` qui :
    - vide les layers existants,
-   - appelle `push(...)` pour ajouter tes layers,
+   - appelle `push(...)` pour ajouter vos layers,
    - configure `Layer.inputs`/`Layer.output` + champs de dimensions,
    - calcule `params_count` correctement.
 4. Enregistre l’entrée dans `ModelArchitectures::Registry` (typiquement dans `ensureBuiltinsRegistered()` de `ModelArchitectures.cpp`).
@@ -155,16 +160,16 @@ Les hooks à surcharger (dans une classe dérivée) sont déclarés `virtual` da
 - `buildTextBranch(...)`, `buildImageBranch(...)`, `buildAudioBranch(...)`, `buildVideoBranch(...)`
 - `injectMagicToken(...)`
 
-Dans ce mode, tu peux :
+Dans ce mode, vous pouvez :
 
-- soit **surcharger `build()`** entièrement (si tu veux un contrôle total),
+- soit **surcharger `build()`** entièrement (si vous voulez un contrôle total),
 - soit laisser `Model::build()` faire le “workflow” et ne surcharger que les hooks.
 
-Dans les deux cas, la mécanique interne reste la même : tu construis `layers` via `push()` + configuration des champs `Layer`, puis `allocateParams()` + `initializeWeights()`.
+Dans les deux cas, la mécanique interne reste la même : vous construisez `layers` via `push()` + configuration des champs `Layer`, puis `allocateParams()` + `initializeWeights()`.
 
 ## Construire un graphe manuellement avec `push()`
 
-Quand tu veux construire un modèle *sans* passer par le registre d’architectures, la méthode centrale est :
+Quand vous voulez construire un modèle *sans* passer par le registre d’architectures, la méthode centrale est :
 
 - `Model::push(name, type, params_count)`
 
@@ -181,7 +186,7 @@ Ce que `push()` **ne fait pas** :
 
 - Il ne devine pas le bon `params_count` (c’est toi qui dois le calculer).
 - Il ne configure pas automatiquement `in_features/out_features`, `seq_len`, `embed_dim`, etc.
-- Il ne route pas des tenseurs multi-entrées à ta place (ça passe par `Layer.inputs` / `Layer.output`).
+- Il ne route pas des tenseurs multi-entrées à votre place (ça passe par `Layer.inputs` / `Layer.output`).
 
 ### Règle d’or : figer la topologie avant `allocateParams()`
 
@@ -189,7 +194,7 @@ Ce que `push()` **ne fait pas** :
 
 Conséquence pratique :
 
-- Si tu changes `params_count` après `allocateParams()`, tu dois réallouer (rebuild + `allocateParams()` à nouveau), sinon les lectures via `Layer::getWeights()` deviennent incohérentes.
+- Si vous changez `params_count` après `allocateParams()`, vous devez réallouer (rebuild + `allocateParams()` à nouveau), sinon les lectures via `Layer::getWeights()` deviennent incohérentes.
 
 ## Routing (wiring) : `inputs` / `output`
 
@@ -198,7 +203,7 @@ Le forward (dans `Model::forwardPassView`) utilise un `TensorStore` interne adre
 - Si `layer.inputs` est vide → entrée par défaut `{"x"}`.
 - Si `layer.output` est vide → sortie par défaut `"x"`.
 
-Donc, pour construire un graphe non-linéaire (skip connections, concat, add…), tu règles :
+Donc, pour construire un graphe non-linéaire (skip connections, concat, add…), vous réglez :
 
 - `layer.inputs = {"a", "b", ...}`
 - `layer.output = "c"`
@@ -206,12 +211,12 @@ Donc, pour construire un graphe non-linéaire (skip connections, concat, add…)
 Notes importantes :
 
 - Le modèle injecte aussi un alias immuable `"__input__"` au début du forward (utile si `"x"` est réutilisé par la suite avec une taille différente).
-- En mode multi-entrées (`forwardPassNamed`), tu peux injecter des tenseurs float et des tenseurs int dans le store (et certains alias sont ajoutés côté runtime).
+- En mode multi-entrées (`forwardPassNamed`), vous pouvez injecter des tenseurs float et des tenseurs int dans le store (et certains alias sont ajoutés côté runtime).
 
 ## Paramétrer les paramètres internes des layers (C++)
 
 Les paramètres “internes” d’un layer sont essentiellement les champs de `struct Layer` (`src/Layers.hpp`).
-Ils sont lus pendant le forward via le `switch (LayerType)` dans `src/Model.cpp` et via les helpers dans `src/LayerOps.hpp` / `src/LayerOpsExt.hpp`.
+Ils sont lus pendant le forward via le `switch (LayerType)` dans `src/Model.cpp` et via les helpers dans `src/runtimes/cpu/LayerOps.hpp` / `src/runtimes/cpu/LayerOpsExt.hpp`.
 
 ### Pattern général
 
@@ -293,7 +298,7 @@ int main() {
 Ici, on produit deux tenseurs nommés puis on les additionne.
 
 ```cpp
-// Hypothèse: tu as déjà créé deux branches qui écrivent dans "a" et "b".
+// Hypothèse: vous avez déjà créé deux branches qui écrivent dans "a" et "b".
 m.push("add", "Add", 0);
 Layer* add = m.getLayerByName("add");
 add->inputs = {"a", "b"};
@@ -320,6 +325,12 @@ int main() {
 
 ## Points d’attention
 
-- `forwardPassView` / `forwardPassNamedView` renvoient une référence vers un buffer interne : si tu appelles un autre forward ensuite, la référence peut changer.
+- `forwardPassView` / `forwardPassNamedView` renvoient une référence vers un buffer interne : si vous appelez un autre forward ensuite, la référence peut changer.
 - Le support backward/optimizer dépend de l’architecture et des layers réellement utilisés : c’est volontairement “best-effort”.
 - La config (dimensions, `seq_len`, `embed_dim`, etc.) est majoritairement définie par le registre `ModelArchitectures`.
+
+## Étapes suivantes
+
+- [Page précédente : Internals: AdvancedRAMManager (cache RAM / compression / spill disque)](05-AdvancedRAMManager.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Internals : `Helpers.hpp` (helpers C++)](11-Helpers.md)

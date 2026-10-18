@@ -1,21 +1,16 @@
 # Inférence
 
-## Pour qui
-
-Débutant à intermédiaire.
-
-## Objectif
-
 Exécuter une inférence propre depuis un modèle créé ou chargé.
 
-## Avant de commencer
+**Public concerné :** Débutant à intermédiaire.
 
-Avoir un checkpoint ou une config d'architecture.
+> **Prérequis**
+>
+> Avoir un checkpoint ou une config d'architecture.
 
-## Résultat attendu
+## Diagramme d'explication
 
-Tu obtiens une sortie de modèle reproductible.
-
+![Pipeline d'inférence](../graphs/12_inference_pipeline.svg)
 
 Cette page se concentre sur l’inférence **via l’API Lua**.
 
@@ -42,7 +37,7 @@ Dans la plupart des scripts, on configure d’abord:
 - `Mimir.Allocator.configure({ max_ram_gb=..., enable_compression=true, swap_strategy="lru" })`
 - `Mimir.Model.set_hardware(true)` (si dispo)
 
-Exemples: `scripts/examples/example_simple.lua`, `scripts/examples/example_gpt.lua`.
+Exemples: `scripts/examples/example_conf_inference.lua`, `scripts/inferences/hf_vae_decoder_infer.lua`.
 
 ### Exemple: charger un checkpoint puis faire un forward
 
@@ -94,7 +89,7 @@ L’API accepte deux formes d’inputs:
 
 Recommandation:
 
-- utilise la forme map même pour un seul input: ça évite de casser tes scripts si tu changes de modèle.
+- utilise la forme map même pour un seul input: ça évite de casser vos scripts si vous changez de modèle.
 
 ## Génération (LLM)
 
@@ -105,7 +100,7 @@ Pour des Transformers causaux (GPT-style):
 
 Dans l’état actuel, les scripts de démo montrent surtout:
 
-- la construction et l’entraînement (ex: `scripts/examples/example_gpt.lua`)
+- la construction/inférence via config (`scripts/examples/example_conf_inference.lua`)
 - un chemin legacy `Mimir.Model.infer(prompt)`
 
 ### `Mimir.Model.infer(prompt)` (legacy)
@@ -115,3 +110,9 @@ Dans l’état actuel, les scripts de démo montrent surtout:
 - utile pour certaines démos
 - pas recommandé comme base “production”
 - n’implique pas automatiquement une boucle d’échantillonnage moderne (sampling + cache)
+
+## Étapes suivantes
+
+- [Page précédente : Entraînement](04-Training.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Scripting Lua](06-Lua-Scripting.md)

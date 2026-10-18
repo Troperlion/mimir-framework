@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="600" viewBox="0 0 1500 600" role="img" aria-labelledby="title desc">
+<title id="title">Inspection et export</title><desc id="desc">Diagramme vectoriel éditable généré depuis les dumps du framework.</desc>
+<defs>
+<marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#475569"/></marker>
+<marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#2563eb"/></marker>
+<style><![CDATA[text{font-family:Inter,Segoe UI,Arial,sans-serif}.title{font-size:34px;font-weight:800;fill:#0f172a}.subtitle{font-size:16px;fill:#475569}.label{font-size:17px;font-weight:700;fill:#0f172a}.small{font-size:13px;fill:#475569}.tiny{font-size:11px;fill:#64748b}.box{stroke:#94a3b8;stroke-width:1.4;rx:14}.edge{stroke:#475569;stroke-width:2.2;fill:none;marker-end:url(#arrow)}.edgeB{stroke:#2563eb;stroke-width:2.4;fill:none;marker-end:url(#arrowBlue)}.dash{stroke-dasharray:7 7}.note{font-size:12px;fill:#475569}]]></style>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="60" y="62" class="title" text-anchor="start">Inspection et export</text>
+<text x="60" y="92" class="subtitle" text-anchor="start">Flux recommandé pour lister, exporter et analyser les architectures.</text>
+<line x1="60" y1="112" x2="1440" y2="112" stroke="#e2e8f0" stroke-width="2"/>
+<rect x="70.0" y="240" width="249.6" height="110" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="194.8" y="265" class="label" text-anchor="middle">inspect -a</text>
+<text x="194.8" y="322" class="small" text-anchor="middle">liste architectures</text>
+<rect x="347.6" y="240" width="249.6" height="110" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="472.40000000000003" y="265" class="label" text-anchor="middle">inspect -l</text>
+<text x="472.40000000000003" y="322" class="small" text-anchor="middle">détail modèle</text>
+<path d="M319.6,295.0 L347.6,295.0" class="edgeB"/>
+<rect x="625.2" y="240" width="249.6" height="110" rx="14" fill="#fef3c7" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="750.0" y="265" class="label" text-anchor="middle">export</text>
+<text x="750.0" y="322" class="small" text-anchor="middle">JSON/folder/st</text>
+<path d="M597.2,295.0 L625.2,295.0" class="edgeB"/>
+<rect x="902.8000000000001" y="240" width="249.6" height="110" rx="14" fill="#ffedd5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1027.6000000000001" y="265" class="label" text-anchor="middle">analyze_model</text>
+<text x="1027.6000000000001" y="322" class="small" text-anchor="middle">stats + graphe</text>
+<path d="M874.8000000000001,295.0 L902.8000000000001,295.0" class="edgeB"/>
+<rect x="1180.4" y="240" width="249.6" height="110" rx="14" fill="#dbeafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1305.2" y="265" class="label" text-anchor="middle">graph-out</text>
+<text x="1305.2" y="322" class="small" text-anchor="middle">SVG publiable</text>
+<path d="M1152.4,295.0 L1180.4,295.0" class="edgeB"/>
+<text x="1440" y="576" class="tiny" text-anchor="end">Mímir Framework — SVG vectoriel éditable</text>
+</svg>

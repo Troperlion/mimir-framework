@@ -1,7 +1,10 @@
 #!/usr/bin/env lua
+local Help = dofile(ROOTWORK.."/scripts/modules/help_cli.lua")
+Help.auto_exit_help()
+
 ---@diagnostic disable: undefined-field, need-check-nil
 
--- Smoke test sérialisation (SafeTensors) — Mímir Framework v2.4.0
+-- Smoke test sérialisation (SafeTensors) — Mímir Framework v3.5.0
 -- Objectif: valider rapidement la surface API Mimir.Serialization.save/load.
 -- Usage:
 --   ./bin/mimir --lua scripts/tests/test_serialization_smoke.lua

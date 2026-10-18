@@ -1,0 +1,452 @@
+{
+  "default_dtype": "float32",
+  "encoder": {
+    "architecture": "ViT",
+    "has_encoder": true
+  },
+  "features": [
+    "layer_config",
+    "real_shapes",
+    "layer_io",
+    "extended_layer_types",
+    "framework_state",
+    "checksums"
+  ],
+  "format": "mimir_debug_dump",
+  "format_version": "1.3.0",
+  "framework_state": {
+    "memory": {
+      "advanced_ram_manager": {
+        "allocations_blocked": false,
+        "current_bytes": 0,
+        "current_mb": 0.0,
+        "freeze_mode": false,
+        "peak_bytes": 0,
+        "peak_mb": 0.0,
+        "usage_percent": 0.0
+      },
+      "dynamic_tensor_allocator": {
+        "loaded_count": 3,
+        "tensor_count": 3
+      },
+      "memory_guard": {
+        "allocations_blocked": false,
+        "current_bytes": 789504,
+        "current_mb": 0.7529296875,
+        "freeze_mode": false,
+        "limit_bytes": 10737418240,
+        "limit_mb": 10240.0,
+        "peak_bytes": 789504,
+        "peak_mb": 0.7529296875,
+        "usage_percent": 0.0073528289794921875
+      }
+    },
+    "model": {
+      "default_dtype": "float32",
+      "has_encoder": true,
+      "image_height": 64,
+      "image_width": 64,
+      "model_config": {
+        "dropout": 0.0,
+        "hidden_dim": 256,
+        "hidden_layers": 2,
+        "input_dim": 256,
+        "output_dim": 256,
+        "type": "basic_mlp"
+      },
+      "model_name": "BasicMLPModel",
+      "num_layers": 6,
+      "parameters_frozen": false,
+      "tokenizer_vocab_size": 47,
+      "total_params": 197376
+    },
+    "registry": {
+      "supported_layer_count": 70,
+      "supported_layer_types": [
+        "Conv2d",
+        "ConvTranspose2d",
+        "Conv1d",
+        "DepthwiseConv2d",
+        "Linear",
+        "Bilinear",
+        "Embedding",
+        "EmbeddingBag",
+        "BatchNorm2d",
+        "BatchNorm1d",
+        "LayerNorm",
+        "GroupNorm",
+        "InstanceNorm2d",
+        "RMSNorm",
+        "ReLU",
+        "LeakyReLU",
+        "GELU",
+        "GEGLU",
+        "SiLU",
+        "Tanh",
+        "Sigmoid",
+        "Softmax",
+        "LogSoftmax",
+        "Softplus",
+        "Mish",
+        "HardSigmoid",
+        "HardSwish",
+        "MaxPool2d",
+        "AvgPool2d",
+        "AdaptiveAvgPool2d",
+        "GlobalAvgPool2d",
+        "MaxPool1d",
+        "AvgPool1d",
+        "TokenMeanPool",
+        "Dropout",
+        "Dropout2d",
+        "AlphaDropout",
+        "Flatten",
+        "Reshape",
+        "Transpose",
+        "Permute",
+        "Squeeze",
+        "Unsqueeze",
+        "View",
+        "Add",
+        "Subtract",
+        "Multiply",
+        "Divide",
+        "Concat",
+        "Split",
+        "Chunk",
+        "Stack",
+        "MatMul",
+        "BatchMatMul",
+        "SelfAttention",
+        "MultiHeadAttention",
+        "CrossAttention",
+        "UpsampleNearest",
+        "UpsampleBilinear",
+        "UpsampleBicubic",
+        "PixelShuffle",
+        "LSTM",
+        "GRU",
+        "RNN",
+        "ZeroPad2d",
+        "ReflectionPad2d",
+        "ReplicationPad2d",
+        "Identity",
+        "Constant",
+        "Lambda"
+      ]
+    },
+    "runtime": {
+      "backends": {
+        "cpu": {
+          "available": true,
+          "compiled": true,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CPU",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "cuda": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CUDA",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "opencl": {
+          "available": false,
+          "compiled": true
+        },
+        "rocm": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "ROCM",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "vulkan": {
+          "available": true,
+          "compiled": true
+        }
+      },
+      "cpu_features": {
+        "avx2": true,
+        "bmi2": true,
+        "f16c": true,
+        "fma": true
+      },
+      "environment_overrides": {},
+      "framework_logs_suppressed": false
+    },
+    "snapshot_timestamp": 1783546783,
+    "snapshot_version": "1.0.0"
+  },
+  "git": {
+    "branch": "unknown",
+    "commit": "unknown"
+  },
+  "layers": [
+    {
+      "index": 0,
+      "inputs": [
+        "__input__"
+      ],
+      "name": "basic_mlp/raw_in",
+      "output": "basic_mlp/in",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Identity"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 256,
+        "out_features": 256
+      },
+      "index": 1,
+      "inputs": [
+        "basic_mlp/in"
+      ],
+      "name": "basic_mlp/fc1",
+      "output": "basic_mlp/h1",
+      "params_count": 65792,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "basic_mlp/fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            256
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 65536,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 2,
+      "inputs": [
+        "basic_mlp/h1"
+      ],
+      "name": "basic_mlp/fc1/gelu",
+      "output": "basic_mlp/h1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 256,
+        "out_features": 256
+      },
+      "index": 3,
+      "inputs": [
+        "basic_mlp/h1_act"
+      ],
+      "name": "basic_mlp/fc2",
+      "output": "basic_mlp/h2",
+      "params_count": 65792,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "basic_mlp/fc2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            256
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 65536,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 4,
+      "inputs": [
+        "basic_mlp/h2"
+      ],
+      "name": "basic_mlp/fc2/gelu",
+      "output": "basic_mlp/h2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 256,
+        "out_features": 256
+      },
+      "index": 5,
+      "inputs": [
+        "basic_mlp/h2_act"
+      ],
+      "name": "basic_mlp/out",
+      "output": "x",
+      "params_count": 65792,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "basic_mlp/out.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            256
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 65536,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    }
+  ],
+  "model_config": {
+    "dropout": 0.0,
+    "dtype": "float32",
+    "hidden_dim": 256,
+    "hidden_layers": 2,
+    "input_dim": 256,
+    "output_dim": 256,
+    "type": "basic_mlp"
+  },
+  "model_name": "BasicMLPModel",
+  "num_layers": 6,
+  "timestamp": 1783546783,
+  "tokenizer": {
+    "has_vocab": true,
+    "vocab_size": 47
+  },
+  "total_params": 197376,
+  "default_params": {
+    "dropout": 0,
+    "hidden_dim": 256,
+    "hidden_layers": 2,
+    "input_dim": 256,
+    "output_dim": 256
+  }
+}

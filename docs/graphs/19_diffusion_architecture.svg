@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="650" viewBox="0 0 1500 650" role="img" aria-labelledby="title desc">
+<title id="title">DiffusionModel — architecture</title><desc id="desc">Diagramme vectoriel éditable généré depuis les dumps du framework.</desc>
+<defs>
+<marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#475569"/></marker>
+<marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#2563eb"/></marker>
+<style><![CDATA[text{font-family:Inter,Segoe UI,Arial,sans-serif}.title{font-size:34px;font-weight:800;fill:#0f172a}.subtitle{font-size:16px;fill:#475569}.label{font-size:17px;font-weight:700;fill:#0f172a}.small{font-size:13px;fill:#475569}.tiny{font-size:11px;fill:#64748b}.box{stroke:#94a3b8;stroke-width:1.4;rx:14}.edge{stroke:#475569;stroke-width:2.2;fill:none;marker-end:url(#arrow)}.edgeB{stroke:#2563eb;stroke-width:2.4;fill:none;marker-end:url(#arrowBlue)}.dash{stroke-dasharray:7 7}.note{font-size:12px;fill:#475569}]]></style>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="60" y="62" class="title" text-anchor="start">DiffusionModel — architecture</text>
+<text x="60" y="92" class="subtitle" text-anchor="start">Baseline MLP epsilon predictor : input=t_embed||x_t, hidden_dim=2048.</text>
+<line x1="60" y1="112" x2="1440" y2="112" stroke="#e2e8f0" stroke-width="2"/>
+<rect x="1110" y="135" width="320" height="90" rx="14" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1270.0" y="160" class="label" text-anchor="middle">Métriques du dump</text>
+<text x="1270.0" y="197" class="small" text-anchor="middle">4 couches • 50.61 M params</text>
+<rect x="70" y="330" width="220" height="105" rx="14" fill="#dbeafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="180.0" y="355" class="label" text-anchor="middle">Input</text>
+<text x="180.0" y="407" class="small" text-anchor="middle">t_embed || x_t</text>
+<rect x="318" y="330" width="220" height="105" rx="14" fill="#fef3c7" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="428.0" y="355" class="label" text-anchor="middle">Linear fc1</text>
+<text x="428.0" y="407" class="small" text-anchor="middle">12 416 → 2 048</text>
+<path d="M290,382.5 L318,382.5" class="edgeB"/>
+<rect x="566" y="330" width="220" height="105" rx="14" fill="#ffedd5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="676.0" y="355" class="label" text-anchor="middle">GELU</text>
+<text x="676.0" y="407" class="small" text-anchor="middle">activation</text>
+<path d="M538,382.5 L566,382.5" class="edgeB"/>
+<rect x="814" y="330" width="220" height="105" rx="14" fill="#fef3c7" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="924.0" y="355" class="label" text-anchor="middle">Linear out</text>
+<text x="924.0" y="407" class="small" text-anchor="middle">2 048 → output</text>
+<path d="M786,382.5 L814,382.5" class="edgeB"/>
+<rect x="1062" y="330" width="220" height="105" rx="14" fill="#dbeafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1172.0" y="355" class="label" text-anchor="middle">ε prediction</text>
+<text x="1172.0" y="407" class="small" text-anchor="middle">bruit estimé</text>
+<path d="M1034,382.5 L1062,382.5" class="edgeB"/>
+<text x="1440" y="626" class="tiny" text-anchor="end">Mímir Framework — SVG vectoriel éditable</text>
+</svg>

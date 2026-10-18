@@ -1,8 +1,11 @@
+local Help = dofile(ROOTWORK.."/scripts/modules/help_cli.lua")
+Help.auto_exit_help()
+
 ---@diagnostic disable: undefined-global, undefined-field, inject-field
 
 -- Smoke-test: VAEConv avec attention (sans mémoire encodeur).
 -- Objectif: valider que Model.create + allocate_params + forward passent
--- quand use_attention=true.
+-- quand attention=true.
 --
 -- Usage:
 --   ./bin/mimir --lua scripts/tests/test_vae_conv_attention_smoke.lua
@@ -45,9 +48,9 @@ cfg.text_cond = false
 cfg.stochastic_latent = false
 
 -- Activer attention uniquement au bottleneck (16*16=256 tokens)
-cfg.use_attention = false
+cfg.resnet = false
 cfg.resnet_max_tokens = 0
-cfg.use_attn = true
+cfg.attention = true
 cfg.attn_heads = 4
 cfg.attn_max_tokens = 256
 

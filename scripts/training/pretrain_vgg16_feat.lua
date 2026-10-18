@@ -1,8 +1,9 @@
 ---@diagnostic disable: undefined-global, undefined-field, inject-field
-local Args = dofile("scripts/modules/args.lua")
+local Args = dofile(ROOTWORK.."/scripts/modules/args.lua")
 local opts = Args.parse(arg) or {}
+local FS = dofile(ROOTWORK.."/scripts/modules/fs.lua")
 
-local Ckpt = dofile("scripts/modules/checkpoint_resume.lua")
+local Ckpt = dofile(ROOTWORK.."/scripts/modules/checkpoint_resume.lua")
 
 local function opt_num(k, d)
   local v = opts[k]
@@ -74,25 +75,25 @@ local epochs = opt_int("epochs", 10)
 local lr = opt_num("lr", 1e-4)
 local seed = opt_int("seed", opt_int("init-seed", 1337))
 
-local image_w = opt_int("image-w", 256)
-local image_h = opt_int("image-h", 256)
+local image_w = opt_int("image-w", 1024)
+local image_h = opt_int("image-h", 1024)
 local image_c = opt_int("image-c", 3)
 
 -- `base_channels` du vgg16_feat = `perceptual_base_channels` côté VAEConv.
 -- NOTE: l'archi `vgg16_feat` force `base_channels >= 4` côté C++.
-local base_channels = opt_int("base-channels", opt_int("perceptual-base-channels", 2))
+local base_channels = opt_int("base-channels", opt_int("perceptual-base-channels", 16))
 if base_channels < 4 then base_channels = 4 end
 
 local autosave_every_epochs = opt_int("autosave-every-epochs", opt_int("autosave", 1))
 local max_items = opt_int("max-items", 0)
-local log_every = opt_int("log-every", 10)
-local pretrain_grid = opt_int("pretrain-grid", 8)
+local log_every = opt_int("log-every", 1)
+local pretrain_grid = opt_int("pretrain-grid", 16)
 
 -- Viz/monitoring (consommés par LuaScripting.cpp)
 -- NOTE: l'activation de la viz se fait via les flags `--viz` / `--htop` (Args.parse).
-local viz_taps_every_steps = opt_int("viz-taps-every-steps", opt_int("viz-every-steps", 0))
-local viz_taps_max_frames = opt_int("viz-taps-max-frames", opt_int("viz-max-frames", 0))
-local viz_taps_max_side = opt_int("viz-taps-max-side", opt_int("viz-max-side", 0))
+local viz_taps_every_steps = opt_int("viz-taps-every-steps", opt_int("viz-every-steps", 1))
+local viz_taps_max_frames = opt_int("viz-taps-max-frames", opt_int("viz-max-frames", 400))
+local viz_taps_max_side = opt_int("viz-taps-max-side", opt_int("viz-max-side", 1024))
 
 -- Optimizer knobs (consommés par LuaScripting::lua_trainModel)
 local optimizer = opt_str("optimizer", "adamw")
@@ -100,14 +101,19 @@ local beta1 = opt_num("beta1", 0.9)
 local beta2 = opt_num("beta2", 0.999)
 local epsilon = opt_num("epsilon", 1e-8)
 local weight_decay = opt_num("weight-decay", 1e-6)
-local decay_strategy = opt_str("decay-strategy", "cosine")
-local warmup_steps = opt_int("warmup-steps", opt_int("lr-warmup-steps", 0))
+local decay_strategy = opt_str("decay-strategy", "linear")
+local warmup_steps = opt_int("warmup-steps", opt_int("lr-warmup-steps", 1500))
 -- Gradient clipping (L2 global). 0 = désactivé. Consommé par Model::optimizerStep
 -- (lit modelConfig["grad_clip_norm"]). Indispensable ici: la boucle vgg16_feat
 -- explose sans clipping (gradient explosion -> loss ~1e13).
-local grad_clip_norm = opt_num("grad-clip-norm", opt_num("clip-norm", 1.0))
+local grad_clip_norm = opt_num("grad-clip-norm", opt_num("clip-norm", 1.5))
 
-os.execute("mkdir -p '" .. out_dir:gsub("'", "'\\''") .. "' 2>/dev/null")
+local enc_norm = opt_str("enc-norm", "groupnorm")
+local enc_gn_groups = math.max(1, opt_int("enc-gn-groups", 32))
+local dtype = opt_str("dtype", "float32")
+
+
+FS.mkdir_p(out_dir)
 
 log("=== Pretrain vgg16_feat ===")
 log(string.format("- dataset_root=%s", dataset_root))
@@ -119,6 +125,8 @@ log(string.format("- autosave_every_epochs=%d max_items=%d log_every=%d", autosa
 log(string.format("- pretrain_grid=%d", pretrain_grid))
 log(string.format("- optimizer=%s wd=%.3g decay=%s warmup_steps=%d", optimizer, weight_decay, decay_strategy, warmup_steps))
 log(string.format("- grad_clip_norm=%.3g", grad_clip_norm))
+log(string.format("- enc_norm=%s enc_gn_groups=%d", enc_norm, enc_gn_groups))
+
 
 -- Dataset
 local ok_ds, n_or_err = Mimir.Dataset.load(dataset_root, image_w, image_h, 1, true, 'dataset_cache.json', 10240, true)
@@ -156,6 +164,10 @@ cfg.warmup_steps = warmup_steps
 if grad_clip_norm and grad_clip_norm > 0 then
   cfg.grad_clip_norm = grad_clip_norm
 end
+
+cfg.enc_norm = enc_norm
+cfg.enc_gn_groups = enc_gn_groups
+cfg.dtype = dtype
 
 assert_ok(Mimir.Model.create("vgg16_feat", cfg), nil, "Model.create(vgg16_feat) failed")
 apply_dtype(cfg)
@@ -212,7 +224,7 @@ if ok_train == false and tostring(err_train) == "STOP_REQUESTED" then
     last_dir = out_dir
   end
 
-  os.execute("mkdir -p '" .. tostring(last_dir):gsub("'", "'\\''") .. "' 2>/dev/null")
+  FS.mkdir_p(last_dir)
   local ok_save_stop, err_save_stop = Mimir.Serialization.save(last_dir, "raw_folder", {
     save_optimizer = true,
     include_checksums = true,
@@ -229,7 +241,7 @@ assert_ok(ok_train, err_train, "Model.train failed")
 -- Sauvegarde finale
 do
   local final_dir = out_dir .. "/final"
-  os.execute("mkdir -p '" .. final_dir:gsub("'", "'\\''") .. "' 2>/dev/null")
+  FS.mkdir_p(final_dir)
   local ok_save, err_save = Mimir.Serialization.save(final_dir, "raw_folder", {
     save_optimizer = true,
     include_checksums = true,

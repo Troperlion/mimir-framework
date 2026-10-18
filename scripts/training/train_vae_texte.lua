@@ -15,10 +15,11 @@
 --   --optimizer/beta1/beta2/epsilon/weight-decay,
 --   --validate-*, --autosave-every-epochs, --dtype, --override, etc.
 
-local Args = dofile("scripts/modules/args.lua")
+local Args = dofile(ROOTWORK.."/scripts/modules/args.lua")
 local opts = Args.parse(arg) or {}
+local FS = dofile(ROOTWORK.."/scripts/modules/fs.lua")
 
-local Ckpt = dofile("scripts/modules/checkpoint_resume.lua")
+local Ckpt = dofile(ROOTWORK.."/scripts/modules/checkpoint_resume.lua")
 
 local function opt_num(k, d)
   local v = opts[k]
@@ -48,7 +49,7 @@ local function opt_bool(k, d)
   return d
 end
 
-local BaseTok = dofile("scripts/modules/base_tokenizer.lua")
+local BaseTok = dofile(ROOTWORK.."/scripts/modules/base_tokenizer.lua")
 
 local function assert_ok(ok, err, msg)
   if ok == false then
@@ -119,6 +120,12 @@ cfg.num_heads = opt_int("heads", opt_int("num-heads", opt_int("num_heads", cfg.n
 cfg.mlp_hidden = opt_int("mlp-hidden", opt_int("mlp_hidden", cfg.mlp_hidden or 1024))
 cfg.latent_tokens = opt_int("latent-tokens", opt_int("latent_tokens", cfg.latent_tokens or 32))
 cfg.proj_dim = opt_int("proj-dim", opt_int("proj_dim", cfg.proj_dim or 256))
+cfg.decoder_causal = opt_bool("decoder-causal", opt_bool("decoder_causal", cfg.decoder_causal ~= false))
+cfg.enable_conditional_encoder = opt_bool("enable-conditional-encoder", opt_bool("enable_conditional_encoder", cfg.enable_conditional_encoder ~= false))
+cfg.enable_context_heads = opt_bool("enable-context-heads", opt_bool("enable_context_heads", cfg.enable_context_heads ~= false))
+cfg.context_semantic_dim = opt_int("context-semantic-dim", opt_int("context_semantic_dim", cfg.context_semantic_dim or 64))
+cfg.context_thematic_dim = opt_int("context-thematic-dim", opt_int("context_thematic_dim", cfg.context_thematic_dim or 32))
+cfg.context_dialog_dim = opt_int("context-dialog-dim", opt_int("context_dialog_dim", cfg.context_dialog_dim or 64))
 cfg.stochastic_latent = opt_bool(
   "stochastic-latent",
   opt_bool(
@@ -127,13 +134,16 @@ cfg.stochastic_latent = opt_bool(
   )
 )
 
--- Training knobs consumed by Model::trainStepVAEText
+-- Training knobs consumed by the Model::trainStep hook
 cfg.align_weight = opt_num("align-weight", opt_num("align_weight", cfg.align_weight or 0.0))
 cfg.kl_beta = opt_num("kl-beta", opt_num("kl_beta", cfg.kl_beta or 0.01))
 cfg.kl_warmup_steps = opt_int("kl-warmup-steps", opt_int("kl-warmup", opt_int("kl_warmup", cfg.kl_warmup_steps or 0)))
 cfg.recon_loss = opt_str("recon-loss", opt_str("recon_loss", cfg.recon_loss or "ce"))
 cfg.logvar_clip_min = opt_num("logvar-clip-min", opt_num("logvar_clip_min", cfg.logvar_clip_min or -6.0))
 cfg.logvar_clip_max = opt_num("logvar-clip-max", opt_num("logvar_clip_max", cfg.logvar_clip_max or 2.0))
+cfg.context_semantic_weight = opt_num("context-semantic-weight", opt_num("context_semantic_weight", cfg.context_semantic_weight or 0.08))
+cfg.context_thematic_weight = opt_num("context-thematic-weight", opt_num("context_thematic_weight", cfg.context_thematic_weight or 0.05))
+cfg.context_dialog_weight = opt_num("context-dialog-weight", opt_num("context_dialog_weight", cfg.context_dialog_weight or 0.10))
 cfg.grad_accum_steps = opt_int("grad-accum-steps", cfg.grad_accum_steps or 1)
 cfg.grad_clip_norm = opt_num("grad-clip-norm", cfg.grad_clip_norm or 1.0)
 cfg.max_items = opt_int("max-items", cfg.max_items or 0)
@@ -177,6 +187,7 @@ do
   assert(ok_bt == true, "Base tokenizer: " .. tostring(err_bt))
 end
 cfg.vocab_size = BaseTok.vocab_size()
+cfg.tokenizer_integrated = true
 cfg.tokenizer_frozen = true
 cfg.padding_idx = BaseTok.pad_id and BaseTok.pad_id() or (cfg.padding_idx or 0)
 
@@ -190,8 +201,11 @@ log(string.format("  out_dir(resume_from)=%s", out_dir))
 log(string.format("  output_model(save_to)=%s", save_out_dir))
 log(string.format("  seq_len=%d d_model=%d latent_tokens=%d proj_dim=%d", cfg.seq_len, cfg.d_model, cfg.latent_tokens, cfg.proj_dim))
 log(string.format("  layers=%d heads=%d mlp_hidden=%d", cfg.num_layers, cfg.num_heads, cfg.mlp_hidden))
+log(string.format("  decoder_causal=%s cond_encoder=%s context_heads=%s", tostring(cfg.decoder_causal), tostring(cfg.enable_conditional_encoder), tostring(cfg.enable_context_heads)))
+log(string.format("  context_dims: semantic=%d thematic=%d dialog=%d", cfg.context_semantic_dim, cfg.context_thematic_dim, cfg.context_dialog_dim))
 log(string.format("  epochs=%d lr=%g kl_beta=%g", epochs, lr, cfg.kl_beta))
 log(string.format("  recon_loss=%s align_weight=%g", tostring(cfg.recon_loss), tonumber(cfg.align_weight or 0.0) or 0.0))
+log(string.format("  context_weights: semantic=%g thematic=%g dialog=%g", cfg.context_semantic_weight, cfg.context_thematic_weight, cfg.context_dialog_weight))
 log(string.format("  logvar_clip=[%g,%g] grad_accum_steps=%d grad_clip=%g", cfg.logvar_clip_min, cfg.logvar_clip_max, cfg.grad_accum_steps, cfg.grad_clip_norm))
 log(string.format("  optimizer=%s beta1=%g beta2=%g wd=%g", tostring(cfg.optimizer), cfg.beta1, cfg.beta2, cfg.weight_decay))
 log(string.format("  warmup_steps=%d decay=%s", cfg.warmup_steps or 0, tostring(cfg.decay_strategy)))
@@ -244,7 +258,7 @@ end
 -- Snapshot debug JSON avant entraînement
 do
   local starttrain_path = save_out_dir .. "/starttrain.json"
-  os.execute("mkdir -p '" .. save_out_dir:gsub("'", "'\\''") .. "' 2>/dev/null")
+  FS.mkdir_p(save_out_dir)
   local ok_dbg, err_dbg = Mimir.Serialization.save(starttrain_path, "debug_json", {
     save_tokenizer = true,
     save_encoder = true,
@@ -268,7 +282,7 @@ if ok_train == false and tostring(err_train) == "STOP_REQUESTED" then
   end
   if not last_dir then last_dir = save_out_dir end
 
-  os.execute("mkdir -p '" .. tostring(last_dir):gsub("'", "'\\''") .. "' 2>/dev/null")
+  FS.mkdir_p(last_dir)
   local ok_save_stop, err_save_stop = Mimir.Serialization.save(last_dir, "raw_folder", {
     save_optimizer = true,
     save_tokenizer = true,
@@ -287,7 +301,7 @@ end
 assert_ok(ok_train, err_train, "Model.train failed")
 
 -- Sauvegarde
-os.execute("mkdir -p '" .. save_out_dir:gsub("'", "'\\''") .. "' 2>/dev/null")
+FS.mkdir_p(save_out_dir)
 local ok_save, err_save = Mimir.Serialization.save(save_out_dir, "raw_folder", {
   save_optimizer = true,
   save_tokenizer = true,

@@ -1,0 +1,50 @@
+{
+  "$schema": "./conf.schema.json",
+  "lua": {
+    "scripts": ["scripts/training/train_causal_lm.lua"]
+  },
+  "model": {
+    "architecture": "causal_lm",
+    "vocab_size": 4096,
+    "seq_len": 128,
+    "d_model": 256,
+    "num_layers": 6,
+    "num_heads": 8,
+    "num_kv_heads": 2,
+    "mlp_hidden": 704,
+    "padding_idx": 0,
+    "norm_eps": 0.00001,
+    "rope_theta": 10000.0
+  },
+  "tokenizer": {
+    "path": "tokenizer.json"
+  },
+  "dataset": {
+    "text_path": "data/corpus.txt"
+  },
+  "training": {
+    "steps": 10000,
+    "learning_rate": 0.0003,
+    "optimizer": "adamw",
+    "beta1": 0.9,
+    "beta2": 0.95,
+    "epsilon": 1e-8,
+    "weight_decay": 0.1,
+    "grad_clip_norm": 1.0,
+    "amp": true,
+    "ddp": true,
+    "log_every": 1,
+    "save_every": 500,
+    "checkpoint_dir": "checkpoints/causal_lm",
+    "seed": 1337
+  },
+  "visualization": {
+
+    "enabled": true,
+    "window_title": "Model Visualization",
+    "update_interval_ms": 200,
+    "fps_limit": 60,
+    "show_generated_images": false
+
+  }
+}

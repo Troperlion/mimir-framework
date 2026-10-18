@@ -1,23 +1,29 @@
-# Config Et Registre D'Architectures
-
-## Pour qui
-
-Développeur framework (C/C++/runtime/scripting).
-
-## Objectif
+# Configuration et registre d’architectures
 
 Implémenter ou modifier des briques techniques sans casser le contrat global.
 
-## Avant de commencer
+**Public concerné :** Développeur framework (C/C++/runtime/scripting).
 
-Comprendre le registre d'architectures et les conventions I/O.
-
-## Résultat attendu
-
-Tu peux livrer des évolutions compatibles avec la base existante.
+> **Prérequis**
+>
+> Comprendre le registre d'architectures et les conventions I/O.
 
 
 Ce chapitre explique comment composer une config, creer une architecture, et la renseigner au registre.
+
+## Sur cette page
+
+- [1. Pourquoi le registre existe](#1-pourquoi-le-registre-existe)
+- [2. Contrat du registre](#2-contrat-du-registre)
+- [3. Composer une config modele](#3-composer-une-config-modele)
+- [4. Ajouter une nouvelle architecture](#4-ajouter-une-nouvelle-architecture)
+- [5. Exemple conceptuel d'entree registre](#5-exemple-conceptuel-dentree-registre)
+- [6. Validation rapide](#6-validation-rapide)
+- [7. Anti-patterns a eviter](#7-anti-patterns-a-eviter)
+- [8. Demo metier - cycle complet registre](#8-demo-metier---cycle-complet-registre)
+- [9. Demo metier - overlays de config sans casser la compat](#9-demo-metier---overlays-de-config-sans-casser-la-compat)
+- [10. Checklist metier de release d'une architecture](#10-checklist-metier-de-release-dune-architecture)
+- [Étapes suivantes](#étapes-suivantes)
 
 ## 1. Pourquoi le registre existe
 
@@ -156,3 +162,9 @@ Attendu metier :
 2. Inspection outillage OK (`-a`, `-l`, `--layers`, `--stats`).
 3. Un script training/inference de smoke passe.
 4. Aucun alias scripting metier existant n'est casse.
+
+## Étapes suivantes
+
+- [Page précédente : Construire Un Modele Et Ses Layers](02-Building-Models-And-Layers.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Runtime - Modifier Et Ajouter Un Backend](04-Runtime-Development.md)

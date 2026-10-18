@@ -26,6 +26,9 @@
 #ifdef ENABLE_ROCM
 #  include "runtimes/rocm/RocmRuntime.hpp"
 #endif
+#ifdef ENABLE_VULKAN
+#  include "runtimes/vulkan/VulkanRuntime.hpp"
+#endif
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers repris du pattern de test_layers_all_types.cpp
@@ -56,6 +59,34 @@ static std::vector<float> run_linear_cpu(
     fin["x0"] = input;
     std::unordered_map<std::string, std::vector<int>> iin;
     return m.forwardPassNamed(fin, iin, /*training=*/false);
+}
+
+// Reuse one runtime across growing/shrinking batches and in-place parameter
+// mutations. A scratch cache must never become a stale parameter cache.
+template <class Runtime>
+static void check_linear_workspace(Runtime& runtime) {
+    for (int batch : {1, 7, 3, 7}) {
+        for (int in : {3, 65}) {
+            const int out = 5;
+            std::vector<float> x(size_t(batch) * in), weights(size_t(out) * in), bias(out), y(size_t(batch) * out);
+            for (int iteration = 0; iteration < 3; ++iteration) {
+                for (size_t i = 0; i < x.size(); ++i) x[i] = float(int(i % 13) - 6 + iteration) / 13;
+                for (size_t i = 0; i < weights.size(); ++i) weights[i] = float(int(i % 17) - 8 - iteration) / 17;
+                for (int o = 0; o < out; ++o) bias[o] = float(o + iteration) / 11;
+                const float* b = iteration == 1 ? nullptr : bias.data();
+                CHECK(runtime.linearForward(x.data(), weights.data(), b, y.data(), batch, in, out));
+                for (int row = 0; row < batch; ++row) {
+                    for (int o = 0; o < out; ++o) {
+                        float expected = 0;
+                        for (int i = 0; i < in; ++i)
+                            expected += x[size_t(row) * in + i] * weights[size_t(o) * in + i];
+                        if (b) expected += b[o];
+                        CHECK(std::abs(y[size_t(row) * out + o] - expected) < 1e-4f);
+                    }
+                }
+            }
+        }
+    }
 }
 
 int main() {
@@ -140,6 +171,7 @@ int main() {
         if (!rt.initialize(cfg)) {
             std::cout << "SKIP: no CUDA device\n";
         } else {
+            check_linear_workspace(rt);
             const float W[4] = {1.f, 2.f,  3.f, 4.f};
             const float x[2] = {1.f, 0.f};
             float y[2]       = {0.f, 0.f};
@@ -215,6 +247,7 @@ int main() {
         if (!rt.initialize(cfg)) {
             std::cout << "SKIP: no ROCm device\n";
         } else {
+            check_linear_workspace(rt);
             const float W[4] = {1.f, 2.f,  3.f, 4.f};
             const float x[2] = {1.f, 0.f};
             float y[2]       = {0.f, 0.f};
@@ -225,6 +258,98 @@ int main() {
         }
     }
 #endif  // ENABLE_ROCM
+
+    // =========================================================================
+    // 8. GPU Vulkan – cas 1 via linearForward() direct
+    // =========================================================================
+#ifdef ENABLE_VULKAN
+    {
+        VulkanRuntime rt;
+        RuntimeConfig cfg;
+        cfg.linear_enabled = true;
+        cfg.linear_min_ops = 0;
+        if (!rt.initialize(cfg)) {
+            std::cout << "SKIP: no Vulkan compute device\n";
+        } else {
+            check_linear_workspace(rt);
+            const float W[4] = {1.f, 2.f,  3.f, 4.f};
+            const float x[2] = {1.f, 0.f};
+            float y[2]       = {0.f, 0.f};
+            const bool ok = rt.linearForward(x, W, nullptr, y, /*batch=*/1, 2, 2);
+            TASSERT_TRUE(ok);
+            TASSERT_NEAR(y[0], 1.f, 1e-4f);
+            TASSERT_NEAR(y[1], 3.f, 1e-4f);
+        }
+    }
+
+    // GPU Vulkan : cas avec biais
+    {
+        VulkanRuntime rt;
+        RuntimeConfig cfg;
+        cfg.linear_enabled = true;
+        cfg.linear_min_ops = 0;
+        if (rt.initialize(cfg)) {
+            const float W[4]  = {1.f, 0.f,  0.f, 1.f};
+            const float b[2]  = {1.f, -1.f};
+            const float x[2]  = {5.f, -3.f};
+            float y[2]        = {0.f, 0.f};
+            const bool ok = rt.linearForward(x, W, b, y, 1, 2, 2);
+            TASSERT_TRUE(ok);
+            TASSERT_NEAR(y[0],  6.f, 1e-4f);
+            TASSERT_NEAR(y[1], -4.f, 1e-4f);
+        }
+    }
+
+    // GPU Vulkan : batch = 2 via forwardLayer
+    {
+        VulkanRuntime rt;
+        RuntimeConfig cfg;
+        cfg.linear_enabled = true;
+        cfg.linear_min_ops = 0;
+        if (rt.initialize(cfg)) {
+            Model m;
+            m.push("x0", "Linear", 0);
+            auto& L = m.getMutableLayers()[0];
+            L.in_features  = 2;
+            L.out_features = 2;
+            L.use_bias     = false;
+            L.params_count = 4;
+            m.allocateParams();
+            float* w = L.getWeights();
+            TASSERT_TRUE(w != nullptr);
+            w[0] = 2.f; w[1] = 0.f;
+            w[2] = 0.f; w[3] = 3.f;
+
+            const std::vector<float> x = {1.f, 1.f,  2.f, 2.f};
+            const std::vector<const std::vector<float>*> inputs = {&x};
+            std::vector<std::vector<float>> outputs;
+            const bool ok = rt.forwardLayer(inputs, outputs, L, false);
+            TASSERT_TRUE(ok);
+            TASSERT_TRUE(outputs.size() == 1 && outputs[0].size() == 4);
+            TASSERT_NEAR(outputs[0][0], 2.f, 1e-4f);
+            TASSERT_NEAR(outputs[0][1], 3.f, 1e-4f);
+            TASSERT_NEAR(outputs[0][2], 4.f, 1e-4f);
+            TASSERT_NEAR(outputs[0][3], 6.f, 1e-4f);
+        }
+    }
+
+    // GPU Vulkan : deux kernels unary chaînés avec un seul upload/download.
+    {
+        VulkanRuntime rt;
+        RuntimeConfig cfg;
+        if (rt.initialize(cfg)) {
+            const float x[4] = {-2.f, -0.5f, 0.f, 2.f};
+            float y[4] = {};
+            const bool ok = rt.unaryChainForwardResident(
+                x, y, 4, {LayerType::ReLU, LayerType::Sigmoid});
+            TASSERT_TRUE(ok);
+            TASSERT_NEAR(y[0], 0.5f, 1e-5f);
+            TASSERT_NEAR(y[1], 0.5f, 1e-5f);
+            TASSERT_NEAR(y[2], 0.5f, 1e-5f);
+            TASSERT_NEAR(y[3], 1.f / (1.f + std::exp(-2.f)), 1e-5f);
+        }
+    }
+#endif  // ENABLE_VULKAN
 
     return 0;
 }

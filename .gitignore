@@ -153,6 +153,28 @@ output_*
 
 # Graphes/artefacts de viz
 graph*.png
+graph_data.json
+graph_report.html
+viz_ui_settings.json
+snapshots/
+
+# Rapports et historiques générés localement
+loss_history*.csv
+rapport.txt
+rapport.md
+hardinfo*_report.txt
+archi-mimir.json
+recon.raw
+
+# Sorties de tests et d'inférence VAE
+exports/vae_conv_samples/
+scripts/tests/tmp_*/
+
+# Produits de synthèse FPGA (les sources HDL et contraintes restent suivies)
+fpga/**/*.bit
+fpga/**/*.svf
+fpga/**/*.config
+fpga/**/*.json
 
 # Fichiers de configuration locaux
 config_local.json
@@ -198,3 +220,9 @@ Makefile.cmake
 # Valgrind
 *.valgrind
 vgcore.*
+
+# Local build variants and generated experiment results
+/build-*/
+/outputs/
+/resultat.png
+/exports/inspect-architectures.dtxt

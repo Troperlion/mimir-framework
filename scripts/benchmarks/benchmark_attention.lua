@@ -1,22 +1,14 @@
 #!/usr/bin/env mimir --lua
+local Help = dofile(ROOTWORK.."/scripts/modules/help_cli.lua")
+Help.auto_exit_help()
+
 -- Benchmark minimal: mesure le coût du forward d'un modèle avec attention.
 -- Usage:
 --   MIMIR_ACCEL_VERBOSE=1 ./bin/mimir --lua scripts/benchmarks/benchmark_attention.lua
 
+local B = dofile(ROOTWORK.."/scripts/benchmarks/common.lua")
+B.setup()
 math.randomseed(7)
-
-local model = Mimir.Model
-
-if Mimir and Mimir.MemoryGuard and Mimir.MemoryGuard.setLimit then
-  pcall(Mimir.MemoryGuard.setLimit, 6.0)
-end
-if Mimir and Mimir.Allocator and Mimir.Allocator.configure then
-  pcall(Mimir.Allocator.configure, { max_ram_gb = 6.0, enable_compression = true, swap_strategy = "lru" })
-end
-
-if model and model.set_hardware then
-  pcall(model.set_hardware, true)
-end
 
 local function rand_floats(n)
   local x = {}
@@ -34,41 +26,9 @@ local function rand_ids(n, vocab_size)
   return ids
 end
 
-local function apply_dtype(cfg)
-  local dtype = (type(cfg) == "table" and cfg.dtype) or os.getenv("MIMIR_DTYPE")
-  if dtype == nil then return true end
-  if type(Mimir) ~= "table" or type(Mimir.model) ~= "table" or type(Mimir.model.dtype) ~= "function" then
-    return true
-  end
-  local ok, dt_or_err = Mimir.model.dtype(dtype)
-  assert(ok ~= false, tostring(dt_or_err or "Model.dtype failed"))
-  return true
-end
-
-local function bench(name, cfg, input, iters)
-  iters = iters or 30
-  log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-  log("BENCH: " .. name)
-  log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-  local ok, err = model.create(name, cfg)
-  assert(ok ~= false, tostring(err or "Model.create failed"))
-  apply_dtype(cfg)
-  assert(model.allocate_params())
-  assert(model.init_weights("xavier", 7))
-
-  local x = input
-
-  -- warmup
-  model.forward(x, false)
-
-  local t0 = os.clock()
-  for i = 1, iters do
-    model.forward(x, false)
-  end
-  local t1 = os.clock()
-  local dt = (t1 - t0)
-  log(string.format("iters=%d | total=%.3fs | per_iter=%.3fms", iters, dt, (dt * 1000.0) / iters))
+local function bench(name, cfg, input, expected)
+  B.create(name, cfg)
+  B.bench_forward(input, expected)
 end
 
 -- 1) VAEConv attention 2D: tokens = H*W, embed_dim = C
@@ -78,13 +38,17 @@ bench("vae_conv", {
   image_h = 32,
   image_c = 3,
   base_channels = 32,
-  latent_channels = 32,
-  use_attn = true,
+  latent_w = 8,
+  latent_h = 8,
+  latent_c = 4,
+  stochastic_latent = false,
+  text_cond = false,
+  attention = true,
   attn_heads = 4,
   attn_max_tokens = 256,
-}, rand_floats(32 * 32 * 3), 20)
+}, rand_floats(32 * 32 * 3), 32*32*3 + 2*8*8*4)
 
--- 2) Transformer NLP-like (si dispo): tokens=seq_len, d_model=embed_dim
+-- 2) Transformer sur tokens entiers: tokens=seq_len, d_model=embed_dim
 -- Garde config petite pour éviter O(seq^2).
 bench("transformer", {
   vocab_size = 2048,
@@ -92,9 +56,11 @@ bench("transformer", {
   d_model = 128,
   num_heads = 4,
   num_layers = 2,
-  ff_mult = 4,
+  mlp_hidden = 512,
+  output_dim = 128,
   dropout = 0.0,
   causal = true,
-}, rand_ids(64, 2048), 20)
+}, {__input__=rand_ids(64, 2048), mag=B.floats(64*128), mod=B.floats(64*128)}, 128)
 
 log("\n✓ done")
+B.report('attention')

@@ -7,8 +7,8 @@
 #include "MemoryGuard.hpp"
 #include "DynamicTensorAllocator.hpp"
 #include "AsyncMonitor.hpp"
-#include "Models/Diffusion/PonyXLDDPMModel.hpp"
 #include "Helpers.hpp"
+#include "scriptings/ScriptingBridgeCommon.hpp"
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -49,6 +49,8 @@ bool _mimir_live_params_overrides_enabled(const T& p) {
 LuaScripting::LuaScripting() {
     L = luaL_newstate();
     luaL_openlibs(L);  // Charger les bibliothèques standard Lua
+    setString(ScriptingBridgeCommon::kEnvRootWork,
+              ScriptingBridgeCommon::ensureRootWorkEnv());
     registerAPI();
 }
 
@@ -177,6 +179,9 @@ void LuaScripting::registerAPI() {
     lua_pushcfunction(L, lua_createModel);
     lua_setfield(L, -2, "create");
 
+    lua_pushcfunction(L, lua_createEmptyModel);
+    lua_setfield(L, -2, "create_empty");
+
     lua_pushcfunction(L, lua_createModelFromConfig);
     lua_setfield(L, -2, "create_from_config");
     
@@ -185,6 +190,8 @@ void LuaScripting::registerAPI() {
     
     lua_pushcfunction(L, lua_trainModel);
     lua_setfield(L, -2, "train");
+    lua_pushcfunction(L, lua_visionTrainStep);
+    lua_setfield(L, -2, "vision_train_step");
     
     lua_pushcfunction(L, lua_inferModel);
     lua_setfield(L, -2, "infer");
@@ -205,8 +212,14 @@ void LuaScripting::registerAPI() {
     lua_pushcfunction(L, lua_totalParams);
     lua_setfield(L, -2, "total_params");
 
+    lua_pushcfunction(L, lua_modelGetConfig);
+    lua_setfield(L, -2, "get_config");
+
     lua_pushcfunction(L, lua_getModelLayers);
     lua_setfield(L, -2, "get_layers");
+
+    lua_pushcfunction(L, lua_clearModelLayers);
+    lua_setfield(L, -2, "clear_layers");
     
     lua_pushcfunction(L, lua_pushLayer);
     lua_setfield(L, -2, "push_layer");
@@ -229,6 +242,24 @@ void LuaScripting::registerAPI() {
     
     lua_pushcfunction(L, lua_getGradients);
     lua_setfield(L, -2, "get_gradients");
+
+    lua_pushcfunction(L, lua_lumenText2Img);
+    lua_setfield(L, -2, "lumen_text2img");
+
+    lua_pushcfunction(L, lua_lumenBeginVaeCalibration);
+    lua_setfield(L, -2, "lumen_begin_vae_calibration");
+
+    lua_pushcfunction(L, lua_lumenAddVaeCalibrationImage);
+    lua_setfield(L, -2, "lumen_add_vae_calibration_image");
+
+    lua_pushcfunction(L, lua_lumenFinishVaeCalibration);
+    lua_setfield(L, -2, "lumen_finish_vae_calibration");
+
+    lua_pushcfunction(L, lua_lumenTrainStep);
+    lua_setfield(L, -2, "lumen_train_step");
+
+    lua_pushcfunction(L, lua_lumenValidateStep);
+    lua_setfield(L, -2, "lumen_validate_step");
     
     // Hardware
     lua_pushcfunction(L, lua_setHardwareAccel);
@@ -237,40 +268,27 @@ void LuaScripting::registerAPI() {
     lua_pushcfunction(L, lua_getHardwareCaps);
     lua_setfield(L, -2, "hardware_caps");
 
+    lua_pushcfunction(L, lua_conditioningPrompt);
+    lua_setfield(L, -2, "conditioning_prompt");
+
+    lua_pushcfunction(L, lua_runtimeOps);
+    lua_setfield(L, -2, "runtime_ops");
+
     // DType selection
     lua_pushcfunction(L, lua_modelDType);
     lua_setfield(L, -2, "dtype");
 
-    // Helpers spécifiques (PonyXL / Diffusion)
-    lua_pushcfunction(L, lua_ponyxlDdpmTrainStep);
-    lua_setfield(L, -2, "ponyxl_ddpm_train_step");
-
-    lua_pushcfunction(L, lua_ponyxlDdpmValidateStep);
-    lua_setfield(L, -2, "ponyxl_ddpm_validate_step");
-
-    lua_pushcfunction(L, lua_ponyxlDdpmVizReconstructStep);
-    lua_setfield(L, -2, "ponyxl_ddpm_viz_reconstruct_step");
-
-    lua_pushcfunction(L, lua_ponyxlDdpmText2Img);
-    lua_setfield(L, -2, "ponyxl_ddpm_text2img");
-
-    lua_pushcfunction(L, lua_ponyxlDdpmText2ImgLatent);
-    lua_setfield(L, -2, "ponyxl_ddpm_text2img_latent");
-
-    lua_pushcfunction(L, lua_ponyxlDdpmSetVaeScale);
-    lua_setfield(L, -2, "ponyxl_ddpm_set_vae_scale");
-
-    lua_pushcfunction(L, lua_ponyxlDdpmGetVaeScale);
-    lua_setfield(L, -2, "ponyxl_ddpm_get_vae_scale");
-
-    lua_pushcfunction(L, lua_ponyxlDdpmVaeMuMoments);
-    lua_setfield(L, -2, "ponyxl_ddpm_vae_mu_moments");
-    
     // Expose both Mimir.Model and Mimir.model (lowercase alias)
     lua_pushvalue(L, -1);
     lua_setfield(L, -3, "model");  // Mimir.model
 
     lua_setfield(L, -2, "Model");  // Mimir.Model
+
+    // ========== Sous-table "Mimir.Benchmark" ==========
+    lua_newtable(L);
+    lua_pushcfunction(L, lua_benchmarkNow);
+    lua_setfield(L, -2, "now");
+    lua_setfield(L, -2, "Benchmark");
     
     // ========== Sous-table "Mimir.Architectures" ==========
     lua_newtable(L);
@@ -292,17 +310,41 @@ void LuaScripting::registerAPI() {
     
     // ========== Sous-table "Mimir.Layers" ==========
     lua_newtable(L);
+
+    lua_pushcfunction(L, lua_layersAvailable);
+    lua_setfield(L, -2, "available");
+
+    lua_pushcfunction(L, lua_layersByType);
+    lua_setfield(L, -2, "by_type");
+
+    auto registerLayerType = [this](const std::string& field_name, const std::string& layer_type) {
+        lua_pushstring(L, layer_type.c_str());
+        lua_pushcclosure(L, lua_layersByType, 1);
+        lua_setfield(L, -2, field_name.c_str());
+    };
+
+    for (const auto& layer_type : LayerRegistry::get_all_supported_types()) {
+        registerLayerType(layer_type, layer_type);
+        std::string lowercase = layer_type;
+        std::transform(lowercase.begin(), lowercase.end(), lowercase.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        registerLayerType(lowercase, layer_type);
+    }
     
-    lua_pushcfunction(L, lua_computeConv2D);
+    lua_pushstring(L, "Conv2d");
+    lua_pushcclosure(L, lua_layersByType, 1);
     lua_setfield(L, -2, "conv2d");
     
-    lua_pushcfunction(L, lua_computeLinear);
+    lua_pushstring(L, "Linear");
+    lua_pushcclosure(L, lua_layersByType, 1);
     lua_setfield(L, -2, "linear");
     
-    lua_pushcfunction(L, lua_computeMaxPool2D);
+    lua_pushstring(L, "MaxPool2d");
+    lua_pushcclosure(L, lua_layersByType, 1);
     lua_setfield(L, -2, "maxpool2d");
     
-    lua_pushcfunction(L, lua_computeAvgPool2D);
+    lua_pushstring(L, "AvgPool2d");
+    lua_pushcclosure(L, lua_layersByType, 1);
     lua_setfield(L, -2, "avgpool2d");
     
     lua_pushcfunction(L, lua_computeActivation);
@@ -311,7 +353,8 @@ void LuaScripting::registerAPI() {
     lua_pushcfunction(L, lua_computeBatchNorm);
     lua_setfield(L, -2, "batchnorm");
     
-    lua_pushcfunction(L, lua_computeLayerNorm);
+    lua_pushstring(L, "LayerNorm");
+    lua_pushcclosure(L, lua_layersByType, 1);
     lua_setfield(L, -2, "layernorm");
     
     lua_pushcfunction(L, lua_computeAttention);
@@ -425,6 +468,9 @@ void LuaScripting::registerAPI() {
     
     lua_pushcfunction(L, lua_getDataset);
     lua_setfield(L, -2, "get");
+
+    lua_pushcfunction(L, lua_releaseDatasetItem);
+    lua_setfield(L, -2, "release");
     
     lua_pushcfunction(L, lua_prepareSequences);
     lua_setfield(L, -2, "prepare_sequences");
@@ -447,6 +493,10 @@ void LuaScripting::registerAPI() {
     lua_setfield(L, -2, "read_image_rgb_u8");
     lua_pushcfunction(L, lua_readImageRGBU8);
     lua_setfield(L, -2, "readImageRGBU8");  // alias
+    lua_pushcfunction(L, lua_setStdoutLogSuppressed);
+    lua_setfield(L, -2, "suppress_stdout_logs");
+    lua_pushcfunction(L, lua_setStdoutLogSuppressed);
+    lua_setfield(L, -2, "suppressStdoutLogs");  // alias
 
     lua_setfield(L, -2, "IO");  // Mimir.IO
     
@@ -568,9 +618,15 @@ void LuaScripting::registerAPI() {
     
     lua_setfield(L, -2, "Htop");  // Mimir.Htop
     
-    // ========== Sous-table "Mimir.Viz" (Visualizer SFML) ==========
+    // ========== Sous-table "Mimir.Viz" (backend sélectionné) ==========
     lua_newtable(L);
     
+    lua_pushcfunction(L, lua_vizConfigure);
+    lua_setfield(L, -2, "configure");
+    lua_pushcfunction(L, lua_vizPollEvents);
+    lua_setfield(L, -2, "poll_events");
+    lua_pushcfunction(L, lua_vizBackend);
+    lua_setfield(L, -2, "backend");
     lua_pushcfunction(L, lua_vizCreate);
     lua_setfield(L, -2, "create");
     
@@ -588,12 +644,24 @@ void LuaScripting::registerAPI() {
     
     lua_pushcfunction(L, lua_vizAddImage);
     lua_setfield(L, -2, "add_image");
+
+    lua_pushcfunction(L, lua_vizSetDetections);
+    lua_setfield(L, -2, "set_detections");
+
+    lua_pushcfunction(L, lua_vizShowDetections);
+    lua_setfield(L, -2, "show_detections");
+
+    lua_pushcfunction(L, lua_vizSetDetectionThreshold);
+    lua_setfield(L, -2, "set_detection_threshold");
     
     lua_pushcfunction(L, lua_vizUpdateMetrics);
     lua_setfield(L, -2, "update_metrics");
 
     lua_pushcfunction(L, lua_vizSetValidation);
     lua_setfield(L, -2, "set_validation");
+
+    lua_pushcfunction(L, lua_vizValidationEnabled);
+    lua_setfield(L, -2, "validation_enabled");
     
     lua_pushcfunction(L, lua_vizAddLossPoint);
     lua_setfield(L, -2, "add_loss_point");
@@ -682,6 +750,13 @@ void LuaScripting::registerAPI() {
     lua_setglobal(L, ScriptingContext::kAliasViz);
     
     lua_pop(L, 1);  // Pop Mimir table
+}
+
+int LuaScripting::lua_benchmarkNow(lua_State* L) {
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    const double seconds = std::chrono::duration<double>(now).count();
+    lua_pushnumber(L, seconds);
+    return 1;
 }
 
 // ============================================================================

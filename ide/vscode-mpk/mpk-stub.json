@@ -1,0 +1,57 @@
+{
+  "keywords": {
+    "map": "Déclare une table associative : map nom = []",
+    "list": "Déclare une séquence ordonnée : list nom = []",
+    "array": "Alias de list.",
+    "true": "Valeur booléenne vraie.",
+    "false": "Valeur booléenne fausse.",
+    "null": "Valeur nulle."
+  },
+  "methods": {
+    "set": "Ajoute ou remplace une entrée d'une map : objet.set(\"clé\", valeur).",
+    "append": "Ajoute une valeur à la fin d'une list ou array."
+  },
+  "fields": {
+    "container": "Conteneur source. La valeur moderne est \"pseudocode\".",
+    "format": "Nom long du format : \"Mimir Package Template\".",
+    "format_short": "Nom court du format : \"MPK\".",
+    "header": "Métadonnées du package.",
+    "payload": "Configuration, description et structure du modèle.",
+    "name": "Nom de l'architecture exposé dans le registre.",
+    "type": "Architecture native de base utilisée pour construire le modèle.",
+    "author": "Auteur du package.",
+    "created_at": "Date UTC ISO-8601 de création.",
+    "modifiable": "Indique si le package est destiné à être modifié.",
+    "viz_specified": "Indique que le package fournit des informations de visualisation.",
+    "checksum": "Checksum logique du payload, recalculé par les outils MPK.",
+    "base_config_b64": "Configuration JSON du modèle encodée en Base64.",
+    "description_b64": "Description UTF-8 encodée en Base64.",
+    "model_structure": "Structure documentaire ou graphe nodal de l'architecture.",
+    "graph": "Graphe contenant généralement nodes, links et mode.",
+    "nodes": "Liste des layers du graphe.",
+    "links": "Liste des connexions entre tensors et nœuds.",
+    "inputs": "Liste des noms de tensors consommés par un nœud.",
+    "output": "Nom du tensor produit par un nœud.",
+    "params": "Paramètres documentaires ou exécutables du layer.",
+    "params_count": "Nombre de paramètres numériques du layer.",
+    "external_components": "Composants nécessaires mais non construits par le graphe MPK."
+  },
+  "layerTypes": [
+    "Conv2d", "ConvTranspose2d", "Conv1d", "DepthwiseConv2d",
+    "Linear", "Bilinear", "Embedding", "EmbeddingBag",
+    "BatchNorm2d", "BatchNorm1d", "LayerNorm", "GroupNorm",
+    "InstanceNorm2d", "RMSNorm", "ReLU", "LeakyReLU", "GELU",
+    "GEGLU", "SiLU", "Tanh", "Sigmoid", "Softmax", "LogSoftmax",
+    "Softplus", "Mish", "HardSigmoid", "HardSwish", "MaxPool2d",
+    "AvgPool2d", "AdaptiveAvgPool2d", "GlobalAvgPool2d", "MaxPool1d",
+    "AvgPool1d", "TokenMeanPool", "Dropout", "Dropout2d",
+    "AlphaDropout", "Flatten", "Reshape", "Transpose", "Permute",
+    "Squeeze", "Unsqueeze", "View", "Add", "Subtract", "Multiply",
+    "Divide", "Concat", "Split", "Chunk", "Stack", "MatMul",
+    "BatchMatMul", "NMS", "SelfAttention", "MultiHeadAttention",
+    "CrossAttention", "UpsampleNearest", "UpsampleBilinear",
+    "UpsampleBicubic", "PixelShuffle", "LSTM", "GRU", "RNN",
+    "ZeroPad2d", "ReflectionPad2d", "ReplicationPad2d", "Identity",
+    "Constant", "Lambda"
+  ]
+}

@@ -39,6 +39,15 @@ public:
         bool reserved = false;      // Réservation comptabilisée dans MemoryGuard
         size_t reserved_bytes = 0;  // Bytes réservés (typiquement size*sizeof(float))
     };
+
+    struct StatsSnapshot {
+        size_t tensor_count = 0;
+        size_t loaded_count = 0;
+        size_t compressed_count = 0;
+        size_t reserved_count = 0;
+        size_t loaded_bytes = 0;
+        size_t reserved_bytes = 0;
+    };
     
     // Configuration
     void configure(double max_ram_gb, bool enable_compression = true, bool lazy_mode = true) {
@@ -261,6 +270,26 @@ public:
         return count;
     }
 
+    StatsSnapshot getStatsSnapshot() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        StatsSnapshot s;
+        s.tensor_count = handles_.size();
+        for (const auto& [k, h] : handles_) {
+            if (h->is_loaded) {
+                s.loaded_count++;
+                s.loaded_bytes += h->size * sizeof(float);
+            }
+            if (h->is_compressed) {
+                s.compressed_count++;
+            }
+            if (h->reserved) {
+                s.reserved_count++;
+                s.reserved_bytes += h->reserved_bytes;
+            }
+        }
+        return s;
+    }
+
 private:
     DynamicTensorAllocator() = default;
 
@@ -353,7 +382,7 @@ private:
                   << " MB libérés (MemoryGuard)" << std::endl;
     }
     
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     size_t max_ram_bytes_ = 10ULL * 1024 * 1024 * 1024;
     bool compression_enabled_ = true;
     bool lazy_mode_ = true;

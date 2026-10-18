@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1180" viewBox="0 0 1800 1180" role="img" aria-labelledby="title desc">
+<title id="title">Taxonomie du registre d’architectures</title><desc id="desc">Diagramme vectoriel éditable généré depuis les dumps du framework.</desc>
+<defs>
+<marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#475569"/></marker>
+<marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#2563eb"/></marker>
+<style><![CDATA[text{font-family:Inter,Segoe UI,Arial,sans-serif}.title{font-size:34px;font-weight:800;fill:#0f172a}.subtitle{font-size:16px;fill:#475569}.label{font-size:17px;font-weight:700;fill:#0f172a}.small{font-size:13px;fill:#475569}.tiny{font-size:11px;fill:#64748b}.box{stroke:#94a3b8;stroke-width:1.4;rx:14}.edge{stroke:#475569;stroke-width:2.2;fill:none;marker-end:url(#arrow)}.edgeB{stroke:#2563eb;stroke-width:2.4;fill:none;marker-end:url(#arrowBlue)}.dash{stroke-dasharray:7 7}.note{font-size:12px;fill:#475569}]]></style>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="60" y="62" class="title" text-anchor="start">Taxonomie du registre d’architectures</text>
+<text x="60" y="92" class="subtitle" text-anchor="start">Les architectures sont des entrées indépendantes créées via create(name, config).</text>
+<line x1="60" y1="112" x2="1740" y2="112" stroke="#e2e8f0" stroke-width="2"/>
+<rect x="740" y="140" width="320" height="80" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="900.0" y="165" class="label" text-anchor="middle">Architecture Registry</text>
+<text x="900.0" y="192" class="small" text-anchor="middle">registre central</text>
+<rect x="80" y="300" width="240" height="70" rx="14" fill="#dbeafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="200.0" y="325" class="label" text-anchor="middle">Baselines</text>
+<text x="200.0" y="342" class="small" text-anchor="middle">4 entrées</text>
+<path d="M900,220 L200,300" class="edgeB"/>
+<rect x="80" y="405" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="200.0" y="430" class="label" text-anchor="middle">basic_mlp</text>
+<rect x="80" y="461" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="200.0" y="486" class="label" text-anchor="middle">diffusion</text>
+<rect x="80" y="517" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="200.0" y="542" class="label" text-anchor="middle">cond_diffusion</text>
+<rect x="80" y="573" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="200.0" y="598" class="label" text-anchor="middle">gan_latent</text>
+<rect x="365" y="300" width="240" height="70" rx="14" fill="#cffafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="485.0" y="325" class="label" text-anchor="middle">CNN</text>
+<text x="485.0" y="342" class="small" text-anchor="middle">6 entrées</text>
+<path d="M900,220 L485,300" class="edgeB"/>
+<rect x="365" y="405" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="485.0" y="430" class="label" text-anchor="middle">vgg16</text>
+<rect x="365" y="461" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="485.0" y="486" class="label" text-anchor="middle">vgg16_feat</text>
+<rect x="365" y="517" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="485.0" y="542" class="label" text-anchor="middle">vgg19</text>
+<rect x="365" y="573" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="485.0" y="598" class="label" text-anchor="middle">resnet</text>
+<rect x="365" y="629" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="485.0" y="654" class="label" text-anchor="middle">mobilenet</text>
+<rect x="365" y="685" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="485.0" y="710" class="label" text-anchor="middle">patch_discriminator</text>
+<rect x="650" y="300" width="240" height="70" rx="14" fill="#ede9fe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="770.0" y="325" class="label" text-anchor="middle">Autoencodeurs</text>
+<text x="770.0" y="342" class="small" text-anchor="middle">6 entrées</text>
+<path d="M900,220 L770,300" class="edgeB"/>
+<rect x="650" y="405" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="770.0" y="430" class="label" text-anchor="middle">vae</text>
+<rect x="650" y="461" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="770.0" y="486" class="label" text-anchor="middle">vae_conv</text>
+<rect x="650" y="517" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="770.0" y="542" class="label" text-anchor="middle">vae_conv_decode</text>
+<rect x="650" y="573" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="770.0" y="598" class="label" text-anchor="middle">vae_text</text>
+<rect x="650" y="629" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="770.0" y="654" class="label" text-anchor="middle">vae_text_decode</text>
+<rect x="650" y="685" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="770.0" y="710" class="label" text-anchor="middle">hf_vae_decoder</text>
+<rect x="935" y="300" width="240" height="70" rx="14" fill="#ffedd5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1055.0" y="325" class="label" text-anchor="middle">Diffusion / LDM</text>
+<text x="1055.0" y="342" class="small" text-anchor="middle">4 entrées</text>
+<path d="M900,220 L1055,300" class="edgeB"/>
+<rect x="935" y="405" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<rect x="935" y="461" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<rect x="935" y="517" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1055.0" y="542" class="label" text-anchor="middle">sd3_5</text>
+<rect x="935" y="573" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1055.0" y="598" class="label" text-anchor="middle">hf_sdxl_transformer_block</text>
+<rect x="1220" y="300" width="240" height="70" rx="14" fill="#fef3c7" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1340.0" y="325" class="label" text-anchor="middle">Transformers / Text</text>
+<text x="1340.0" y="342" class="small" text-anchor="middle">4 entrées</text>
+<path d="M900,220 L1340,300" class="edgeB"/>
+<rect x="1220" y="405" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1340.0" y="430" class="label" text-anchor="middle">transformer</text>
+<rect x="1220" y="461" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1340.0" y="486" class="label" text-anchor="middle">vit</text>
+<rect x="1220" y="517" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1340.0" y="542" class="label" text-anchor="middle">hf_clip_text_encoder_1</text>
+<rect x="1220" y="573" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1340.0" y="598" class="label" text-anchor="middle">hf_clip_text_encoder_2</text>
+<rect x="1505" y="300" width="240" height="70" rx="14" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1625.0" y="325" class="label" text-anchor="middle">External</text>
+<text x="1625.0" y="342" class="small" text-anchor="middle">1 entrées</text>
+<path d="M900,220 L1625,300" class="edgeB"/>
+<rect x="1505" y="405" width="240" height="40" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1625.0" y="430" class="label" text-anchor="middle">external_safetensors_base</text>
+<text x="1740" y="1156" class="tiny" text-anchor="end">Mímir Framework — SVG vectoriel éditable</text>
+</svg>

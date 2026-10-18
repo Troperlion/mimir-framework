@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1900" height="690" viewBox="0 0 1900 690" role="img" aria-labelledby="title desc">
+<title id="title">Cycle de vie moderne du modèle</title><desc id="desc">Diagramme vectoriel éditable généré depuis les dumps du framework.</desc>
+<defs>
+<marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#475569"/></marker>
+<marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#2563eb"/></marker>
+<style><![CDATA[text{font-family:Inter,Segoe UI,Arial,sans-serif}.title{font-size:34px;font-weight:800;fill:#0f172a}.subtitle{font-size:16px;fill:#475569}.label{font-size:17px;font-weight:700;fill:#0f172a}.small{font-size:13px;fill:#475569}.tiny{font-size:11px;fill:#64748b}.box{stroke:#94a3b8;stroke-width:1.4;rx:14}.edge{stroke:#475569;stroke-width:2.2;fill:none;marker-end:url(#arrow)}.edgeB{stroke:#2563eb;stroke-width:2.4;fill:none;marker-end:url(#arrowBlue)}.dash{stroke-dasharray:7 7}.note{font-size:12px;fill:#475569}]]></style>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="60" y="62" class="title" text-anchor="start">Cycle de vie moderne du modèle</text>
+<text x="60" y="92" class="subtitle" text-anchor="start">Workflow recommandé : create → allocate_params → init/load → forward → train/infer → save.</text>
+<line x1="60" y1="112" x2="1840" y2="112" stroke="#e2e8f0" stroke-width="2"/>
+<rect x="70.0" y="240" width="227.42857142857142" height="110" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="183.71428571428572" y="265" class="label" text-anchor="middle">create</text>
+<text x="183.71428571428572" y="322" class="small" text-anchor="middle">architecture + config</text>
+<rect x="325.42857142857144" y="240" width="227.42857142857142" height="110" rx="14" fill="#fef3c7" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="439.14285714285717" y="265" class="label" text-anchor="middle">allocate_params</text>
+<text x="439.14285714285717" y="322" class="small" text-anchor="middle">tenseurs poids</text>
+<path d="M297.42857142857144,295.0 L325.42857142857144,295.0" class="edgeB"/>
+<rect x="580.8571428571429" y="240" width="227.42857142857142" height="110" rx="14" fill="#fef3c7" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="694.5714285714286" y="265" class="label" text-anchor="middle">init_weights</text>
+<text x="694.5714285714286" y="322" class="small" text-anchor="middle">ou load checkpoint</text>
+<path d="M552.8571428571429,295.0 L580.8571428571429,295.0" class="edgeB"/>
+<rect x="836.2857142857142" y="240" width="227.42857142857142" height="110" rx="14" fill="#dbeafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="949.9999999999999" y="265" class="label" text-anchor="middle">forward</text>
+<text x="949.9999999999999" y="322" class="small" text-anchor="middle">inférence / loss</text>
+<path d="M808.2857142857143,295.0 L836.2857142857142,295.0" class="edgeB"/>
+<rect x="1091.7142857142858" y="240" width="227.42857142857142" height="110" rx="14" fill="#ffedd5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1205.4285714285716" y="265" class="label" text-anchor="middle">backward</text>
+<text x="1205.4285714285716" y="322" class="small" text-anchor="middle">si entraînement</text>
+<path d="M1063.7142857142856,295.0 L1091.7142857142858,295.0" class="edgeB"/>
+<rect x="1347.142857142857" y="240" width="227.42857142857142" height="110" rx="14" fill="#ffedd5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1460.857142857143" y="265" class="label" text-anchor="middle">optimizer</text>
+<text x="1460.857142857143" y="322" class="small" text-anchor="middle">mise à jour</text>
+<path d="M1319.142857142857,295.0 L1347.142857142857,295.0" class="edgeB"/>
+<rect x="1602.5714285714284" y="240" width="227.42857142857142" height="110" rx="14" fill="#ede9fe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1716.2857142857142" y="265" class="label" text-anchor="middle">save</text>
+<text x="1716.2857142857142" y="322" class="small" text-anchor="middle">checkpoint/export</text>
+<path d="M1574.5714285714284,295.0 L1602.5714285714284,295.0" class="edgeB"/>
+<text x="1840" y="666" class="tiny" text-anchor="end">Mímir Framework — SVG vectoriel éditable</text>
+</svg>

@@ -1,20 +1,12 @@
-# API : mémoire
-
-## Pour qui
-
-Développeur et utilisateur intermédiaire/avancé.
-
-## Objectif
+# Mémoire
 
 Trouver rapidement le contrat API réel et les paramètres utilisables.
 
-## Avant de commencer
+**Public concerné :** Développeur et utilisateur intermédiaire/avancé.
 
-Connaître les commandes de base de Mímir.
-
-## Résultat attendu
-
-Tu peux appeler l'API sans ambiguïté de signature ou de comportement.
+> **Prérequis**
+>
+> Connaître les commandes de base de Mímir.
 
 
 Source : `src/scriptings/Lua/luaScripting/LuaScripting.cpp`.
@@ -45,3 +37,9 @@ Source : `src/scriptings/Lua/luaScripting/LuaScripting.cpp`.
 - `get_stats()` / `print_stats()`
 
 Recommandation : activer `MemoryGuard` + `Allocator` au début des scripts.
+
+## Étapes suivantes
+
+- [Page précédente : API : `Mimir.Dataset`](13-Dataset.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : API : monitoring / visualisation](15-Viz-Htop.md)

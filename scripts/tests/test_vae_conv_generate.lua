@@ -29,8 +29,9 @@
 
 ---@diagnostic disable: need-check-nil, inject-field
 
-local Args = dofile("scripts/modules/args.lua")
+local Args = dofile(ROOTWORK.."/scripts/modules/args.lua")
 local opts = Args.parse(arg) or {}
+local FS = dofile(ROOTWORK.."/scripts/modules/fs.lua")
 
 local function logx(msg)
   local l = rawget(_G, "log")
@@ -72,6 +73,13 @@ local function opt_int(k, d)
   return math.floor(opt_num(k, d))
 end
 
+local function first_defined(values, keys)
+  for _, key in ipairs(keys) do
+    if values[key] ~= nil then return values[key] end
+  end
+  return nil
+end
+
 local function clamp(x, a, b)
   if x < a then return a end
   if x > b then return b end
@@ -79,16 +87,20 @@ local function clamp(x, a, b)
 end
 
 local function mkdir_p(dir)
-  if dir == nil or dir == "" then return end
-  -- best-effort
-  os.execute("mkdir -p '" .. tostring(dir):gsub("'", "'\\''") .. "' 2>/dev/null")
+  FS.mkdir_p(dir)
 end
 
 local function dirname(path)
-  path = tostring(path or "")
-  local p = path:match("^(.*)/[^/]+$")
+  local p = FS.dirname(path)
   if p == nil or p == "" then return "." end
   return p
+end
+
+local function endswith(s, suffix)
+  if type(s) ~= "string" or type(suffix) ~= "string" then return false end
+  if #suffix == 0 then return true end
+  if #s < #suffix then return false end
+  return s:sub(-#suffix) == suffix
 end
 
 -- --------------------------------------------------------------------------
@@ -330,11 +342,14 @@ local function infer_cfg_from_checkpoint(ckpt_dir)
 
   -- Chemin rapide : model_config est stocké directement dans architecture.json
   -- depuis le patch VAEConv 2026-06. Contient TOUS les flags architecturaux
-  -- (use_attention, decoder_upsample, use_skip_connections, use_encoder_prior,
+  -- (resnet, attention, decoder_upsample, use_skip_connections, use_encoder_prior,
   -- resnet_max_tokens, etc.) en plus des dimensions image/latent.
   local mc = arch.model_config or arch.modelConfig
   if type(mc) == "table" and (tonumber(mc.image_w) or 0) > 0 then
-    local function mci(k) return math.floor(tonumber(mc[k] or 0)) end
+    local function mci(k)
+      local n = tonumber(mc[k] or 0) or 0
+      return math.floor(n)
+    end
     return {
       image_w              = mci("image_w"),
       image_h              = mci("image_h"),
@@ -343,7 +358,8 @@ local function infer_cfg_from_checkpoint(ckpt_dir)
       latent_w             = mci("latent_w"),
       latent_c             = mci("latent_c"),
       base_channels        = mci("base_channels"),
-      use_attention        = mc.use_attention,
+      resnet               = first_defined(mc, {"resnet", "use_resnet", "use_attention"}),
+      attention            = first_defined(mc, {"attention", "use_attn"}),
       resnet_max_tokens    = mc.resnet_max_tokens,
       use_skip_connections = mc.use_skip_connections,
       use_encoder_prior    = mc.use_encoder_prior,
@@ -420,6 +436,190 @@ local function infer_cfg_from_checkpoint(ckpt_dir)
     latent_c      = math.floor(latent_c),
     base_channels = math.floor(base_channels),
     downsamples   = downsamples,
+  }, nil
+end
+
+local function infer_cfg_from_debug_json(debug_json_path)
+  local j = read_json(debug_json_path)
+  if type(j) ~= "table" then
+    return nil, "read_json failed: " .. tostring(debug_json_path)
+  end
+
+  local mc = j.model_config
+  if type(mc) ~= "table" then
+    local m = j.model
+    if type(m) == "table" and type(m.model_config) == "table" then
+      mc = m.model_config
+    end
+  end
+  if type(mc) ~= "table" then
+    return nil, "missing model_config in " .. tostring(debug_json_path)
+  end
+
+  local function mci(k)
+    local n = tonumber(mc[k] or 0) or 0
+    return math.floor(n)
+  end
+
+  local image_w = mci("image_w")
+  local image_h = mci("image_h")
+  local latent_h = mci("latent_h")
+  local latent_w = mci("latent_w")
+  local latent_c = mci("latent_c")
+  local base_channels = mci("base_channels")
+  if image_w <= 0 or image_h <= 0 or latent_h <= 0 or latent_w <= 0 or latent_c <= 0 or base_channels <= 0 then
+    return nil, "invalid dims in model_config from " .. tostring(debug_json_path)
+  end
+
+  return {
+    image_w = image_w,
+    image_h = image_h,
+    image_c = math.max(1, mci("image_c")),
+    latent_h = latent_h,
+    latent_w = latent_w,
+    latent_c = latent_c,
+    base_channels = base_channels,
+    resnet = first_defined(mc, {"resnet", "use_resnet", "use_attention"}),
+    attention = first_defined(mc, {"attention", "use_attn"}),
+    resnet_max_tokens = mc.resnet_max_tokens,
+    use_skip_connections = mc.use_skip_connections,
+    use_encoder_prior = mc.use_encoder_prior,
+    decoder_upsample = mc.decoder_upsample,
+    stochastic_latent = mc.stochastic_latent,
+  }, nil
+end
+
+-- --------------------------------------------------------------------------
+-- SafeTensors minimal reader: extract model/architecture_json
+-- --------------------------------------------------------------------------
+local function u64_le(bytes)
+  local b = { bytes:byte(1, 8) }
+  local n = 0
+  local mul = 1
+  for i = 1, 8 do
+    n = n + (b[i] or 0) * mul
+    mul = mul * 256
+  end
+  return n
+end
+
+local function read_exact(f, n)
+  local s = f:read(n)
+  if not s or #s ~= n then
+    return nil, "short read"
+  end
+  return s
+end
+
+local function safe_json_decode(s)
+  local json_mod = rawget(_G, "json")
+  if type(json_mod) == "table" and type(json_mod.decode) == "function" then
+    local ok, v = pcall(json_mod.decode, s)
+    if ok and type(v) == "table" then return v end
+  end
+  local cjson_mod = rawget(_G, "cjson")
+  if type(cjson_mod) == "table" and type(cjson_mod.decode) == "function" then
+    local ok, v = pcall(cjson_mod.decode, s)
+    if ok and type(v) == "table" then return v end
+  end
+  return nil
+end
+
+local function read_safetensors_header(path)
+  local f = io.open(path, "rb")
+  if not f then return nil, "cannot open" end
+  local len_bytes, err = read_exact(f, 8)
+  if not len_bytes then f:close(); return nil, err end
+  local header_len = u64_le(len_bytes)
+  if header_len <= 0 or header_len > 64 * 1024 * 1024 then
+    f:close()
+    return nil, "invalid header_len=" .. tostring(header_len)
+  end
+  local header_str, err2 = read_exact(f, header_len)
+  if not header_str then f:close(); return nil, err2 end
+  local header = safe_json_decode(header_str)
+  if type(header) ~= "table" then
+    f:close()
+    return nil, "header JSON decode failed"
+  end
+  return { f = f, header_len = header_len, header = header }, nil
+end
+
+local function extract_tensor_bytes(ctx, tensor_name)
+  local entry = ctx.header[tensor_name]
+  if type(entry) ~= "table" then
+    return nil, "tensor not found in header: " .. tostring(tensor_name)
+  end
+  local offsets = entry.data_offsets
+  if type(offsets) ~= "table" or #offsets < 2 then
+    return nil, "missing data_offsets"
+  end
+  local begin = tonumber(offsets[1])
+  local end_ = tonumber(offsets[2])
+  if not begin or not end_ or end_ < begin then
+    return nil, "invalid data_offsets"
+  end
+  local size = end_ - begin
+  if size <= 0 or size > 128 * 1024 * 1024 then
+    return nil, "invalid tensor size=" .. tostring(size)
+  end
+  local data_base = 8 + ctx.header_len
+  ctx.f:seek("set", data_base + begin)
+  local bytes, err = read_exact(ctx.f, size)
+  if not bytes then
+    return nil, "read tensor bytes failed: " .. tostring(err)
+  end
+  return bytes, nil
+end
+
+local function infer_cfg_from_safetensors(st_path)
+  local ctx, err = read_safetensors_header(st_path)
+  if not ctx then return nil, err end
+
+  local bytes, errb = extract_tensor_bytes(ctx, "model/architecture_json")
+  ctx.f:close()
+  if not bytes then return nil, errb end
+
+  local arch = safe_json_decode(bytes)
+  if type(arch) ~= "table" then
+    return nil, "architecture_json decode failed"
+  end
+
+  local mc = arch.model_config or arch.modelConfig
+  if type(mc) ~= "table" then
+    return nil, "missing model_config in model/architecture_json"
+  end
+
+  local function mci(k)
+    local n = tonumber(mc[k] or 0) or 0
+    return math.floor(n)
+  end
+
+  local image_w = mci("image_w")
+  local image_h = mci("image_h")
+  local latent_h = mci("latent_h")
+  local latent_w = mci("latent_w")
+  local latent_c = mci("latent_c")
+  local base_channels = mci("base_channels")
+  if image_w <= 0 or image_h <= 0 or latent_h <= 0 or latent_w <= 0 or latent_c <= 0 or base_channels <= 0 then
+    return nil, "invalid model_config dimensions in safetensors"
+  end
+
+  return {
+    image_w = image_w,
+    image_h = image_h,
+    image_c = math.max(1, mci("image_c")),
+    latent_h = latent_h,
+    latent_w = latent_w,
+    latent_c = latent_c,
+    base_channels = base_channels,
+    resnet = first_defined(mc, {"resnet", "use_resnet", "use_attention"}),
+    attention = first_defined(mc, {"attention", "use_attn"}),
+    resnet_max_tokens = mc.resnet_max_tokens,
+    use_skip_connections = mc.use_skip_connections,
+    use_encoder_prior = mc.use_encoder_prior,
+    decoder_upsample = mc.decoder_upsample,
+    stochastic_latent = mc.stochastic_latent,
   }, nil
 end
 
@@ -521,7 +721,7 @@ local function read_latent_bin(path)
 
   local n = lh * lw * lc
   local float_bytes = n * 4
-  local data = f:read(float_bytes)
+  local data = f:read(math.floor(float_bytes))
   f:close()
 
   if not data or #data ~= float_bytes then
@@ -542,7 +742,21 @@ end
 -- Main
 -- --------------------------------------------------------------------------
 local DEFAULT_CKPT = "checkpoint/vae_conv_base_tok_latent-128-2/epoch_0024_stop"
-local checkpoint_dir = opt_str("checkpoint", opt_str("ckpt", DEFAULT_CKPT))
+local checkpoint_ref = opt_str("checkpoint", opt_str("ckpt", DEFAULT_CKPT))
+local checkpoint_format = opt_str("format", "")
+
+if checkpoint_format == "" then
+  if endswith(checkpoint_ref:lower(), ".safetensors") then
+    checkpoint_format = "safetensors"
+  else
+    checkpoint_format = "raw_folder"
+  end
+end
+
+local checkpoint_meta_dir = checkpoint_ref
+if checkpoint_format == "safetensors" then
+  checkpoint_meta_dir = dirname(checkpoint_ref)
+end
 local in_path = opt_str("in", opt_str("input", "01.ppm"))
 local out_path = opt_str("out", "scripts/tests/out_vae_conv_recon.ppm")
 local out_in_path = opt_str("out-in", opt_str("out_in", ""))
@@ -560,27 +774,56 @@ if Mimir and Mimir.Allocator and Mimir.Allocator.configure then
   Mimir.Allocator.configure({ max_ram_gb = mem_gb, enable_compression = compression })
 end
 
-logx("[test_vae_conv_generate] checkpoint=" .. tostring(checkpoint_dir))
+logx("[test_vae_conv_generate] checkpoint=" .. tostring(checkpoint_ref))
+logx("[test_vae_conv_generate] format=" .. tostring(checkpoint_format))
 logx("[test_vae_conv_generate] in=" .. tostring(in_path))
 
-local inferred, err_inf = infer_cfg_from_checkpoint(checkpoint_dir)
+local inferred, err_inf = infer_cfg_from_checkpoint(checkpoint_meta_dir)
+if checkpoint_format == "safetensors" then
+  local inf_st, err_st = infer_cfg_from_safetensors(checkpoint_ref)
+  if inf_st then
+    inferred = inf_st
+    err_inf = nil
+    logx("[test_vae_conv_generate] inferred config from model/architecture_json in safetensors")
+  else
+    err_inf = err_st
+  end
+end
 if not inferred then
-  die("infer_cfg_from_checkpoint failed: " .. tostring(err_inf))
+  local sidecars = {
+    checkpoint_meta_dir .. "/endtrain.json",
+    checkpoint_meta_dir .. "/starttrain.json",
+  }
+  for _, p in ipairs(sidecars) do
+    local inf2, err2 = infer_cfg_from_debug_json(p)
+    if inf2 then
+      inferred = inf2
+      err_inf = nil
+      logx("[test_vae_conv_generate] inferred config from debug_json: " .. tostring(p))
+      break
+    else
+      err_inf = err2
+    end
+  end
 end
 
 local cfg = Mimir.Architectures.default_config("vae_conv")
 if type(cfg) ~= "table" then die("default_config(vae_conv) failed") end
 
--- Appliquer tous les champs inférés depuis le checkpoint (dimensions + flags architecturaux)
-local cfg_fields = {
-  "image_w", "image_h", "image_c",
-  "latent_h", "latent_w", "latent_c", "base_channels",
-  -- flags architecturaux (depuis model_config, patch 2026-06)
-  "use_attention", "resnet_max_tokens",
-  "use_skip_connections", "use_encoder_prior", "decoder_upsample",
-}
-for _, k in ipairs(cfg_fields) do
-  if inferred[k] ~= nil then cfg[k] = inferred[k] end
+if inferred then
+  -- Appliquer tous les champs inférés depuis le checkpoint (dimensions + flags architecturaux)
+  local cfg_fields = {
+    "image_w", "image_h", "image_c",
+    "latent_h", "latent_w", "latent_c", "base_channels",
+    -- flags architecturaux (depuis model_config, patch 2026-06)
+    "resnet", "attention", "resnet_max_tokens",
+    "use_skip_connections", "use_encoder_prior", "decoder_upsample",
+  }
+  for _, k in ipairs(cfg_fields) do
+    if inferred[k] ~= nil then cfg[k] = inferred[k] end
+  end
+else
+  logx("[test_vae_conv_generate] WARNING: infer_cfg_from_checkpoint failed, using default_config + CLI overrides: " .. tostring(err_inf))
 end
 cfg.latent_dim = cfg.latent_h * cfg.latent_w * cfg.latent_c
 cfg.text_cond = false
@@ -596,13 +839,13 @@ if opts["latent-c"] then cfg.latent_c = opt_int("latent-c", cfg.latent_c) end
 if opts["base-channels"] then cfg.base_channels = opt_int("base-channels", cfg.base_channels) end
 cfg.latent_dim = cfg.latent_h * cfg.latent_w * cfg.latent_c
 
-logx(string.format("[test_vae_conv_generate] cfg image=%dx%dx%d latent=%dx%dx%d base=%d use_attn=%s skip=%s enc_prior=%s upsample=%s",
+logx(string.format("[test_vae_conv_generate] cfg image=%dx%dx%d latent=%dx%dx%d base=%d attention=%s skip=%s enc_prior=%s upsample=%s",
   cfg.image_w, cfg.image_h, cfg.image_c,
   cfg.latent_h, cfg.latent_w, cfg.latent_c,
   cfg.base_channels,
-  tostring(cfg.use_attention),
-  tostring(cfg.use_skip_connections),
-  tostring(cfg.use_encoder_prior),
+  tostring(cfg.attention),
+  tostring(cfg["use_skip_connections"]),
+  tostring(cfg["use_encoder_prior"]),
   tostring(cfg.decoder_upsample)))
 
 -- Détection du mode
@@ -651,7 +894,7 @@ if MODE == "encode" then
   local ok_alloc, nparams_or_err = Mimir.Model.allocate_params()
   if ok_alloc == false then die("Model.allocate_params failed: " .. tostring(nparams_or_err)) end
 
-  local ok_load, err_load = Mimir.Serialization.load(checkpoint_dir, "raw_folder", {
+  local ok_load, err_load = Mimir.Serialization.load(checkpoint_ref, checkpoint_format, {
     load_encoder = true,
     load_tokenizer = false,
     load_optimizer = false,
@@ -714,7 +957,7 @@ elseif MODE == "decode" then
   local ok_alloc, nparams_or_err = Mimir.Model.allocate_params()
   if ok_alloc == false then die("Model.allocate_params failed: " .. tostring(nparams_or_err)) end
 
-  local ok_load, err_load = Mimir.Serialization.load(checkpoint_dir, "raw_folder", {
+  local ok_load, err_load = Mimir.Serialization.load(checkpoint_ref, checkpoint_format, {
     load_encoder = false,
     load_tokenizer = false,
     load_optimizer = false,
@@ -777,7 +1020,7 @@ else
   local ok_alloc, nparams_or_err = Mimir.Model.allocate_params()
   if ok_alloc == false then die("Model.allocate_params failed: " .. tostring(nparams_or_err)) end
 
-  local ok_load, err_load = Mimir.Serialization.load(checkpoint_dir, "raw_folder", {
+  local ok_load, err_load = Mimir.Serialization.load(checkpoint_ref, checkpoint_format, {
     load_encoder = true,
     load_tokenizer = false,
     load_optimizer = false,

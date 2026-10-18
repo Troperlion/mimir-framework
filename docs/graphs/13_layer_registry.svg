@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1050" viewBox="0 0 1800 1050" role="img" aria-labelledby="title desc">
+<title id="title">Registre des couches</title><desc id="desc">Diagramme vectoriel éditable généré depuis les dumps du framework.</desc>
+<defs>
+<marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#475569"/></marker>
+<marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#2563eb"/></marker>
+<style><![CDATA[text{font-family:Inter,Segoe UI,Arial,sans-serif}.title{font-size:34px;font-weight:800;fill:#0f172a}.subtitle{font-size:16px;fill:#475569}.label{font-size:17px;font-weight:700;fill:#0f172a}.small{font-size:13px;fill:#475569}.tiny{font-size:11px;fill:#64748b}.box{stroke:#94a3b8;stroke-width:1.4;rx:14}.edge{stroke:#475569;stroke-width:2.2;fill:none;marker-end:url(#arrow)}.edgeB{stroke:#2563eb;stroke-width:2.4;fill:none;marker-end:url(#arrowBlue)}.dash{stroke-dasharray:7 7}.note{font-size:12px;fill:#475569}]]></style>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="60" y="62" class="title" text-anchor="start">Registre des couches</text>
+<text x="60" y="92" class="subtitle" text-anchor="start">Le framework annonce 70 types de couches supportées dans le registry runtime.</text>
+<line x1="60" y1="112" x2="1740" y2="112" stroke="#e2e8f0" stroke-width="2"/>
+<rect x="80" y="160" width="360" height="70" rx="14" fill="#dbeafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="260.0" y="185" class="label" text-anchor="middle">Convolution</text>
+<text x="260.0" y="202" class="small" text-anchor="middle">4 exemples</text>
+<rect x="115" y="255" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="260.0" y="280" class="label" text-anchor="middle">Conv2d</text>
+<rect x="115" y="303" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="260.0" y="328" class="label" text-anchor="middle">ConvTranspose2d</text>
+<rect x="115" y="351" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="260.0" y="376" class="label" text-anchor="middle">DepthwiseConv2d</text>
+<rect x="115" y="399" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="260.0" y="424" class="label" text-anchor="middle">Conv1d</text>
+<rect x="510" y="160" width="360" height="70" rx="14" fill="#ffedd5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="690.0" y="185" class="label" text-anchor="middle">Activations</text>
+<text x="690.0" y="202" class="small" text-anchor="middle">6 exemples</text>
+<rect x="545" y="255" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="690.0" y="280" class="label" text-anchor="middle">ReLU</text>
+<rect x="545" y="303" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="690.0" y="328" class="label" text-anchor="middle">GELU</text>
+<rect x="545" y="351" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="690.0" y="376" class="label" text-anchor="middle">SiLU</text>
+<rect x="545" y="399" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="690.0" y="424" class="label" text-anchor="middle">Tanh</text>
+<rect x="545" y="447" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="690.0" y="472" class="label" text-anchor="middle">Sigmoid</text>
+<rect x="545" y="495" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="690.0" y="520" class="label" text-anchor="middle">Mish</text>
+<rect x="940" y="160" width="360" height="70" rx="14" fill="#ede9fe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1120.0" y="185" class="label" text-anchor="middle">Norm</text>
+<text x="1120.0" y="202" class="small" text-anchor="middle">4 exemples</text>
+<rect x="975" y="255" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1120.0" y="280" class="label" text-anchor="middle">BatchNorm</text>
+<rect x="975" y="303" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1120.0" y="328" class="label" text-anchor="middle">LayerNorm</text>
+<rect x="975" y="351" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1120.0" y="376" class="label" text-anchor="middle">GroupNorm</text>
+<rect x="975" y="399" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1120.0" y="424" class="label" text-anchor="middle">RMSNorm</text>
+<rect x="1370" y="160" width="360" height="70" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1550.0" y="185" class="label" text-anchor="middle">Attention</text>
+<text x="1550.0" y="202" class="small" text-anchor="middle">3 exemples</text>
+<rect x="1405" y="255" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1550.0" y="280" class="label" text-anchor="middle">SelfAttention</text>
+<rect x="1405" y="303" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1550.0" y="328" class="label" text-anchor="middle">MultiHeadAttention</text>
+<rect x="1405" y="351" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1550.0" y="376" class="label" text-anchor="middle">CrossAttention</text>
+<rect x="80" y="540" width="360" height="70" rx="14" fill="#cffafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="260.0" y="565" class="label" text-anchor="middle">Tensor ops</text>
+<text x="260.0" y="582" class="small" text-anchor="middle">6 exemples</text>
+<rect x="115" y="635" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="260.0" y="660" class="label" text-anchor="middle">Reshape</text>
+<rect x="115" y="683" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="260.0" y="708" class="label" text-anchor="middle">Permute</text>
+<rect x="115" y="731" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="260.0" y="756" class="label" text-anchor="middle">Concat</text>
+<rect x="115" y="779" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="260.0" y="804" class="label" text-anchor="middle">Split</text>
+<rect x="115" y="827" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="260.0" y="852" class="label" text-anchor="middle">Add</text>
+<rect x="115" y="875" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="260.0" y="900" class="label" text-anchor="middle">MatMul</text>
+<rect x="510" y="540" width="360" height="70" rx="14" fill="#fef3c7" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="690.0" y="565" class="label" text-anchor="middle">Pooling</text>
+<text x="690.0" y="582" class="small" text-anchor="middle">3 exemples</text>
+<rect x="545" y="635" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="690.0" y="660" class="label" text-anchor="middle">MaxPool</text>
+<rect x="545" y="683" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="690.0" y="708" class="label" text-anchor="middle">AvgPool</text>
+<rect x="545" y="731" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="690.0" y="756" class="label" text-anchor="middle">GlobalAvgPool</text>
+<rect x="940" y="540" width="360" height="70" rx="14" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1120.0" y="565" class="label" text-anchor="middle">RNN</text>
+<text x="1120.0" y="582" class="small" text-anchor="middle">3 exemples</text>
+<rect x="975" y="635" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1120.0" y="660" class="label" text-anchor="middle">LSTM</text>
+<rect x="975" y="683" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1120.0" y="708" class="label" text-anchor="middle">GRU</text>
+<rect x="975" y="731" width="290" height="34" rx="14" fill="#fff" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1120.0" y="756" class="label" text-anchor="middle">RNN</text>
+<text x="1740" y="1026" class="tiny" text-anchor="end">Mímir Framework — SVG vectoriel éditable</text>
+</svg>

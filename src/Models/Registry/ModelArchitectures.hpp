@@ -7,6 +7,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace ModelArchitectures {
@@ -16,10 +17,22 @@ using json = nlohmann::json;
 using CreateFn = std::function<std::shared_ptr<Model>(const json&)>;
 
 struct Entry {
+    Entry() = default;
+    Entry(std::string entry_name,
+          std::string entry_description,
+          json entry_default_config,
+          CreateFn entry_create)
+        : name(std::move(entry_name)),
+          description(std::move(entry_description)),
+          default_config(std::move(entry_default_config)),
+          create(std::move(entry_create)) {}
+
     std::string name;
     std::string description;
     json default_config;
     CreateFn create;
+    std::string origin = "native";
+    std::string source_path;
 };
 
 class Registry {
@@ -72,4 +85,3 @@ std::shared_ptr<Model> createFromConfig(const json& full_config,
                                         const std::string& default_arch = "t2i_autoencoder");
 
 } // namespace ModelArchitectures
-

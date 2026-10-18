@@ -1,15 +1,19 @@
 #pragma once
 
 #include "../Model.hpp"
+#include "../VAETraining.hpp"
 
 #include <string>
 
 // VAEConvModel:
 // - VAE PUREMENT CONVOLUTIONNEL (downsample -> mu/logvar -> reparameterize -> upsample)
-// - Aucune SelfAttention ni couche dense/texte : uniquement Conv2d /
-//   ConvTranspose2d / GroupNorm|LayerNorm / SiLU / résidus Add / UpsampleNearest
-//   / Reparameterize (+ adaptateurs de disposition Reshape/Permute pour l'I/O).
-// - Output packs: [recon(image_dim), mu(latent_dim), logvar(latent_dim)]
+// - Architecture majoritairement convolutionnelle, avec blocs optionnels
+//   SelfAttention spatiale et ResNet.
+// - Couches principales: Conv2d / ConvTranspose2d / GroupNorm|LayerNorm /
+//   SiLU / résidus Add / UpsampleNearest / Reparameterize (+ adaptateurs de
+//   disposition Reshape/Permute pour l'I/O).
+// - Training output packs: [recon(image_dim), mu(latent_dim), logvar(latent_dim)]
+// - Inference output: recon(image_dim), without evaluating the final Concat.
 // - Latent is spatial: latent_dim = latent_h * latent_w * latent_c (CHW)
 
 class VAEConvModel : public Model {
@@ -25,6 +29,15 @@ public:
 
         int base_channels = 64;
 
+        // Optional latent-only refinement. Defaults preserve existing checkpoints.
+        // Local/dilated residual convolutions mix features at constant LH x LW.
+        bool latent_spatial_context = false;
+        int latent_context_channels = 32;
+        // Pack image subpixel phases before mu/logvar; predict phase residuals
+        // exclusively from z in the decoder (no encoder-to-decoder bypass).
+        bool latent_detail_path = false;
+
+
         // Si false, le latent utilisé par le décodeur est déterministe (z = mu).
         // Si true, on active le bruit de réparameterisation (z = mu + std * eps).
         // Pour des pipelines type SD/SDXL, on veut généralement un encodeur déterministe.
@@ -33,13 +46,12 @@ public:
         // ---- Blocs optionnels ----
 
         // Blocs ResNet (conv3x3->SiLU->conv3x3 + skip) dans l'encodeur et le décodeur.
-        // Entièrement convolutionnels. Activé via --resnet / cfg.use_attention.
-        bool use_attention = true;
+        // Entièrement convolutionnels. Activé via --resnet / cfg.resnet.
+        bool resnet = true;
 
-        // [DÉPRÉCIÉ / IGNORÉ] Le modèle est désormais purement convolutionnel :
-        // la SelfAttention spatiale n'est plus émise dans le graphe. Conservé
-        // uniquement pour compatibilité de configuration (JSON/Lua).
-        bool use_attn = false;
+        // Active la SelfAttention spatiale optionnelle (H*W tokens, embed_dim=channels)
+        // sur certains blocs encodeur/décodeur.
+        bool attention = false;
 
         // Normalisation dans l'encodeur : "none" | "groupnorm" | "layernorm"
         std::string enc_norm = "groupnorm";
@@ -55,17 +67,19 @@ public:
         // Si <= 0, reprend enc_gn_groups.
         int dec_gn_groups = 32;
 
-        // Upsampling du décodeur : "conv_transpose" | "nearest_conv".
+        // Upsampling du décodeur : "conv_transpose" | "nearest_conv" |
+        // "bilinear_conv" | "pixel_shuffle".
         std::string decoder_upsample = "conv_transpose";
 
-        // [DÉPRÉCIÉ / IGNORÉ] Têtes d'attention (plus d'attention dans le graphe).
+        // Nombre de têtes SelfAttention (sera clampé à un diviseur valide de channels).
         int attn_heads = 4;
 
         // Garde-fou ResNet : bloc ResNet injecté seulement si h*w <= resnet_max_tokens.
         // 0 = pas de garde-fou (toujours injecté).
         int resnet_max_tokens = 0;
 
-        // [DÉPRÉCIÉ / IGNORÉ] Garde-fou SelfAttention (plus d'attention dans le graphe).
+        // Garde-fou SelfAttention : injectée seulement si h*w <= attn_max_tokens.
+        // 0 = pas de garde-fou (toujours injectée quand attention=true).
         int attn_max_tokens = 0;
 
         // Skip connections encodeur→décodeur (style U-Net).
@@ -92,9 +106,11 @@ public:
         // pour éviter tout conflit de dimension avec le latent spatial.
         int d_model = 0;
 
-        // [DÉPRÉCIÉ / IGNORÉ] Conditionnement texte. Un modèle purement convolutionnel
-        // ne peut pas embarquer le chemin dense texte (Embedding/Pool/Linear) ; ces
-        // champs sont conservés pour compatibilité mais n'affectent plus le graphe.
+        // Conditionnement texte optionnel.
+        // Quand activé, le graphe ajoute une branche texte légère
+        // (Embedding -> TokenMeanPool -> Linear) et deux têtes de projection
+        // (image/text) pour l'alignement multi-modal pendant trainStep.
+        // Quand désactivé, le graphe reste strictement image-only.
         bool text_cond = false;
         int vocab_size = 32000;
         int seq_len = 64;
@@ -112,6 +128,11 @@ public:
     // Layer names match the decoder portion of buildInto().
     static void buildDecoderInto(Model& model, const Config& cfg);
 
+    bool InitVizTips() override;
+    bool UpdateVizTips(const Layer& layer, VizFrame& frame) override;
+    std::optional<TrainStepResult> trainStep(const TrainStepRequest& request) override;
+
 private:
     Config cfg_;
+    VAETraining vae_training_;
 };

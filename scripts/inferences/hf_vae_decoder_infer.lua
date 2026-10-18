@@ -1,7 +1,7 @@
 #!/usr/bin/env lua
 ---@diagnostic disable: undefined-field, need-check-nil
 
-local Args = dofile("scripts/modules/args.lua")
+local Args = dofile(ROOTWORK.."/scripts/modules/args.lua")
 
 local function logf(fmt, ...)
   local msg = string.format(fmt, ...)
@@ -20,8 +20,8 @@ local function ok_or_die(ok, err, ctx)
 end
 
 local opts = Args.parse(arg)
-local checkpoint = Args.get_str(opts, "checkpoint", Args.get_str(opts, "ckpt", "../ponyxl.safetensors"))
-local mapping_json = Args.get_str(opts, "mapping-json", "tools/ponyxl_vae_decoder_mapping.json")
+local checkpoint = Args.get_str(opts, "checkpoint", Args.get_str(opts, "ckpt", "../model.safetensors"))
+local mapping_json = Args.get_str(opts, "mapping-json", "tools/vae_decoder_mapping.json")
 local image_w = Args.get_int(opts, "image-w", 512)
 local image_h = Args.get_int(opts, "image-h", 512)
 local latent_w = Args.get_int(opts, "latent-w", math.floor(image_w / 8))

@@ -54,6 +54,18 @@ class ConditioningEncoder
                            bool update_mod = true,
                            bool update_mag = true);
 
+        // Mono-modality helpers:
+        // - image feature updates only MAG vector
+        // - text tokens update only SEQ vector
+        // They are no-op unless single_modality_training is true.
+        void fillImageVectorSingleModality(const std::vector<float>& image_feature,
+                           float lr,
+                           bool single_modality_training);
+        void fillTextVectorSingleModality(const std::vector<int>& token_ids,
+                          int pad_id,
+                          float lr,
+                          bool single_modality_training);
+
         // expose for checkpointing
         int dim;
         int vocab_size;

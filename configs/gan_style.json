@@ -1,0 +1,12 @@
+{
+  "architecture": "Gan_Style",
+  "model": {
+    "image_w": 64,
+    "image_h": 64,
+    "image_c": 3,
+    "base_channels": 16,
+    "discriminator_channels": 16,
+    "content_weight": 10.0,
+    "discriminator_lr": 0.001
+  }
+}

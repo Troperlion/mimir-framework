@@ -1,234 +1,190 @@
-# Documentation Mímir (réécrite)
+# Documentation Mímir 3.x
 
-Version framework : **3.1.0**  
-Révision documentation : **2026-07-01**
+Mímir est un framework C++ de construction, d'entraînement et d'exécution de
+modèles, pilotable depuis Lua. Sa documentation est progressive : elle permet
+de lancer un premier modèle rapidement, puis d'approfondir le moteur, les
+runtimes et les extensions sans changer de conventions en cours de route.
 
-Cette documentation remplace l’ancienne doc (archivée dans [docs_archive/2026-02-14/](../docs_archive/2026-02-14/)).
+> **Note**
+> Cette documentation décrit la branche 3.x actuelle. L'ancienne documentation
+> est conservée dans `docs_archive/` à titre historique, mais ne doit pas être
+> utilisée comme référence d'API.
 
-Guide de style documentation : [docs/00-STYLE.md](00-STYLE.md)
+## Sur cette page
 
----
+- [Commencer ici](#commencer-ici)
+- [Prologue](#prologue)
+- [Bien démarrer](#bien-démarrer)
+- [Concepts d'architecture](#concepts-darchitecture)
+- [Les bases](#les-bases)
+- [Modèles](#modèles)
+- [Référence de l'API Lua](#référence-de-lapi-lua)
+- [Runtimes et matériel](#runtimes-et-matériel)
+- [Aller plus loin](#aller-plus-loin)
+- [Développement et extension](#développement-et-extension)
+- [Tutoriels](#tutoriels)
+- [Conventions essentielles](#conventions-essentielles)
+- [Étapes suivantes](#étapes-suivantes)
 
-## 🚀 NOUVEAU — Démarrage rapide (5-10 min)
+## Commencer ici
 
-**👉 Si tu débutes, commence ICI :**
+Si vous découvrez Mímir, suivez ces pages dans l'ordre :
 
-→ **[🚀 GET STARTED](01-Getting-Started/00-GET-STARTED.md)** — Démarrage rapide en 5 étapes
-- Vérifier les prérequis
-- Compiler le framework
-- Exécuter un test rapide
-- Créer ton premier modèle
-- Sauvegarder un checkpoint
+1. [Installation](01-Getting-Started/02-Installation.md)
+2. [Démarrage rapide](01-Getting-Started/00-GET-STARTED.md)
+3. [Concepts essentiels](02-User-Guide/01-Core-Concepts.md)
+4. [Cycle de vie d'un modèle](02-User-Guide/02-Model-Lifecycle.md)
+5. [Scripting Lua](02-User-Guide/06-Lua-Scripting.md)
 
-Puis lis dans cet ordre :
-1. [Compilation & dépendances détaillées](01-Getting-Started/02-Installation.md) (si problèmes de build)
-2. [Cycle de vie d'un modèle](02-User-Guide/02-Model-Lifecycle.md) (comprendre create/allocate/init/forward)
-3. [API Lua de base](03-API-Reference/19-Globals.md) (ce que le runtime injecte)
-
----
-
-## 📚 Documentation complète par section
-
-## Index par tâche (guide rapide)
-
-- Vérifier que l’environnement marche
-  - Lis : [docs/01-Getting-Started/01-Quick-Start.md](01-Getting-Started/01-Quick-Start.md)
-  - Lance :
+Pour choisir un parcours adapté à votre expérience, consultez les
+[parcours d'apprentissage](01-Getting-Started/06-Learning-Paths.md).
 
 ```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
 ./bin/mimir --lua scripts/templates/template_new_model.lua
 ```
 
-- Comprendre create/build/alloc/init
-  - Lis : [docs/02-User-Guide/02-Model-Lifecycle.md](02-User-Guide/02-Model-Lifecycle.md)
-  - Lance :
+## Prologue
 
-```bash
-./bin/mimir --lua scripts/templates/template_new_model.lua
-```
+- [État réel du projet et matrice de maturité](00-PROJECT-STATUS.md)
+- [Philosophie du framework](00-Framework-Philosophy.md)
+- [Guide de style de la documentation](00-STYLE.md)
+- [Notes de version](../CHANGELOG.md)
+- [Guide de contribution](06-Contributing/01-Contributing.md)
 
-- Démarrer rapidement avec la Pipeline API (v3.0+)
-  - Lis : [docs/02-User-Guide/06-Lua-Scripting.md](02-User-Guide/06-Lua-Scripting.md)
-  - Lance :
+## Bien démarrer
 
-```bash
-./bin/mimir --lua scripts/templates/template_pipeline_only.lua
-./bin/mimir --lua scripts/templates/template_pipeline_args.lua -- --no-train
-```
+- [Démarrage rapide](01-Getting-Started/00-GET-STARTED.md)
+- [Première exécution](01-Getting-Started/01-Quick-Start.md)
+- [Installation et compilation](01-Getting-Started/02-Installation.md)
+- [Interface en ligne de commande](01-Getting-Started/03-CLI.md)
+- [Organisation du projet](01-Getting-Started/04-Repo-Layout.md)
+- [Valider l'installation](01-Getting-Started/05-Smoketest.md)
+- [Parcours par niveau](01-Getting-Started/06-Learning-Paths.md)
 
-- Apprendre à passer des arguments
-  - Lis : [docs/02-User-Guide/06-Lua-Scripting.md](02-User-Guide/06-Lua-Scripting.md)
-  - Lance :
+## Concepts d'architecture
 
-```bash
-./bin/mimir --lua scripts/training/ponyxl_ddpm_train.lua -- --help
-```
+- [Vue d'ensemble du moteur](04-Architecture-Internals/01-Engine-Overview.md)
+- [Cycle de vie d'un modèle](02-User-Guide/02-Model-Lifecycle.md)
+- [Classe `Model`](04-Architecture-Internals/10-Model-Class.md)
+- [Registre et builders](04-Architecture-Internals/19-Models-Registry-And-Builders.md)
+- [Planification de l'exécution](04-Architecture-Internals/22-Planning.md)
+- [Autograd et gradients](04-Architecture-Internals/13-Autograd-Gradients.md)
 
-- Éviter les OOM et stabiliser les runs
-  - Lis : [docs/02-User-Guide/09-Memory.md](02-User-Guide/09-Memory.md)
-  - Lance :
+## Les bases
 
-```bash
-./bin/mimir --lua scripts/benchmarks/benchmark_official.lua -- --safe --iters 1
-```
+- [Concepts essentiels](02-User-Guide/01-Core-Concepts.md)
+- [Données et datasets](02-User-Guide/03-Data.md)
+- [Entraînement](02-User-Guide/04-Training.md)
+- [Inférence](02-User-Guide/05-Inference.md)
+- [Scripting Lua](02-User-Guide/06-Lua-Scripting.md)
+- [Tokenizer et encodeur](02-User-Guide/07-Tokenizer-Encoder.md)
+- [Configuration pilotée par fichier](02-User-Guide/08-Config-Driven-Scripting.md)
+- [Checkpoints](02-User-Guide/08-Checkpoints.md)
+- [Gestion de la mémoire](02-User-Guide/09-Memory.md)
+- [Scripts et exemples](02-User-Guide/10-Examples.md)
+- [Packages d’architecture MPK](02-User-Guide/15-MPK.md)
+- [Rapports Show-Graph et métriques](02-User-Guide/16-Show-Graph-Metrics.md)
 
-- Sauver/charger proprement
-  - Lis : [docs/03-API-Reference/02-Serialization.md](03-API-Reference/02-Serialization.md)
-  - Lance :
+## Modèles
 
-```bash
-./bin/mimir --lua scripts/tests/test_serialization_smoke.lua
-```
+- [Registre des architectures](03-API-Reference/11-Architectures.md)
+- [VAE texte](02-User-Guide/11-VAEText.md)
+- [Transformer et GPT](02-User-Guide/12-Transformer-GPT.md)
+- [Modèles de diffusion](02-User-Guide/13-Diffusion.md)
+- [VAE convolutionnel](02-User-Guide/14-VAEConv.md)
 
-## Cheat sheet (conventions + champs importants)
+## Référence de l'API Lua
 
-### Conventions d’IO (noms de tenseurs)
+- [Vue d'ensemble](03-API-Reference/00-API-Overview.md)
+- [Contrat du système de scripting](03-API-Reference/00-Scripting-Contract.md)
+- [Variables globales et alias](03-API-Reference/19-Globals.md)
+- [`Mimir.Model`](03-API-Reference/10-Model.md)
+- [`Mimir.Architectures`](03-API-Reference/11-Architectures.md)
+- [`Mimir.Layers`](03-API-Reference/18-Layers-Module.md)
+- [`Mimir.Tokenizer`](03-API-Reference/12-Tokenizer.md)
+- [`Mimir.Dataset`](03-API-Reference/13-Dataset.md)
+- [`Mimir.IO`](03-API-Reference/21-IO.md)
+- [Mémoire](03-API-Reference/14-Memory.md)
+- [Visualisation et monitoring](03-API-Reference/15-Viz-Htop.md)
+- [Interfaces Viz : SFML, Qt, GTK, Web](02-User-Guide/17-Viz-Backends.md)
+- [Sérialisation](03-API-Reference/02-Serialization.md)
+- [Variables d'environnement](03-API-Reference/22-Environment-Variables.md)
+- [Bridge JavaScript](03-API-Reference/21-JavaScript-API.md)
+- [Correspondance Lua vers C++](03-API-Reference/20-Lua-API-Cpp-Mapping.md)
 
-| Nom | Type typique | Sens |
-| --- | ---: | --- |
-| `__input__` | float *ou* ids int (selon archi) | entrée par défaut |
-| `text_ids` | ids int | entrée texte dédiée (NLP) |
-| `x` | float | sortie principale (convention) |
+## Runtimes et matériel
 
-### Champs de config Transformer (v3.0+)
+- [Backends matériels](04-Architecture-Internals/03-Hardware-Backends.md)
+- [Runtimes GPU](04-Architecture-Internals/21-GPU-Runtimes.md)
+- [Accélération GPU](05-Advanced/05-GPU-Acceleration.md)
+- [Étude du runtime FPGA iCESugar Pro](05-Advanced/06-FPGA-iCESugar-Pro-Runtime-Study.md)
+- [Runtime allocator et scratchpads](04-Architecture-Internals/18-RuntimeAllocator-And-Scratchpads.md)
+- [Développer un runtime](07-Devs/04-Runtime-Development.md)
 
-| Champ | Sens |
+Le routeur essaie les backends disponibles dans cet ordre : ROCm, CUDA,
+Vulkan, OpenCL, puis CPU. Le support déclaré d'une opération ne garantit pas
+qu'elle possède un kernel GPU spécialisé ; les pages runtime distinguent ces
+deux notions.
+
+CPU, Vulkan et OpenCL couvrent 72 types exécutables en forward et 73 en
+backward. [NMS](03-API-Reference/01-Layers.md#contrat-de-nms) possède un backward
+stop-gradient sur CPU, CUDA, Vulkan et OpenCL. Les kernels de référence GPU
+complètent la couverture ; ils ne garantissent pas une amélioration de vitesse.
+
+## Aller plus loin
+
+- [Performance](05-Advanced/01-Performance.md)
+- [Benchmarks Colab : profils, runtimes et mesures](05-Advanced/07-Colab-Benchmarks.md)
+- [Débogage et stabilité numérique](05-Advanced/02-Debugging.md)
+- [État de préparation LLM](05-Advanced/03-LLM-Readiness.md)
+- [Carte du code source](05-Advanced/04-Source-Code-Map.md)
+- [Internals de la mémoire](04-Architecture-Internals/02-Memory.md)
+- [Layers et opérations](04-Architecture-Internals/14-Layers-And-Ops.md)
+- [Sérialisation interne](04-Architecture-Internals/15-Serialization-Internals.md)
+- [Bindings Lua internes](04-Architecture-Internals/17-Lua-Bindings-Internals.md)
+
+## Développement et extension
+
+- [Guide développeur](07-Devs/00-INDEX.md)
+- [Construire des modèles et des layers](07-Devs/02-Building-Models-And-Layers.md)
+- [Configuration et registre](07-Devs/03-Config-And-Registry.md)
+- [Contrat du système de scripting](07-Devs/05-Scripting-System-Contract.md)
+- [Ajouter une architecture et ses outils](06-Contributing/02-New-Architecture-And-Tools.md)
+- [Étendre modèles, runtimes et fonctionnalités](06-Contributing/03-Extending-Models-Runtimes-And-Features.md)
+- [Ajouter une entrée de scripting](06-Contributing/04-Tutorial-Add-Python-Scripting-Entry.md)
+- [Préparer une publication GitHub](06-Contributing/05-Publishing-GitHub.md)
+
+## Tutoriels
+
+- [Tous les tutoriels](08-Tuto/00-INDEX.md)
+- [Le framework en trois étapes](08-Tuto/01-Cours-Framework-3-Etapes.md)
+- [Ajouter un modèle](08-Tuto/02-Tuto-Ajouter-Modele.md)
+- [Écrire un script Lua](08-Tuto/03-Tuto-Coder-Script.md)
+- [Ajouter ou modifier un runtime](08-Tuto/04-Tuto-Modifier-Ou-Ajouter-Runtime.md)
+- [Ajouter une opération](08-Tuto/05-Tuto-Ajouter-Op.md)
+- [Parcours complet](08-Tuto/06-Parcours-Complet-Framework.md)
+- [Valider VAEConv sans dataset](08-Tuto/07-Tuto-VAEConv-Sans-Dataset.md)
+- [Du registre au checkpoint](08-Tuto/08-Tuto-Registre-Pipeline-Checkpoint.md)
+- [Créer et inspecter un package MPK](08-Tuto/09-Tuto-Creer-MPK.md)
+
+## Conventions essentielles
+
+| Nom | Rôle |
 | --- | --- |
-| `seq_len` | longueur de séquence traitée |
-| `vocab_size` | taille du vocab |
-| `d_model` | dimension embedding/model |
-| `mlp_hidden` | hidden du MLP (FFN) |
-| `num_layers` | nombre de blocs |
-| `num_heads` | nombre de têtes |
+| `__input__` | Entrée par défaut, sous forme de flottants ou d'identifiants selon l'architecture |
+| `text_ids` | Entrée d'identifiants dédiée aux architectures de texte |
+| `x` | Sortie principale conventionnelle |
 
-### Legacy → moderne (scripts)
+Les sources de vérité sont le
+[registre des architectures](../src/Models/Registry/ModelArchitectures.cpp),
+les [bindings Lua](../src/scriptings/Lua/luaScripting/LuaScripting.cpp), la
+[classe Model](../src/Model.cpp) et les implémentations de
+[runtimes](../src/runtimes/).
 
-| Ancien | Nouveau | Pourquoi |
-| --- | --- | --- |
-| `max_seq_len` | `seq_len` | nom canonique registre |
-| `d_ff` | `mlp_hidden` | explicite (FFN/MLP) |
-| `embed_dim` | `d_model` | cohérent Transformer |
+## Étapes suivantes
 
-## 1) Démarrer (10 minutes)
-
-- Quick start : [docs/01-Getting-Started/01-Quick-Start.md](01-Getting-Started/01-Quick-Start.md)
-- Installer / compiler : [docs/01-Getting-Started/02-Installation.md](01-Getting-Started/02-Installation.md)
-- CLI (binaire `mimir`) : [docs/01-Getting-Started/03-CLI.md](01-Getting-Started/03-CLI.md)
-- Organisation du repo : [docs/01-Getting-Started/04-Repo-Layout.md](01-Getting-Started/04-Repo-Layout.md)
-- Smoketest (valider l’environnement rapidement) : [docs/01-Getting-Started/05-Smoketest.md](01-Getting-Started/05-Smoketest.md)
-
-Parcours conseillé si tu reviens sur le projet après plusieurs semaines :
-
-1. valide le binaire avec le smoketest,
-2. relis le lifecycle modèle,
-3. seulement ensuite ouvre la référence API détaillée.
-
-## 2) Utiliser le framework
-
-- Concepts essentiels : [docs/02-User-Guide/01-Core-Concepts.md](02-User-Guide/01-Core-Concepts.md)
-- Workflow modèle (create/build/allocate/forward/backward) : [docs/02-User-Guide/02-Model-Lifecycle.md](02-User-Guide/02-Model-Lifecycle.md)
-- Données & datasets : [docs/02-User-Guide/03-Data.md](02-User-Guide/03-Data.md)
-- Entraînement : [docs/02-User-Guide/04-Training.md](02-User-Guide/04-Training.md)
-- Inférence : [docs/02-User-Guide/05-Inference.md](02-User-Guide/05-Inference.md)
-- Scripting Lua (args, globals) : [docs/02-User-Guide/06-Lua-Scripting.md](02-User-Guide/06-Lua-Scripting.md)
-- Tokenizer & ConditioningEncoder : [docs/02-User-Guide/07-Tokenizer-Encoder.md](02-User-Guide/07-Tokenizer-Encoder.md)
-- Checkpoints / reprise : [docs/02-User-Guide/08-Checkpoints.md](02-User-Guide/08-Checkpoints.md)
-- Analyse d’un artefact modèle sur disque (SafeTensors / RawFolder / DebugJson) : [docs/02-User-Guide/08-Checkpoints.md](02-User-Guide/08-Checkpoints.md)
-- Mémoire (Allocator, MemoryGuard) : [docs/02-User-Guide/09-Memory.md](02-User-Guide/09-Memory.md)
-- Scripts d’exemples : [docs/02-User-Guide/10-Examples.md](02-User-Guide/10-Examples.md)
-- **Config-driven scripting** (`--conf` mode, workflows, automation) : [docs/02-User-Guide/08-Config-Driven-Scripting.md](02-User-Guide/08-Config-Driven-Scripting.md)
-- Scripts d'exemples : [docs/02-User-Guide/10-Examples.md](02-User-Guide/10-Examples.md)
-- Tutoriel VAEText : [docs/02-User-Guide/11-VAEText.md](02-User-Guide/11-VAEText.md)
-- Tutoriel Transformer/GPT : [docs/02-User-Guide/12-Transformer-GPT.md](02-User-Guide/12-Transformer-GPT.md)
-- Tutoriel diffusion (PonyXL/SD3.5) : [docs/02-User-Guide/13-Diffusion.md](02-User-Guide/13-Diffusion.md)
-
-## 3) Référence API
-
-- Vue d’ensemble API Lua : [docs/03-API-Reference/00-API-Overview.md](03-API-Reference/00-API-Overview.md)
-- Layers (statut, paramètres, compat) : [docs/03-API-Reference/01-Layers.md](03-API-Reference/01-Layers.md)
-- Sérialisation (save/load, formats, checksums) : [docs/03-API-Reference/02-Serialization.md](03-API-Reference/02-Serialization.md)
-- `Mimir.Model` : [docs/03-API-Reference/10-Model.md](03-API-Reference/10-Model.md)
-- `Mimir.Architectures` : [docs/03-API-Reference/11-Architectures.md](03-API-Reference/11-Architectures.md)
-- `Mimir.Tokenizer` : [docs/03-API-Reference/12-Tokenizer.md](03-API-Reference/12-Tokenizer.md)
-- `Mimir.Dataset` : [docs/03-API-Reference/13-Dataset.md](03-API-Reference/13-Dataset.md)
-- Mémoire / allocator : [docs/03-API-Reference/14-Memory.md](03-API-Reference/14-Memory.md)
-- Visualisation & monitoring : [docs/03-API-Reference/15-Viz-Htop.md](03-API-Reference/15-Viz-Htop.md)
-- Sérialisation (détaillé) : [docs/03-API-Reference/16-Serialization.md](03-API-Reference/16-Serialization.md)
-- `Mimir.NeuroPulse` : [docs/03-API-Reference/17-NeuroPulse.md](03-API-Reference/17-NeuroPulse.md)
-- `Mimir.Layers` (ops) : [docs/03-API-Reference/18-Layers-Module.md](03-API-Reference/18-Layers-Module.md)
-- `Mimir.IO` (I/O images) : [docs/03-API-Reference/21-IO.md](03-API-Reference/21-IO.md)
-- Globals & aliases : [docs/03-API-Reference/19-Globals.md](03-API-Reference/19-Globals.md)
-- Mapping Lua ↔ C++ (sommaire) : [docs/03-API-Reference/20-Lua-API-Cpp-Mapping.md](03-API-Reference/20-Lua-API-Cpp-Mapping.md)
-
-## 🆕 Nouveautés de la série 3.0 (résumé)
-
-| Quoi | Où |
-| --- | --- |
-| Nouveau module `Mimir.IO` (lecture image RGB u8) | [03-API-Reference/21-IO.md](03-API-Reference/21-IO.md) |
-| `Mimir.Model.create_from_config(full_cfg)` | [03-API-Reference/10-Model.md](03-API-Reference/10-Model.md) |
-| `Mimir.Model.dtype()` / dtype setter | [03-API-Reference/10-Model.md](03-API-Reference/10-Model.md) |
-| Alias `Mimir.model` (lowercase) | [03-API-Reference/19-Globals.md](03-API-Reference/19-Globals.md) |
-| Helpers PonyXL-DDPM (train/val/viz/text2img/vae_scale) | [03-API-Reference/20-Lua-API-Cpp-Mapping.md](03-API-Reference/20-Lua-API-Cpp-Mapping.md) |
-| Nouveaux templates : `template_pipeline_only.lua` + `template_pipeline_args.lua` | [scripts/README.md](../scripts/README.md) |
-| pipeline_api.lua : dtype robuste (Mimir.model / Mimir.Model) | [scripts/README.md](../scripts/README.md) |
-| Détection hardware au démarrage (AVX2/FMA/F16C/BMI2 + CUDA/ROCm) | `bin/mimir --help` |
-
-Pour éviter les confusions avec l’ancienne doc : certains paragraphes parlent encore de fonctionnalités “nouvelles en v3.0”. Lis cela comme “introduit dans la branche 3.0, toujours valable en 3.0.1”, et non comme une indication que la version courante serait restée sur la première release de cette branche.
-
-## 4) Internals (comment ça marche)
-
-- Index internals (étendu) : [docs/04-Architecture-Internals/00-Internals-Index.md](04-Architecture-Internals/00-Internals-Index.md)
-- Moteur d’exécution : [docs/04-Architecture-Internals/01-Engine-Overview.md](04-Architecture-Internals/01-Engine-Overview.md)
-- Mémoire & allocateur : [docs/04-Architecture-Internals/02-Memory.md](04-Architecture-Internals/02-Memory.md)
-- Backends hardware (CPU/Vulkan/OpenCL) : [docs/04-Architecture-Internals/03-Hardware-Backends.md](04-Architecture-Internals/03-Hardware-Backends.md)
-- Monitoring (Htop/SFML/threads) : [docs/04-Architecture-Internals/04-Monitoring-Htop-Visualizer.md](04-Architecture-Internals/04-Monitoring-Htop-Visualizer.md)
-- AdvancedRAMManager (cache/compression/spill) : [docs/04-Architecture-Internals/05-AdvancedRAMManager.md](04-Architecture-Internals/05-AdvancedRAMManager.md)
-- Classe `Model` (C++) : [docs/04-Architecture-Internals/10-Model-Class.md](04-Architecture-Internals/10-Model-Class.md)
-- Helpers C++ (`Helpers.hpp`) : [docs/04-Architecture-Internals/11-Helpers.md](04-Architecture-Internals/11-Helpers.md)
-- Stockage `tensor` + alloc dynamique : [docs/04-Architecture-Internals/12-Tensor-Storage.md](04-Architecture-Internals/12-Tensor-Storage.md)
-- Autograd / gradients / backward : [docs/04-Architecture-Internals/13-Autograd-Gradients.md](04-Architecture-Internals/13-Autograd-Gradients.md)
-- Layers / `LayerOps` / layouts : [docs/04-Architecture-Internals/14-Layers-And-Ops.md](04-Architecture-Internals/14-Layers-And-Ops.md)
-- Sérialisation (implémentation) : [docs/04-Architecture-Internals/15-Serialization-Internals.md](04-Architecture-Internals/15-Serialization-Internals.md)
-- Tokenizer / ConditioningEncoder (implémentation) : [docs/04-Architecture-Internals/16-Tokenizer-Encoder-Internals.md](04-Architecture-Internals/16-Tokenizer-Encoder-Internals.md)
-- Bindings Lua (implémentation) : [docs/04-Architecture-Internals/17-Lua-Bindings-Internals.md](04-Architecture-Internals/17-Lua-Bindings-Internals.md)
-- RuntimeAllocator / scratchpads : [docs/04-Architecture-Internals/18-RuntimeAllocator-And-Scratchpads.md](04-Architecture-Internals/18-RuntimeAllocator-And-Scratchpads.md)
-- Registre modèles / builders : [docs/04-Architecture-Internals/19-Models-Registry-And-Builders.md](04-Architecture-Internals/19-Models-Registry-And-Builders.md)
-- CLI / entry points : [docs/04-Architecture-Internals/20-CLI-EntryPoints.md](04-Architecture-Internals/20-CLI-EntryPoints.md)
-
-## 5) Performance
-
-- Performance & tuning CPU : [docs/05-Advanced/01-Performance.md](05-Advanced/01-Performance.md)
-- Debug & stabilité numérique : [docs/05-Advanced/02-Debugging.md](05-Advanced/02-Debugging.md)
-- Analyse modèle (outil `analyze_model.lua`, graphe Mermaid Markdown) : [docs/05-Advanced/02-Debugging.md](05-Advanced/02-Debugging.md)
-- LLM (état / manque / roadmap) : [docs/05-Advanced/03-LLM-Readiness.md](05-Advanced/03-LLM-Readiness.md)
-- Carte du code source (C/C++, fichier par fichier) : [docs/05-Advanced/04-Source-Code-Map.md](05-Advanced/04-Source-Code-Map.md)
-
-## 6) Contribution
-
-- Contribuer : [docs/06-Contributing/01-Contributing.md](06-Contributing/01-Contributing.md)
-- Ajouter une architecture + registre + script Lua + outils : [docs/06-Contributing/02-New-Architecture-And-Tools.md](06-Contributing/02-New-Architecture-And-Tools.md)
-- Chapitre développeur complet (models, runtimes, features, scripting multi-langage) : [docs/06-Contributing/03-Extending-Models-Runtimes-And-Features.md](06-Contributing/03-Extending-Models-Runtimes-And-Features.md)
-- Tutoriel pas-à-pas: ajouter une entrée Python (transposable Ruby/JS/Perl/Java/Rust) : [docs/06-Contributing/04-Tutorial-Add-Python-Scripting-Entry.md](06-Contributing/04-Tutorial-Add-Python-Scripting-Entry.md)
-
-## 7) Devs (guide d'implémentation)
-
-- Index développeur : [docs/07-Devs/00-INDEX.md](07-Devs/00-INDEX.md)
-- Fonctionnement du framework : [docs/07-Devs/01-How-The-Framework-Works.md](07-Devs/01-How-The-Framework-Works.md)
-- Construire un modèle (model.push + wiring C/C++) : [docs/07-Devs/02-Building-Models-And-Layers.md](07-Devs/02-Building-Models-And-Layers.md)
-- Config + registre d'architectures : [docs/07-Devs/03-Config-And-Registry.md](07-Devs/03-Config-And-Registry.md)
-- Modifier / ajouter un runtime : [docs/07-Devs/04-Runtime-Development.md](07-Devs/04-Runtime-Development.md)
-- Contrat API scripting inter-langages : [docs/07-Devs/05-Scripting-System-Contract.md](07-Devs/05-Scripting-System-Contract.md)
-
-## Convention de noms
-
-- `__input__` : entrée float par défaut (ou ids int selon l’archi)
-- `text_ids` : entrée ids int pour les architectures NLP qui consomment un Embedding
-- `x` : sortie float principale du modèle (convention dans les architectures)
-
-## Où est la “vérité” ?
-
-- Contrat API scripting (globals/aliases partagés) : [src/scriptings/ScriptingContext.hpp](../src/scriptings/ScriptingContext.hpp)
-- API Lua exportée (implémentation) : [src/scriptings/Lua/luaScripting/LuaScripting.cpp](../src/scriptings/Lua/luaScripting/LuaScripting.cpp)
-- Moteur et exécution des layers : [src/Model.cpp](../src/Model.cpp)
-- Registre des architectures : [src/Models/Registry/ModelArchitectures.cpp](../src/Models/Registry/ModelArchitectures.cpp)
-- Tokenizer/ConditioningEncoder : [src/Tokenizer.cpp](../src/Tokenizer.cpp), [src/Encoder.cpp](../src/Encoder.cpp)
+Pour une première utilisation, poursuivez avec le
+[démarrage rapide](01-Getting-Started/00-GET-STARTED.md). Pour contribuer au
+moteur, commencez par la [vue d'ensemble interne](04-Architecture-Internals/00-Internals-Index.md).

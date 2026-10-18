@@ -1,25 +1,20 @@
-# API Lua - vue d’ensemble
-
-## Pour qui
-
-Développeur et utilisateur intermédiaire/avancé.
-
-## Objectif
+# Vue d’ensemble de l’API Lua
 
 Trouver rapidement le contrat API réel et les paramètres utilisables.
 
-## Avant de commencer
+**Public concerné :** Développeur et utilisateur intermédiaire/avancé.
 
-Connaître les commandes de base de Mímir.
+> **Prérequis**
+>
+> Connaître les commandes de base de Mímir.
 
-## Résultat attendu
-
-Tu peux appeler l'API sans ambiguïté de signature ou de comportement.
-
-
-La source de vérité de l’API exposée est `src/scriptings/Lua/luaScripting/LuaScripting.cpp`.
+La table publique est enregistrée dans
+`src/scriptings/Lua/luaScripting/LuaScripting.cpp`. Les implémentations sont
+réparties dans les autres `LuaScripting*.cpp` du même répertoire.
 
 Le contrat système commun (noms globaux + aliases, partagé entre langages de scripting) est défini dans `src/scriptings/ScriptingContext.hpp`.
+
+La specification officielle du contrat de scripting est ici: [docs/03-API-Reference/00-Scripting-Contract.md](00-Scripting-Contract.md).
 
 ## Modules principaux
 
@@ -28,7 +23,12 @@ Le contrat système commun (noms globaux + aliases, partagé entre langages de s
 - `Mimir.Serialization` : save/load, formats, debug dumps
 - `Mimir.Tokenizer` : tokenize/detokenize, BPE
 - `Mimir.Dataset` : chargement et itération (selon scripts)
+- `Mimir.Database` : builder de chargement avec cache
 - `Mimir.IO` : lecture d'images (RGB u8)
+- `Mimir.Layers` : inspection du graphe courant par type
+- `Mimir.Memory`, `Guard`, `MemoryGuard`, `Allocator` : gestion mémoire
+- `Mimir.Htop`, `Mimir.Viz` : monitoring
+- Environnement : variables `MIMIR_*` runtime/bridge
 
 Pages de référence associées :
 
@@ -39,11 +39,11 @@ Pages de référence associées :
 - Mémoire : `docs/03-API-Reference/14-Memory.md`
 - Viz/Htop : `docs/03-API-Reference/15-Viz-Htop.md`
 - Sérialisation (détaillé) : `docs/03-API-Reference/16-Serialization.md`
-- NeuroPulse : `docs/03-API-Reference/17-NeuroPulse.md`
 - Ops layers : `docs/03-API-Reference/18-Layers-Module.md`
 - Globals/aliases : `docs/03-API-Reference/19-Globals.md`
 - Mapping Lua ↔ C++ (sommaire) : `docs/03-API-Reference/20-Lua-API-Cpp-Mapping.md`
 - `Mimir.IO` (I/O images) : `docs/03-API-Reference/21-IO.md`
+- Variables d'environnement : `docs/03-API-Reference/22-Environment-Variables.md`
 
 ## Convention d’arguments
 
@@ -53,3 +53,9 @@ La plupart des API retournent soit :
 - ou une table Lua + erreur
 
 Les exemples de scripts dans `scripts/` restent les meilleurs “tests vivants” de l’API.
+
+## Étapes suivantes
+
+- [Revenir à la documentation](../00-INDEX.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Scripting Contract](00-Scripting-Contract.md)

@@ -1,4 +1,7 @@
 #!/usr/bin/env lua5.3
+local Help = dofile(ROOTWORK.."/scripts/modules/help_cli.lua")
+Help.auto_exit_help()
+
 --[[
     Exemple d'utilisation du monitoring asynchrone - Mímir Framework v2.0
     

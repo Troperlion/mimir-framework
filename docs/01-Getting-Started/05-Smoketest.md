@@ -1,24 +1,15 @@
-
-
-## Pour qui
-
-Débutant et contributeur.
-
-## Objectif
+# Valider l’installation
 
 Vérifier en 5 minutes que l'environnement est sain.
 
-## Avant de commencer
+**Public concerné :** Débutant et contributeur.
 
-Build effectué au moins une fois.
+> **Prérequis**
+>
+> Build effectué au moins une fois.
 
-## Résultat attendu
-
-Tu sais dire rapidement si la machine est prête.
-
-# Smoketest (5 minutes)
-
-Objectif : vérifier rapidement que le build, la CLI et les chemins essentiels (Lua, forward, sérialisation) fonctionnent sur ta machine.
+Ce smoketest vérifie que le build, la CLI et les chemins essentiels — Lua,
+passe avant et sérialisation — fonctionnent sur votre machine.
 
 ## 1) Build propre
 
@@ -65,7 +56,7 @@ Tests rapides :
 
 ## 6) (Optionnel) Exécuter les tests CMake/CTest si présents
 
-Si ton build a généré des targets de test :
+Si votre build a généré des targets de test :
 
 ```bash
 cd build
@@ -74,5 +65,11 @@ ctest --output-on-failure
 
 ## Notes
 
-- Si tu vois des refus MemoryGuard/OOM, lis `docs/02-User-Guide/09-Memory.md`.
-- Si tu veux faire un run plus lourd : `./bin/mimir --lua scripts/benchmarks/benchmark_official.lua -- --safe --iters 1`.
+- Si vous voyez des refus MemoryGuard/OOM, lis `docs/02-User-Guide/09-Memory.md`.
+- Si vous voulez faire un run plus lourd : `./bin/mimir --lua scripts/benchmarks/benchmark_official.lua -- --safe --iters 1`.
+
+## Étapes suivantes
+
+- [Page précédente : Organisation du dépôt](04-Repo-Layout.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Parcours par niveau de compétence](06-Learning-Paths.md)

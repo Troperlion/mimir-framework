@@ -61,5 +61,10 @@ int main() {
         TASSERT_TRUE(cfg.contains("input_dim") && cfg["input_dim"].get<int>() == 3);
     }
 
+    // 4) Removed architectures are no longer exposed by the registry.
+    {
+        TASSERT_TRUE(ModelArchitectures::Registry::instance().find("ponyxl_ddpm") == nullptr);
+    }
+
     return 0;
 }

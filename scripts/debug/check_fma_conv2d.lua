@@ -1,4 +1,7 @@
 #!/usr/bin/env mimir --lua
+local Help = dofile(ROOTWORK.."/scripts/modules/help_cli.lua")
+Help.auto_exit_help()
+
 
 -- Vérifie (via logs C++ MIMIR_ACCEL_VERBOSE=1) que Conv2d prend le fast path AVX2+FMA.
 -- Usage:

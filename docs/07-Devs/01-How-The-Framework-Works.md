@@ -1,23 +1,28 @@
-# Comment Fonctionne Le Framework
-
-## Pour qui
-
-Développeur framework (C/C++/runtime/scripting).
-
-## Objectif
+# Fonctionnement du framework
 
 Implémenter ou modifier des briques techniques sans casser le contrat global.
 
-## Avant de commencer
+**Public concerné :** Développeur framework (C/C++/runtime/scripting).
 
-Comprendre le registre d'architectures et les conventions I/O.
-
-## Résultat attendu
-
-Tu peux livrer des évolutions compatibles avec la base existante.
-
+> **Prérequis**
+>
+> Comprendre le registre d'architectures et les conventions I/O.
 
 Ce chapitre decrit la boucle centrale du framework, du point de vue developpeur.
+
+## Sur cette page
+
+- [1. Vue d'ensemble](#1-vue-densemble)
+- [Role explicite de la Viz dans le framework](#role-explicite-de-la-viz-dans-le-framework)
+- [2. Cycle de vie standard d'un modele](#2-cycle-de-vie-standard-dun-modele)
+- [3. Topologie et execution](#3-topologie-et-execution)
+- [4. Pourquoi le registre est central](#4-pourquoi-le-registre-est-central)
+- [5. Runtime et dispatch](#5-runtime-et-dispatch)
+- [6. Contrat scripting et stabilite API](#6-contrat-scripting-et-stabilite-api)
+- [7. Contraintes metier a respecter](#7-contraintes-metier-a-respecter)
+- [8. Demo metier - run reproductible en mode conf](#8-demo-metier---run-reproductible-en-mode-conf)
+- [9. Demo metier - boucle d'analyse architecture](#9-demo-metier---boucle-danalyse-architecture)
+- [Étapes suivantes](#étapes-suivantes)
 
 ## 1. Vue d'ensemble
 
@@ -28,6 +33,30 @@ Le framework tourne autour de 5 blocs :
 3. Registre d'architectures : fabrique de modeles a partir d'un nom + config.
 4. Runtime backend : execution CPU/GPU des operations.
 5. Bridges scripting : exposition de l'API framework (Lua aujourd'hui, autres demain).
+
+## Role explicite de la Viz dans le framework
+
+La visualisation n'est pas un "widget UI" annexe. Dans Mimir, la Viz est une brique
+d'observabilite du runtime et de l'entrainement.
+
+Role fonctionnel:
+
+1. Rendre visibles les etats internes (tensors intermediaires, reconstructions, latent, diff).
+2. Permettre le diagnostic rapide des regressions de shape/layout/couleur.
+3. Exposer les metriques live de training sans bloquer la boucle de calcul.
+4. Servir de contrat operatoire entre modele, monitor asynchrone et interface SFML.
+
+Role architectural:
+
+- Le modele produit des "tips" (viz taps) pendant `forwardPass`.
+- `AsyncMonitor` transporte ces donnees vers la couche UI.
+- `Visualizer` transforme ces frames en textures, panels et controles interactifs.
+
+Consequence dev:
+
+- Toute modification de la Viz doit preserver la stabilite du chemin training/runtime.
+- Filtrer une preview ne doit jamais interrompre l'execution du layer (pas de `continue`
+  sur la boucle principale d'execution de `Model`).
 
 ## 2. Cycle de vie standard d'un modele
 
@@ -104,12 +133,12 @@ Exemple de config minimale:
 
 ```json
 {
-	"script": "scripts/templates/template_conf_load_and_train.lua",
-	"arch": "vae_conv",
-	"seed": 42,
-	"epochs": 1,
-	"batch_size": 2,
-	"dataset_path": "dataset_2"
+  "script": "scripts/templates/template_conf_load_and_train.lua",
+  "arch": "vae_conv",
+  "seed": 42,
+  "epochs": 1,
+  "batch_size": 2,
+  "dataset_path": "dataset_2"
 }
 ```
 
@@ -138,3 +167,9 @@ But metier :
 - valider que le schema des layers est coherent,
 - valider que le nombre de parametres n'a pas derive sans justification,
 - garder un point de comparaison avant/apres refactor.
+
+## Étapes suivantes
+
+- [Page précédente : Développement du framework](00-INDEX.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Construire Un Modele Et Ses Layers](02-Building-Models-And-Layers.md)

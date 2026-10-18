@@ -1,20 +1,12 @@
-# Internals : sérialisation (SafeTensors / RawFolder / DebugJson)
-
-## Pour qui
-
-Développeur avancé qui modifie le moteur C/C++.
-
-## Objectif
+# Internals de la sérialisation
 
 Comprendre le fonctionnement interne exact des composants runtime.
 
-## Avant de commencer
+**Public concerné :** Développeur avancé qui modifie le moteur C/C++.
 
-Connaître les bases C++ et la structure du dépôt.
-
-## Résultat attendu
-
-Tu peux modifier le code interne en limitant les régressions.
+> **Prérequis**
+>
+> Connaître les bases C++ et la structure du dépôt.
 
 
 Cette page documente l’implémentation de la sérialisation côté C++ (save/load), et comment elle s’interface avec le runtime `Model`.
@@ -22,10 +14,10 @@ Cette page documente l’implémentation de la sérialisation côté C++ (save/l
 Source de vérité :
 
 - API haut niveau : `src/Serialization/Serialization.hpp`, `src/Serialization/Serialization.cpp`
-- SafeTensors : `src/Serialization/SafeTensorsWriter.hpp/.cpp`, `SafeTensorsReader.hpp/.cpp`
-- Raw folder : `src/Serialization/RawCheckpointWriter.hpp/.cpp`, `RawCheckpointReader.hpp/.cpp`
-- Debug JSON : `src/Serialization/DebugJsonDump.hpp/.cpp`
-- Checksum/crypto utilitaires : `src/Sha256.hpp/.cpp` (si utilisé)
+- SafeTensors : `src/Serialization/SafeTensorsWriter.hpp` et `src/Serialization/SafeTensorsWriter.cpp`, `SafeTensorsReader.hpp/.cpp`
+- Raw folder : `src/Serialization/RawCheckpointWriter.hpp` et `src/Serialization/RawCheckpointWriter.cpp`, `RawCheckpointReader.hpp/.cpp`
+- Debug JSON : `src/Serialization/DebugJsonDump.hpp` et `src/Serialization/DebugJsonDump.cpp`
+- Checksum/crypto utilitaires : `src/Sha256.hpp` et `src/Sha256.cpp` (si utilisé)
 - Modèle (accès weights/layers/tokenizer/encoder/optimizer) : `src/Model.hpp`, `src/Model.cpp`
 
 ## 1) Surface API : `Mimir::Serialization`
@@ -79,7 +71,7 @@ Ce point dépend du writer choisi, mais le contrat général est :
 
 **Note pratique** : côté runtime, les poids peuvent être stockés dans des blocs unifiés `Layer::weight_block` (voir `docs/04-Architecture-Internals/12-Tensor-Storage.md`). Le writer doit donc lire via les accesseurs “compatibles sérialisation”.
 
-## 5) DebugJson “enhanced”
+## 5) DebugJson “enhanced” (v1.4)
 
 Le format debug est conçu pour :
 
@@ -87,11 +79,26 @@ Le format debug est conçu pour :
 - produire des dumps de compat tests,
 - comparer des runs (checksums / deltas).
 
+Depuis v1.3, il embarque aussi `framework_state` (snapshot au moment du dump) :
+
+- runtime/backends + configs,
+- capacités CPU,
+- état mémoire global (guard/allocator/RAM manager),
+- registre des layers supportés,
+- état modèle (`default_dtype`, `model_config`, dimensions, etc.).
+
 Le code convertit `SaveOptions` → `DebugJsonOptions` (voir `Serialization.cpp`).
 
-## 6) Checklist : quand tu ajoutes un nouveau tensor / nouvel état à sauver
+## 6) Checklist : lorsque vous ajoutez un nouveau tensor / nouvel état à sauver
 
 - Choisir une clé stable (nom) compatible entre versions.
 - Mettre à jour writer + reader (SafeTensors et/ou RawFolder).
-- Mettre à jour les tests Lua existants (ex: `scripts/tests/test_serialization_formats.lua`).
+- Mettre à jour le smoke Lua `scripts/tests/test_serialization_smoke.lua` et les
+  tests C++ `SerializationTest.*` concernés.
 - Si l’état est gros, prévoir options “include_*” plutôt qu’un dump systématique.
+
+## Étapes suivantes
+
+- [Page précédente : Internals : layers, `LayerType`, `LayerOps` et layouts de poids (C++)](14-Layers-And-Ops.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Internals : Tokenizer / ConditioningEncoder (C++)](16-Tokenizer-Encoder-Internals.md)

@@ -36,6 +36,8 @@ public:
                         Optimizer& opt,
                         float learning_rate);
 
+    std::optional<TrainStepResult> trainStep(const TrainStepRequest& request) override;
+
     static void buildInto(Model& model, const Config& cfg);
 
 private:

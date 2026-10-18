@@ -26,8 +26,8 @@
 --    - `args.lua` supporte `--no-flag` (ex: `--no-train`).
 -- ═════════════════════════════════════════════════════════════=
 
-local Args = dofile("scripts/modules/args.lua")
-local P = dofile("scripts/modules/pipeline.lua")
+local Args = dofile(ROOTWORK.."/scripts/modules/args.lua")
+local P = dofile(ROOTWORK.."/scripts/modules/pipeline.lua")
 
 -- Parse tous les flags CLI dès le début.
 -- `args.lua` gère aussi les booléens, alias et `--override`.

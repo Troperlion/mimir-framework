@@ -50,18 +50,30 @@ public:
     // Enregistrer les bindings
     void registerAPI() override;
 
+    // Découvre <project_root>/_archi/*.mpk et expose chaque package valide
+    // comme une entrée du registre d'architectures.
+    static std::size_t autoRegisterMpkArchitectures(
+        const std::string& project_root,
+        std::vector<std::string>* warnings = nullptr);
+
 private:
     lua_State* L;
     
     // === Model API ===
     static int lua_createModel(lua_State* L);
+    static int lua_createEmptyModel(lua_State* L);
     static int lua_createModelFromConfig(lua_State* L);
     static int lua_buildModel(lua_State* L);
     static int lua_trainModel(lua_State* L);
+    static int lua_visionTrainStep(lua_State* L);
     static int lua_inferModel(lua_State* L);
     static int lua_saveModel(lua_State* L);
     static int lua_loadModel(lua_State* L);
     static int lua_modelDType(lua_State* L);
+    static int lua_modelGetConfig(lua_State* L);
+
+    // === Benchmark API ===
+    static int lua_benchmarkNow(lua_State* L);
     
     // === New Serialization API ===
     static int lua_saveCheckpoint(lua_State* L);    // Serialization API v2.3
@@ -73,18 +85,17 @@ private:
     static int lua_initWeights(lua_State* L);
     static int lua_totalParams(lua_State* L);
     static int lua_getModelLayers(lua_State* L);
+    static int lua_clearModelLayers(lua_State* L);
     static int lua_pushLayer(lua_State* L);
     static int lua_setLayerIO(lua_State* L);  // NEW: Configure inputs/outputs
     static int lua_forwardPass(lua_State* L);
-    static int lua_ponyxlDdpmTrainStep(lua_State* L);
-    static int lua_ponyxlDdpmValidateStep(lua_State* L);
-    static int lua_ponyxlDdpmVizReconstructStep(lua_State* L);
-    static int lua_ponyxlDdpmText2Img(lua_State* L);
-    static int lua_ponyxlDdpmText2ImgLatent(lua_State* L);
-    static int lua_ponyxlDdpmSetVaeScale(lua_State* L);
-    static int lua_ponyxlDdpmGetVaeScale(lua_State* L);
-    static int lua_ponyxlDdpmVaeMuMoments(lua_State* L);
     static int lua_forwardPromptImageSeed(lua_State* L);
+    static int lua_lumenText2Img(lua_State* L);
+    static int lua_lumenBeginVaeCalibration(lua_State* L);
+    static int lua_lumenAddVaeCalibrationImage(lua_State* L);
+    static int lua_lumenFinishVaeCalibration(lua_State* L);
+    static int lua_lumenTrainStep(lua_State* L);
+    static int lua_lumenValidateStep(lua_State* L);
 
     // === Image IO helpers (Lua) ===
     // Charge une image depuis le disque via stb_image et renvoie des pixels RGB u8.
@@ -99,6 +110,8 @@ private:
     static int lua_getGradients(lua_State* L);
     static int lua_setHardwareAccel(lua_State* L);
     static int lua_getHardwareCaps(lua_State* L);
+    static int lua_runtimeOps(lua_State* L);
+    static int lua_conditioningPrompt(lua_State* L);
     
     // === ModelArchitectures API ===
     static int lua_archAvailable(lua_State* L);
@@ -107,6 +120,8 @@ private:
     static int lua_archDtypes(lua_State* L);
     
     // === Layer Operations API ===
+    static int lua_layersAvailable(lua_State* L);
+    static int lua_layersByType(lua_State* L);
     static int lua_computeConv2D(lua_State* L);
     static int lua_computeLinear(lua_State* L);
     static int lua_computeMaxPool2D(lua_State* L);
@@ -125,13 +140,20 @@ private:
     
     // === Visualizer API ===
     static int lua_vizCreate(lua_State* L);
+    static int lua_vizConfigure(lua_State* L);
+    static int lua_vizPollEvents(lua_State* L);
+    static int lua_vizBackend(lua_State* L);
     static int lua_vizInitialize(lua_State* L);
     static int lua_vizIsOpen(lua_State* L);
     static int lua_vizProcessEvents(lua_State* L);
     static int lua_vizUpdate(lua_State* L);
     static int lua_vizAddImage(lua_State* L);
+    static int lua_vizSetDetections(lua_State* L);
+    static int lua_vizShowDetections(lua_State* L);
+    static int lua_vizSetDetectionThreshold(lua_State* L);
     static int lua_vizUpdateMetrics(lua_State* L);
     static int lua_vizSetValidation(lua_State* L);
+    static int lua_vizValidationEnabled(lua_State* L);
     static int lua_vizAddLossPoint(lua_State* L);
     static int lua_vizClear(lua_State* L);
     static int lua_vizSetEnabled(lua_State* L);
@@ -163,6 +185,9 @@ private:
     static int lua_allocatorConfigure(lua_State* L);
     static int lua_allocatorPrintStats(lua_State* L);
     static int lua_allocatorGetStats(lua_State* L);
+
+    // === Scripting output control ===
+    static int lua_setStdoutLogSuppressed(lua_State* L);
     
     // === Memory Guard API (strict enforcement) ===
     static int lua_guardSetLimit(lua_State* L);
@@ -201,6 +226,7 @@ private:
     // === Dataset API ===
     static int lua_loadDataset(lua_State* L);
     static int lua_getDataset(lua_State* L);
+    static int lua_releaseDatasetItem(lua_State* L);
     static int lua_prepareSequences(lua_State* L);
 
     // === Database API (dataset loader with caching builder) ===

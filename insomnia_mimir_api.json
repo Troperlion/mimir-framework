@@ -1,14 +1,14 @@
 {
   "_type": "export",
   "__export_format": 4,
-  "__export_date": "2026-01-09T00:00:00.000Z",
+  "__export_date": "2026-10-10T00:00:00.000Z",
   "__export_source": "mimir-lua-api",
   "resources": [
     {
       "_id": "wrk_mimir_lua_api",
       "_type": "workspace",
-      "name": "Mímir Lua API",
-      "description": "Collection Insomnia pour le serveur Lua (HTTP) de pilotage Mímir.",
+      "name": "Mímir HTTP + WebSocket API",
+      "description": "Serveur scripts/modules/api_ws_server.lua ; démarrer avec ./bin/mimir --lua scripts/modules/api_ws_server.lua -- --host 127.0.0.1 --port 8088. Cycle modèle : create → allocate_params → init_weights → forward/backward/optimizer_step. /rpc expose les bindings publics JSON, /capabilities leur disponibilité. Auth off par défaut : activer les headers désactivés Authorization ou X-API-Key si le serveur est lancé avec --auth. TLS : choisir l’environnement HTTPS/WSS et fournir --tls-cert/--tls-key. Le serveur est mono-client : déconnecter le WebSocket avant d’envoyer des requêtes HTTP. DELETE /model et /allocator font uniquement un GC Lua ; aucun reset natif.",
       "scope": "collection"
     },
     {
@@ -19,7 +19,26 @@
       "data": {
         "host": "127.0.0.1",
         "port": 8088,
-        "base_url": "http://{{ host }}:{{ port }}"
+        "base_url": "{{ _.scheme }}://{{ _.host }}:{{ _.port }}",
+        "scheme": "http",
+        "ws_scheme": "ws",
+        "ws_url": "{{ _.ws_scheme }}://{{ _.host }}:{{ _.port }}/ws",
+        "api_token": "",
+        "api_key": "",
+        "checkpoint_path": "checkpoint/api-smoke",
+        "tokenizer_path": "checkpoint/tokenizer.json",
+        "dataset_dir": "dataset/example",
+        "dataset_cache": "checkpoint/dataset-index.json"
+      }
+    },
+    {
+      "_id": "env_mimir_tls",
+      "_type": "environment",
+      "parentId": "env_mimir_base",
+      "name": "HTTPS + WSS",
+      "data": {
+        "scheme": "https",
+        "ws_scheme": "wss"
       }
     },
     {
@@ -29,24 +48,256 @@
       "name": "Core"
     },
     {
-      "_id": "req_help",
-      "_type": "request",
-      "parentId": "grp_core",
-      "name": "GET /help",
-      "method": "GET",
-      "url": "{{ base_url }}/help",
-      "headers": [{ "name": "Accept", "value": "application/json" }]
-    },
-    {
       "_id": "req_health",
       "_type": "request",
       "parentId": "grp_core",
       "name": "GET /health",
       "method": "GET",
-      "url": "{{ base_url }}/health",
-      "headers": [{ "name": "Accept", "value": "application/json" }]
+      "url": "{{ _.base_url }}/health",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 0,
+      "description": "/health"
     },
-
+    {
+      "_id": "req_help",
+      "_type": "request",
+      "parentId": "grp_core",
+      "name": "GET /help",
+      "method": "GET",
+      "url": "{{ _.base_url }}/help",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 1,
+      "description": "/help"
+    },
+    {
+      "_id": "req_get_capabilities",
+      "_type": "request",
+      "parentId": "grp_core",
+      "name": "GET /capabilities",
+      "method": "GET",
+      "url": "{{ _.base_url }}/capabilities",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 2,
+      "description": "/capabilities"
+    },
+    {
+      "_id": "req_post_rpc",
+      "_type": "request",
+      "parentId": "grp_core",
+      "name": "POST /rpc",
+      "method": "POST",
+      "url": "{{ _.base_url }}/rpc",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 3,
+      "description": "Appel d’un binding public avec arguments positionnels et retours multiples",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"api\": \"Mimir.Benchmark.now\",\n  \"args\": []\n}"
+      }
+    },
+    {
+      "_id": "grp_architectures",
+      "_type": "request_group",
+      "parentId": "wrk_mimir_lua_api",
+      "name": "Architectures",
+      "metaSortKey": 5
+    },
+    {
+      "_id": "req_get_architectures",
+      "_type": "request",
+      "parentId": "grp_architectures",
+      "name": "GET /architectures",
+      "method": "GET",
+      "url": "{{ _.base_url }}/architectures",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 4,
+      "description": "Architectures.available\nBinding natif : Mimir.Architectures.available"
+    },
+    {
+      "_id": "req_get_architectures_default_config",
+      "_type": "request",
+      "parentId": "grp_architectures",
+      "name": "GET /architectures/default_config",
+      "method": "GET",
+      "url": "{{ _.base_url }}/architectures/default_config",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "model_type",
+          "value": "basic_mlp",
+          "disabled": false
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 5,
+      "description": "Architectures.default_config\nBinding natif : Mimir.Architectures.default_config"
+    },
+    {
+      "_id": "req_get_architectures_info",
+      "_type": "request",
+      "parentId": "grp_architectures",
+      "name": "GET /architectures/info",
+      "method": "GET",
+      "url": "{{ _.base_url }}/architectures/info",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "model_type",
+          "value": "basic_mlp",
+          "disabled": false
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 6,
+      "description": "Architectures.info\nBinding natif : Mimir.Architectures.info"
+    },
+    {
+      "_id": "req_get_architectures_dtypes",
+      "_type": "request",
+      "parentId": "grp_architectures",
+      "name": "GET /architectures/dtypes",
+      "method": "GET",
+      "url": "{{ _.base_url }}/architectures/dtypes",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 7,
+      "description": "Architectures.dtypes\nBinding natif : Mimir.Architectures.dtypes"
+    },
     {
       "_id": "grp_hw",
       "_type": "request_group",
@@ -59,26 +310,64 @@
       "parentId": "grp_hw",
       "name": "GET /hardware",
       "method": "GET",
-      "url": "{{ base_url }}/hardware",
-      "headers": [{ "name": "Accept", "value": "application/json" }]
+      "url": "{{ _.base_url }}/hardware",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 8,
+      "description": "Model.hardware_caps\nBinding natif : Mimir.Model.hardware_caps"
     },
     {
       "_id": "req_hw_put",
       "_type": "request",
       "parentId": "grp_hw",
-      "name": "PUT /hardware (set backend)",
+      "name": "PUT /hardware",
       "method": "PUT",
-      "url": "{{ base_url }}/hardware",
+      "url": "{{ _.base_url }}/hardware",
       "headers": [
-        { "name": "Content-Type", "value": "application/json" },
-        { "name": "Accept", "value": "application/json" }
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
       ],
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"backend\": \"auto\"\n}"
-      }
+        "text": "{\n  \"enable\": false\n}"
+      },
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 9,
+      "description": "Model.set_hardware\nBinding natif : Mimir.Model.set_hardware"
     },
-
     {
       "_id": "grp_alloc",
       "_type": "request_group",
@@ -89,37 +378,94 @@
       "_id": "req_alloc_get",
       "_type": "request",
       "parentId": "grp_alloc",
-      "name": "GET /allocator (stats)",
+      "name": "GET /allocator",
       "method": "GET",
-      "url": "{{ base_url }}/allocator",
-      "headers": [{ "name": "Accept", "value": "application/json" }]
+      "url": "{{ _.base_url }}/allocator",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 10,
+      "description": "Allocator.get_stats\nBinding natif : Mimir.Allocator.get_stats"
     },
     {
       "_id": "req_alloc_patch",
       "_type": "request",
       "parentId": "grp_alloc",
-      "name": "PATCH /allocator (configure)",
+      "name": "PATCH /allocator",
       "method": "PATCH",
-      "url": "{{ base_url }}/allocator",
+      "url": "{{ _.base_url }}/allocator",
       "headers": [
-        { "name": "Content-Type", "value": "application/json" },
-        { "name": "Accept", "value": "application/json" }
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
       ],
       "body": {
         "mimeType": "application/json",
         "text": "{\n  \"max_ram_gb\": 10.0,\n  \"enable_compression\": true\n}"
-      }
+      },
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 11,
+      "description": "Allocator.configure\nBinding natif : Mimir.Allocator.configure"
     },
     {
       "_id": "req_alloc_delete",
       "_type": "request",
       "parentId": "grp_alloc",
-      "name": "DELETE /allocator (ack + GC)",
+      "name": "DELETE /allocator",
       "method": "DELETE",
-      "url": "{{ base_url }}/allocator",
-      "headers": [{ "name": "Accept", "value": "application/json" }]
+      "url": "{{ _.base_url }}/allocator",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 12,
+      "description": "Ack + GC Lua uniquement ; le modèle/allocator natif reste actif."
     },
-
     {
       "_id": "grp_model",
       "_type": "request_group",
@@ -132,14 +478,70 @@
       "parentId": "grp_model",
       "name": "POST /model/create",
       "method": "POST",
-      "url": "{{ base_url }}/model/create",
+      "url": "{{ _.base_url }}/model/create",
       "headers": [
-        { "name": "Content-Type", "value": "application/json" },
-        { "name": "Accept", "value": "application/json" }
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
       ],
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"model_type\": \"transformer\",\n  \"config\": {\n    \"vocab_size\": 32000,\n    \"embed_dim\": 256,\n    \"num_layers\": 4,\n    \"num_heads\": 4,\n    \"max_seq_len\": 128\n  }\n}"
+        "text": "{\n  \"model_type\": \"basic_mlp\",\n  \"config\": {\n    \"input_dim\": 4,\n    \"hidden_dim\": 8,\n    \"output_dim\": 2\n  }\n}"
+      },
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 13,
+      "description": "Model.create\nBinding natif : Mimir.Model.create"
+    },
+    {
+      "_id": "req_post_model_create_from_config",
+      "_type": "request",
+      "parentId": "grp_model",
+      "name": "POST /model/create_from_config",
+      "method": "POST",
+      "url": "{{ _.base_url }}/model/create_from_config",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 14,
+      "description": "Model.create_from_config\nBinding natif : Mimir.Model.create_from_config",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"architecture\": \"basic_mlp\",\n  \"basic_mlp\": {\n    \"input_dim\": 4,\n    \"hidden_dim\": 8,\n    \"output_dim\": 2\n  }\n}"
       }
     },
     {
@@ -148,8 +550,55 @@
       "parentId": "grp_model",
       "name": "POST /model/build",
       "method": "POST",
-      "url": "{{ base_url }}/model/build",
-      "headers": [{ "name": "Accept", "value": "application/json" }]
+      "url": "{{ _.base_url }}/model/build",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 15,
+      "description": "Model.build\nBinding natif : Mimir.Model.build"
+    },
+    {
+      "_id": "req_post_model_allocate_params",
+      "_type": "request",
+      "parentId": "grp_model",
+      "name": "POST /model/allocate_params",
+      "method": "POST",
+      "url": "{{ _.base_url }}/model/allocate_params",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 16,
+      "description": "Model.allocate_params\nBinding natif : Mimir.Model.allocate_params"
     },
     {
       "_id": "req_model_init_weights",
@@ -157,15 +606,35 @@
       "parentId": "grp_model",
       "name": "POST /model/init_weights",
       "method": "POST",
-      "url": "{{ base_url }}/model/init_weights",
+      "url": "{{ _.base_url }}/model/init_weights",
       "headers": [
-        { "name": "Content-Type", "value": "application/json" },
-        { "name": "Accept", "value": "application/json" }
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
       ],
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"init\": \"xavier\",\n  \"seed\": 123\n}"
-      }
+        "text": "{\n  \"init\": \"he\",\n  \"seed\": 42\n}"
+      },
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 17,
+      "description": "Model.init_weights\nBinding natif : Mimir.Model.init_weights"
     },
     {
       "_id": "req_model_params",
@@ -173,8 +642,183 @@
       "parentId": "grp_model",
       "name": "GET /model/params",
       "method": "GET",
-      "url": "{{ base_url }}/model/params",
-      "headers": [{ "name": "Accept", "value": "application/json" }]
+      "url": "{{ _.base_url }}/model/params",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 18,
+      "description": "Model.total_params\nBinding natif : Mimir.Model.total_params"
+    },
+    {
+      "_id": "req_get_model_config",
+      "_type": "request",
+      "parentId": "grp_model",
+      "name": "GET /model/config",
+      "method": "GET",
+      "url": "{{ _.base_url }}/model/config",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 19,
+      "description": "Model.get_config\nBinding natif : Mimir.Model.get_config"
+    },
+    {
+      "_id": "req_get_model_layers",
+      "_type": "request",
+      "parentId": "grp_model",
+      "name": "GET /model/layers",
+      "method": "GET",
+      "url": "{{ _.base_url }}/model/layers",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 20,
+      "description": "Model.get_layers\nBinding natif : Mimir.Model.get_layers"
+    },
+    {
+      "_id": "req_get_model_dtype",
+      "_type": "request",
+      "parentId": "grp_model",
+      "name": "GET /model/dtype",
+      "method": "GET",
+      "url": "{{ _.base_url }}/model/dtype",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 21,
+      "description": "Model.dtype\nBinding natif : Mimir.Model.dtype"
+    },
+    {
+      "_id": "req_put_model_dtype",
+      "_type": "request",
+      "parentId": "grp_model",
+      "name": "PUT /model/dtype",
+      "method": "PUT",
+      "url": "{{ _.base_url }}/model/dtype",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 22,
+      "description": "Model.dtype\nBinding natif : Mimir.Model.dtype",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"dtype\": \"float32\"\n}"
+      }
+    },
+    {
+      "_id": "req_post_model_forward",
+      "_type": "request",
+      "parentId": "grp_model",
+      "name": "POST /model/forward",
+      "method": "POST",
+      "url": "{{ _.base_url }}/model/forward",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 23,
+      "description": "Model.forward\nBinding natif : Mimir.Model.forward",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"input\": [\n    0.1,\n    0.2,\n    0.3,\n    0.4\n  ],\n  \"training\": false\n}"
+      }
     },
     {
       "_id": "req_model_infer",
@@ -182,26 +826,837 @@
       "parentId": "grp_model",
       "name": "POST /model/infer",
       "method": "POST",
-      "url": "{{ base_url }}/model/infer",
+      "url": "{{ _.base_url }}/model/infer",
       "headers": [
-        { "name": "Content-Type", "value": "application/json" },
-        { "name": "Accept", "value": "application/json" }
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
       ],
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"input\": \"Hello\"\n}"
+        "text": "{\n  \"input\": [\n    0.1,\n    0.2,\n    0.3,\n    0.4\n  ]\n}"
+      },
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 24,
+      "description": "Model.infer\nBinding natif : Mimir.Model.infer"
+    },
+    {
+      "_id": "req_post_model_backward",
+      "_type": "request",
+      "parentId": "grp_model",
+      "name": "POST /model/backward",
+      "method": "POST",
+      "url": "{{ _.base_url }}/model/backward",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 25,
+      "description": "Model.backward\nBinding natif : Mimir.Model.backward",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"gradient\": [\n    0.1,\n    -0.2\n  ]\n}"
+      }
+    },
+    {
+      "_id": "req_post_model_zero_grads",
+      "_type": "request",
+      "parentId": "grp_model",
+      "name": "POST /model/zero_grads",
+      "method": "POST",
+      "url": "{{ _.base_url }}/model/zero_grads",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 26,
+      "description": "Model.zero_grads\nBinding natif : Mimir.Model.zero_grads"
+    },
+    {
+      "_id": "req_post_model_optimizer_step",
+      "_type": "request",
+      "parentId": "grp_model",
+      "name": "POST /model/optimizer_step",
+      "method": "POST",
+      "url": "{{ _.base_url }}/model/optimizer_step",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 27,
+      "description": "Model.optimizer_step\nBinding natif : Mimir.Model.optimizer_step",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"learning_rate\": 0.001,\n  \"optimizer\": \"adamw\"\n}"
+      }
+    },
+    {
+      "_id": "req_get_model_gradients",
+      "_type": "request",
+      "parentId": "grp_model",
+      "name": "GET /model/gradients",
+      "method": "GET",
+      "url": "{{ _.base_url }}/model/gradients",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 28,
+      "description": "Model.get_gradients\nBinding natif : Mimir.Model.get_gradients"
+    },
+    {
+      "_id": "req_post_model_train",
+      "_type": "request",
+      "parentId": "grp_model",
+      "name": "POST /model/train",
+      "method": "POST",
+      "url": "{{ _.base_url }}/model/train",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 29,
+      "description": "Model.train\nBinding natif : Mimir.Model.train",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"epochs\": 1,\n  \"learning_rate\": 0.001\n}"
       }
     },
     {
       "_id": "req_model_delete",
       "_type": "request",
       "parentId": "grp_model",
-      "name": "DELETE /model (ack + GC)",
+      "name": "DELETE /model",
       "method": "DELETE",
-      "url": "{{ base_url }}/model",
-      "headers": [{ "name": "Accept", "value": "application/json" }]
+      "url": "{{ _.base_url }}/model",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 30,
+      "description": "Ack + GC Lua uniquement ; le modèle/allocator natif reste actif."
     },
-
+    {
+      "_id": "grp_tokenizer",
+      "_type": "request_group",
+      "parentId": "wrk_mimir_lua_api",
+      "name": "Tokenizer",
+      "metaSortKey": 6
+    },
+    {
+      "_id": "req_post_tokenizer_create",
+      "_type": "request",
+      "parentId": "grp_tokenizer",
+      "name": "POST /tokenizer/create",
+      "method": "POST",
+      "url": "{{ _.base_url }}/tokenizer/create",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 31,
+      "description": "Tokenizer.create\nBinding natif : Mimir.Tokenizer.create",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"max_vocab\": 256\n}"
+      }
+    },
+    {
+      "_id": "req_post_tokenizer_tokenize",
+      "_type": "request",
+      "parentId": "grp_tokenizer",
+      "name": "POST /tokenizer/tokenize",
+      "method": "POST",
+      "url": "{{ _.base_url }}/tokenizer/tokenize",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 32,
+      "description": "Tokenizer.tokenize\nBinding natif : Mimir.Tokenizer.tokenize",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"text\": \"bonjour monde\"\n}"
+      }
+    },
+    {
+      "_id": "req_post_tokenizer_tokenize_ensure",
+      "_type": "request",
+      "parentId": "grp_tokenizer",
+      "name": "POST /tokenizer/tokenize_ensure",
+      "method": "POST",
+      "url": "{{ _.base_url }}/tokenizer/tokenize_ensure",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 33,
+      "description": "Tokenizer.tokenize_ensure\nBinding natif : Mimir.Tokenizer.tokenize_ensure",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"text\": \"bonjour monde\"\n}"
+      }
+    },
+    {
+      "_id": "req_post_tokenizer_detokenize",
+      "_type": "request",
+      "parentId": "grp_tokenizer",
+      "name": "POST /tokenizer/detokenize",
+      "method": "POST",
+      "url": "{{ _.base_url }}/tokenizer/detokenize",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 34,
+      "description": "Tokenizer.detokenize\nBinding natif : Mimir.Tokenizer.detokenize",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"tokens\": [\n    1,\n    2\n  ]\n}"
+      }
+    },
+    {
+      "_id": "req_post_tokenizer_learn_bpe",
+      "_type": "request",
+      "parentId": "grp_tokenizer",
+      "name": "POST /tokenizer/learn_bpe",
+      "method": "POST",
+      "url": "{{ _.base_url }}/tokenizer/learn_bpe",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 35,
+      "description": "Tokenizer.learn_bpe\nBinding natif : Mimir.Tokenizer.learn_bpe",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"corpus\": [\n    \"bonjour monde\",\n    \"bonjour Mimir\"\n  ],\n  \"num_merges\": 32\n}"
+      }
+    },
+    {
+      "_id": "req_get_tokenizer_vocab_size",
+      "_type": "request",
+      "parentId": "grp_tokenizer",
+      "name": "GET /tokenizer/vocab_size",
+      "method": "GET",
+      "url": "{{ _.base_url }}/tokenizer/vocab_size",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 36,
+      "description": "Tokenizer.vocab_size\nBinding natif : Mimir.Tokenizer.vocab_size"
+    },
+    {
+      "_id": "req_post_tokenizer_save",
+      "_type": "request",
+      "parentId": "grp_tokenizer",
+      "name": "POST /tokenizer/save",
+      "method": "POST",
+      "url": "{{ _.base_url }}/tokenizer/save",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 37,
+      "description": "Tokenizer.save\nBinding natif : Mimir.Tokenizer.save",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"path\": \"{{ _.tokenizer_path }}\"\n}"
+      }
+    },
+    {
+      "_id": "req_post_tokenizer_load",
+      "_type": "request",
+      "parentId": "grp_tokenizer",
+      "name": "POST /tokenizer/load",
+      "method": "POST",
+      "url": "{{ _.base_url }}/tokenizer/load",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 38,
+      "description": "Tokenizer.load\nBinding natif : Mimir.Tokenizer.load",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"path\": \"{{ _.tokenizer_path }}\"\n}"
+      }
+    },
+    {
+      "_id": "grp_dataset",
+      "_type": "request_group",
+      "parentId": "wrk_mimir_lua_api",
+      "name": "Dataset",
+      "metaSortKey": 7
+    },
+    {
+      "_id": "req_post_dataset_load",
+      "_type": "request",
+      "parentId": "grp_dataset",
+      "name": "POST /dataset/load",
+      "method": "POST",
+      "url": "{{ _.base_url }}/dataset/load",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 39,
+      "description": "Dataset.load\nBinding natif : Mimir.Dataset.load",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"dir\": \"{{ _.dataset_dir }}\",\n  \"width\": 64,\n  \"height\": 64,\n  \"min_modalities\": 1,\n  \"use_cache\": false,\n  \"cache_path\": \"{{ _.dataset_cache }}\",\n  \"max_ram_mb\": 128,\n  \"lazy_loading\": true\n}"
+      }
+    },
+    {
+      "_id": "req_get_dataset_item",
+      "_type": "request",
+      "parentId": "grp_dataset",
+      "name": "GET /dataset/item",
+      "method": "GET",
+      "url": "{{ _.base_url }}/dataset/item",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "index",
+          "value": "1",
+          "disabled": false
+        },
+        {
+          "name": "load_image",
+          "value": "false",
+          "disabled": false
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 40,
+      "description": "Dataset.get\nBinding natif : Mimir.Dataset.get"
+    },
+    {
+      "_id": "req_post_dataset_release",
+      "_type": "request",
+      "parentId": "grp_dataset",
+      "name": "POST /dataset/release",
+      "method": "POST",
+      "url": "{{ _.base_url }}/dataset/release",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 41,
+      "description": "Dataset.release\nBinding natif : Mimir.Dataset.release",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"index\": 1\n}"
+      }
+    },
+    {
+      "_id": "req_post_dataset_prepare_sequences",
+      "_type": "request",
+      "parentId": "grp_dataset",
+      "name": "POST /dataset/prepare_sequences",
+      "method": "POST",
+      "url": "{{ _.base_url }}/dataset/prepare_sequences",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 42,
+      "description": "Dataset.prepare_sequences\nBinding natif : Mimir.Dataset.prepare_sequences",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"max_length\": 128\n}"
+      }
+    },
+    {
+      "_id": "grp_memory",
+      "_type": "request_group",
+      "parentId": "wrk_mimir_lua_api",
+      "name": "Memory",
+      "metaSortKey": 8
+    },
+    {
+      "_id": "req_get_memory",
+      "_type": "request",
+      "parentId": "grp_memory",
+      "name": "GET /memory",
+      "method": "GET",
+      "url": "{{ _.base_url }}/memory",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 43,
+      "description": "Memory.get_stats\nBinding natif : Mimir.Memory.get_stats"
+    },
+    {
+      "_id": "req_patch_memory",
+      "_type": "request",
+      "parentId": "grp_memory",
+      "name": "PATCH /memory",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/memory",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 44,
+      "description": "Memory.config\nBinding natif : Mimir.Memory.config",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"max_ram_gb\": 2.0\n}"
+      }
+    },
+    {
+      "_id": "req_get_memory_guard",
+      "_type": "request",
+      "parentId": "grp_memory",
+      "name": "GET /memory/guard",
+      "method": "GET",
+      "url": "{{ _.base_url }}/memory/guard",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 45,
+      "description": "MemoryGuard.getStats\nBinding natif : Mimir.MemoryGuard.getStats"
+    },
+    {
+      "_id": "grp_layers",
+      "_type": "request_group",
+      "parentId": "wrk_mimir_lua_api",
+      "name": "Layers",
+      "metaSortKey": 9
+    },
+    {
+      "_id": "req_get_layers",
+      "_type": "request",
+      "parentId": "grp_layers",
+      "name": "GET /layers",
+      "method": "GET",
+      "url": "{{ _.base_url }}/layers",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 46,
+      "description": "Layers.available\nBinding natif : Mimir.Layers.available"
+    },
+    {
+      "_id": "req_get_layers_by_type",
+      "_type": "request",
+      "parentId": "grp_layers",
+      "name": "GET /layers/by_type",
+      "method": "GET",
+      "url": "{{ _.base_url }}/layers/by_type",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "type",
+          "value": "Linear",
+          "disabled": false
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 47,
+      "description": "Layers.by_type\nBinding natif : Mimir.Layers.by_type"
+    },
     {
       "_id": "grp_ser",
       "_type": "request_group",
@@ -214,15 +1669,35 @@
       "parentId": "grp_ser",
       "name": "POST /serialization/load",
       "method": "POST",
-      "url": "{{ base_url }}/serialization/load",
+      "url": "{{ _.base_url }}/serialization/load",
       "headers": [
-        { "name": "Content-Type", "value": "application/json" },
-        { "name": "Accept", "value": "application/json" }
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
       ],
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"path\": \"checkpoint/\",\n  \"format\": \"raw_folder\",\n  \"options\": {\n    \"verify_checksums\": true\n  }\n}"
-      }
+        "text": "{\n  \"path\": \"{{ _.checkpoint_path }}\",\n  \"format\": \"raw_folder\",\n  \"options\": {\n    \"verify_checksums\": true\n  }\n}"
+      },
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 48,
+      "description": "Serialization.load\nBinding natif : Mimir.Serialization.load"
     },
     {
       "_id": "req_ser_save",
@@ -230,15 +1705,370 @@
       "parentId": "grp_ser",
       "name": "POST /serialization/save",
       "method": "POST",
-      "url": "{{ base_url }}/serialization/save",
+      "url": "{{ _.base_url }}/serialization/save",
       "headers": [
-        { "name": "Content-Type", "value": "application/json" },
-        { "name": "Accept", "value": "application/json" }
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
       ],
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"path\": \"model.safetensors\",\n  \"format\": \"safetensors\",\n  \"options\": {\n    \"include_git_info\": true\n  }\n}"
+        "text": "{\n  \"path\": \"{{ _.checkpoint_path }}\",\n  \"format\": \"raw_folder\",\n  \"options\": {\n    \"include_git_info\": true\n  }\n}"
+      },
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 49,
+      "description": "Serialization.save\nBinding natif : Mimir.Serialization.save"
+    },
+    {
+      "_id": "req_post_serialization_detect_format",
+      "_type": "request",
+      "parentId": "grp_ser",
+      "name": "POST /serialization/detect_format",
+      "method": "POST",
+      "url": "{{ _.base_url }}/serialization/detect_format",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 50,
+      "description": "Serialization.detect_format\nBinding natif : Mimir.Serialization.detect_format",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"path\": \"{{ _.checkpoint_path }}\"\n}"
       }
+    },
+    {
+      "_id": "grp_viz",
+      "_type": "request_group",
+      "parentId": "wrk_mimir_lua_api",
+      "name": "Viz",
+      "metaSortKey": 10
+    },
+    {
+      "_id": "req_get_viz_backend",
+      "_type": "request",
+      "parentId": "grp_viz",
+      "name": "GET /viz/backend",
+      "method": "GET",
+      "url": "{{ _.base_url }}/viz/backend",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 51,
+      "description": "Viz.backend\nBinding natif : Mimir.Viz.backend"
+    },
+    {
+      "_id": "req_get_viz_events",
+      "_type": "request",
+      "parentId": "grp_viz",
+      "name": "GET /viz/events",
+      "method": "GET",
+      "url": "{{ _.base_url }}/viz/events",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "timeout_ms",
+          "value": "0",
+          "disabled": false
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 52,
+      "description": "Viz.poll_events\nBinding natif : Mimir.Viz.poll_events"
+    },
+    {
+      "_id": "req_post_viz_create",
+      "_type": "request",
+      "parentId": "grp_viz",
+      "name": "POST /viz/create",
+      "method": "POST",
+      "url": "{{ _.base_url }}/viz/create",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 53,
+      "description": "Viz.create\nBinding natif : Mimir.Viz.create",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"visualization\": {\n    \"enabled\": true,\n    \"window_width\": 1000,\n    \"window_height\": 700\n  }\n}"
+      }
+    },
+    {
+      "_id": "req_patch_viz",
+      "_type": "request",
+      "parentId": "grp_viz",
+      "name": "PATCH /viz",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/viz",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 54,
+      "description": "Viz.configure\nBinding natif : Mimir.Viz.configure",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"panels\": [\n    {\n      \"id\": 1,\n      \"title\": \"Preview\",\n      \"x\": 20,\n      \"y\": 100,\n      \"w\": 600,\n      \"h\": 400\n    }\n  ],\n  \"controls\": [\n    {\n      \"id\": \"apply\",\n      \"label\": \"Apply\",\n      \"x\": 20,\n      \"y\": 20,\n      \"w\": 150,\n      \"h\": 40\n    }\n  ],\n  \"events\": true\n}"
+      }
+    },
+    {
+      "_id": "req_put_viz_validation",
+      "_type": "request",
+      "parentId": "grp_viz",
+      "name": "PUT /viz/validation",
+      "method": "PUT",
+      "url": "{{ _.base_url }}/viz/validation",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 55,
+      "description": "Viz.set_validation\nBinding natif : Mimir.Viz.set_validation",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"enabled\": true,\n  \"in_progress\": false,\n  \"step\": 0\n}"
+      }
+    },
+    {
+      "_id": "req_get_viz_validation",
+      "_type": "request",
+      "parentId": "grp_viz",
+      "name": "GET /viz/validation",
+      "method": "GET",
+      "url": "{{ _.base_url }}/viz/validation",
+      "headers": [
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 56,
+      "description": "Viz.validation_enabled\nBinding natif : Mimir.Viz.validation_enabled"
+    },
+    {
+      "_id": "req_put_viz_enabled",
+      "_type": "request",
+      "parentId": "grp_viz",
+      "name": "PUT /viz/enabled",
+      "method": "PUT",
+      "url": "{{ _.base_url }}/viz/enabled",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 57,
+      "description": "Viz.set_enabled\nBinding natif : Mimir.Viz.set_enabled",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"enabled\": false\n}"
+      }
+    },
+    {
+      "_id": "grp_websocket",
+      "_type": "request_group",
+      "parentId": "wrk_mimir_lua_api",
+      "name": "WebSocket",
+      "metaSortKey": 100
+    },
+    {
+      "_id": "ws-req_mimir_api",
+      "_type": "websocket_request",
+      "parentId": "grp_websocket",
+      "name": "WS /ws — pilotage",
+      "url": "{{ _.ws_url }}",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.api_token }}",
+          "disabled": true
+        },
+        {
+          "name": "X-API-Key",
+          "value": "{{ _.api_key }}",
+          "disabled": true
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 0,
+      "description": "Connecter puis envoyer un payload JSON ci-dessous. id est renvoyé pour la corrélation. La session garde l’auth du handshake ; activer Authorization ou X-API-Key avant connexion. Déconnecter avant les requêtes HTTP (serveur mono-client).",
+      "settingEncodeUrl": true,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingFollowRedirects": "global"
+    },
+    {
+      "_id": "ws-payload_mimir_0",
+      "_type": "websocket_payload",
+      "parentId": "ws-req_mimir_api",
+      "name": "Health",
+      "mode": "application/json",
+      "value": "{\n  \"id\": \"health-1\",\n  \"method\": \"GET\",\n  \"path\": \"/health\"\n}"
+    },
+    {
+      "_id": "ws-payload_mimir_1",
+      "_type": "websocket_payload",
+      "parentId": "ws-req_mimir_api",
+      "name": "Forward",
+      "mode": "application/json",
+      "value": "{\n  \"id\": \"forward-1\",\n  \"method\": \"POST\",\n  \"path\": \"/model/forward\",\n  \"body\": {\n    \"input\": [\n      0.1,\n      0.2,\n      0.3,\n      0.4\n    ],\n    \"training\": false\n  }\n}"
+    },
+    {
+      "_id": "ws-payload_mimir_2",
+      "_type": "websocket_payload",
+      "parentId": "ws-req_mimir_api",
+      "name": "RPC Benchmark",
+      "mode": "application/json",
+      "value": "{\n  \"id\": \"rpc-1\",\n  \"method\": \"POST\",\n  \"path\": \"/rpc\",\n  \"body\": {\n    \"api\": \"Benchmark.now\",\n    \"args\": []\n  }\n}"
     }
   ]
 }

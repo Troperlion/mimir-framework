@@ -1,0 +1,2106 @@
+{
+  "default_dtype": "float32",
+  "encoder": {
+    "architecture": "ViT",
+    "has_encoder": true
+  },
+  "features": [
+    "layer_config",
+    "real_shapes",
+    "layer_io",
+    "extended_layer_types",
+    "framework_state",
+    "checksums"
+  ],
+  "format": "mimir_debug_dump",
+  "format_version": "1.3.0",
+  "framework_state": {
+    "memory": {
+      "advanced_ram_manager": {
+        "allocations_blocked": false,
+        "current_bytes": 0,
+        "current_mb": 0.0,
+        "freeze_mode": false,
+        "peak_bytes": 0,
+        "peak_mb": 0.0,
+        "usage_percent": 0.0
+      },
+      "dynamic_tensor_allocator": {
+        "loaded_count": 23,
+        "tensor_count": 23
+      },
+      "memory_guard": {
+        "allocations_blocked": false,
+        "current_bytes": 28091680,
+        "current_mb": 26.790313720703125,
+        "freeze_mode": false,
+        "limit_bytes": 10737418240,
+        "limit_mb": 10240.0,
+        "peak_bytes": 28091680,
+        "peak_mb": 26.790313720703125,
+        "usage_percent": 0.26162415742874146
+      }
+    },
+    "model": {
+      "default_dtype": "float32",
+      "has_encoder": true,
+      "image_height": 64,
+      "image_width": 64,
+      "model_config": {
+        "base_channels": 32,
+        "fc_hidden": 512,
+        "image_c": 3,
+        "image_h": 64,
+        "image_w": 64,
+        "num_classes": 1000,
+        "type": "vgg19"
+      },
+      "model_name": "VGG19Model",
+      "num_layers": 47,
+      "parameters_frozen": false,
+      "tokenizer_vocab_size": 47,
+      "total_params": 7022920
+    },
+    "registry": {
+      "supported_layer_count": 70,
+      "supported_layer_types": [
+        "Conv2d",
+        "ConvTranspose2d",
+        "Conv1d",
+        "DepthwiseConv2d",
+        "Linear",
+        "Bilinear",
+        "Embedding",
+        "EmbeddingBag",
+        "BatchNorm2d",
+        "BatchNorm1d",
+        "LayerNorm",
+        "GroupNorm",
+        "InstanceNorm2d",
+        "RMSNorm",
+        "ReLU",
+        "LeakyReLU",
+        "GELU",
+        "GEGLU",
+        "SiLU",
+        "Tanh",
+        "Sigmoid",
+        "Softmax",
+        "LogSoftmax",
+        "Softplus",
+        "Mish",
+        "HardSigmoid",
+        "HardSwish",
+        "MaxPool2d",
+        "AvgPool2d",
+        "AdaptiveAvgPool2d",
+        "GlobalAvgPool2d",
+        "MaxPool1d",
+        "AvgPool1d",
+        "TokenMeanPool",
+        "Dropout",
+        "Dropout2d",
+        "AlphaDropout",
+        "Flatten",
+        "Reshape",
+        "Transpose",
+        "Permute",
+        "Squeeze",
+        "Unsqueeze",
+        "View",
+        "Add",
+        "Subtract",
+        "Multiply",
+        "Divide",
+        "Concat",
+        "Split",
+        "Chunk",
+        "Stack",
+        "MatMul",
+        "BatchMatMul",
+        "SelfAttention",
+        "MultiHeadAttention",
+        "CrossAttention",
+        "UpsampleNearest",
+        "UpsampleBilinear",
+        "UpsampleBicubic",
+        "PixelShuffle",
+        "LSTM",
+        "GRU",
+        "RNN",
+        "ZeroPad2d",
+        "ReflectionPad2d",
+        "ReplicationPad2d",
+        "Identity",
+        "Constant",
+        "Lambda"
+      ]
+    },
+    "runtime": {
+      "backends": {
+        "cpu": {
+          "available": true,
+          "compiled": true,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CPU",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "cuda": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CUDA",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "opencl": {
+          "available": false,
+          "compiled": true
+        },
+        "rocm": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "ROCM",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "vulkan": {
+          "available": true,
+          "compiled": true
+        }
+      },
+      "cpu_features": {
+        "avx2": true,
+        "bmi2": true,
+        "f16c": true,
+        "fma": true
+      },
+      "environment_overrides": {},
+      "framework_logs_suppressed": false
+    },
+    "snapshot_timestamp": 1783546807,
+    "snapshot_version": "1.0.0"
+  },
+  "git": {
+    "branch": "unknown",
+    "commit": "unknown"
+  },
+  "layers": [
+    {
+      "index": 0,
+      "inputs": [
+        "__input__"
+      ],
+      "name": "vgg19/raw_in",
+      "output": "vgg19/in",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Identity"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 3,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 1,
+      "inputs": [
+        "vgg19/in"
+      ],
+      "name": "vgg19/b1/c1",
+      "output": "vgg19/b1/y1",
+      "params_count": 864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b1/c1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            3,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 2,
+      "inputs": [
+        "vgg19/b1/y1"
+      ],
+      "name": "vgg19/b1/c1/relu",
+      "output": "vgg19/b1/y1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 32,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 3,
+      "inputs": [
+        "vgg19/b1/y1_act"
+      ],
+      "name": "vgg19/b1/c2",
+      "output": "vgg19/b1/y2",
+      "params_count": 9216,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b1/c2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            32,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 9216,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 4,
+      "inputs": [
+        "vgg19/b1/y2"
+      ],
+      "name": "vgg19/b1/c2/relu",
+      "output": "vgg19/b1/y2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 32,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 5,
+      "inputs": [
+        "vgg19/b1/y2_act"
+      ],
+      "name": "vgg19/b1/down",
+      "output": "vgg19/b1/down_y",
+      "params_count": 9216,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b1/down.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            32,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 9216,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 6,
+      "inputs": [
+        "vgg19/b1/down_y"
+      ],
+      "name": "vgg19/b1/down/relu",
+      "output": "vgg19/b1/down_y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 32,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 7,
+      "inputs": [
+        "vgg19/b1/down_y_act"
+      ],
+      "name": "vgg19/b2/c1",
+      "output": "vgg19/b2/y1",
+      "params_count": 18432,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b2/c1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            32,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 18432,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 8,
+      "inputs": [
+        "vgg19/b2/y1"
+      ],
+      "name": "vgg19/b2/c1/relu",
+      "output": "vgg19/b2/y1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 9,
+      "inputs": [
+        "vgg19/b2/y1_act"
+      ],
+      "name": "vgg19/b2/c2",
+      "output": "vgg19/b2/y2",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b2/c2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 10,
+      "inputs": [
+        "vgg19/b2/y2"
+      ],
+      "name": "vgg19/b2/c2/relu",
+      "output": "vgg19/b2/y2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 11,
+      "inputs": [
+        "vgg19/b2/y2_act"
+      ],
+      "name": "vgg19/b2/down",
+      "output": "vgg19/b2/down_y",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b2/down.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 12,
+      "inputs": [
+        "vgg19/b2/down_y"
+      ],
+      "name": "vgg19/b2/down/relu",
+      "output": "vgg19/b2/down_y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 128,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 13,
+      "inputs": [
+        "vgg19/b2/down_y_act"
+      ],
+      "name": "vgg19/b3/c1",
+      "output": "vgg19/b3/y1",
+      "params_count": 73728,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b3/c1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 73728,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 14,
+      "inputs": [
+        "vgg19/b3/y1"
+      ],
+      "name": "vgg19/b3/c1/relu",
+      "output": "vgg19/b3/y1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 128,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 128,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 15,
+      "inputs": [
+        "vgg19/b3/y1_act"
+      ],
+      "name": "vgg19/b3/c2",
+      "output": "vgg19/b3/y2",
+      "params_count": 147456,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b3/c2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            128,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 147456,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 16,
+      "inputs": [
+        "vgg19/b3/y2"
+      ],
+      "name": "vgg19/b3/c2/relu",
+      "output": "vgg19/b3/y2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 128,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 128,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 17,
+      "inputs": [
+        "vgg19/b3/y2_act"
+      ],
+      "name": "vgg19/b3/c3",
+      "output": "vgg19/b3/y3",
+      "params_count": 147456,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b3/c3.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            128,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 147456,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 18,
+      "inputs": [
+        "vgg19/b3/y3"
+      ],
+      "name": "vgg19/b3/c3/relu",
+      "output": "vgg19/b3/y3_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 128,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 128,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 19,
+      "inputs": [
+        "vgg19/b3/y3_act"
+      ],
+      "name": "vgg19/b3/c4",
+      "output": "vgg19/b3/y4",
+      "params_count": 147456,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b3/c4.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            128,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 147456,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 20,
+      "inputs": [
+        "vgg19/b3/y4"
+      ],
+      "name": "vgg19/b3/c4/relu",
+      "output": "vgg19/b3/y4_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 128,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 128,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 21,
+      "inputs": [
+        "vgg19/b3/y4_act"
+      ],
+      "name": "vgg19/b3/down",
+      "output": "vgg19/b3/down_y",
+      "params_count": 147456,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b3/down.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            128,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 147456,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 22,
+      "inputs": [
+        "vgg19/b3/down_y"
+      ],
+      "name": "vgg19/b3/down/relu",
+      "output": "vgg19/b3/down_y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 128,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 256,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 23,
+      "inputs": [
+        "vgg19/b3/down_y_act"
+      ],
+      "name": "vgg19/b4/c1",
+      "output": "vgg19/b4/y1",
+      "params_count": 294912,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b4/c1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            128,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 294912,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 24,
+      "inputs": [
+        "vgg19/b4/y1"
+      ],
+      "name": "vgg19/b4/c1/relu",
+      "output": "vgg19/b4/y1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 256,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 256,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 25,
+      "inputs": [
+        "vgg19/b4/y1_act"
+      ],
+      "name": "vgg19/b4/c2",
+      "output": "vgg19/b4/y2",
+      "params_count": 589824,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b4/c2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            256,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 589824,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 26,
+      "inputs": [
+        "vgg19/b4/y2"
+      ],
+      "name": "vgg19/b4/c2/relu",
+      "output": "vgg19/b4/y2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 256,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 256,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 27,
+      "inputs": [
+        "vgg19/b4/y2_act"
+      ],
+      "name": "vgg19/b4/c3",
+      "output": "vgg19/b4/y3",
+      "params_count": 589824,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b4/c3.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            256,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 589824,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 28,
+      "inputs": [
+        "vgg19/b4/y3"
+      ],
+      "name": "vgg19/b4/c3/relu",
+      "output": "vgg19/b4/y3_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 256,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 256,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 29,
+      "inputs": [
+        "vgg19/b4/y3_act"
+      ],
+      "name": "vgg19/b4/c4",
+      "output": "vgg19/b4/y4",
+      "params_count": 589824,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b4/c4.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            256,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 589824,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 30,
+      "inputs": [
+        "vgg19/b4/y4"
+      ],
+      "name": "vgg19/b4/c4/relu",
+      "output": "vgg19/b4/y4_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 256,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 256,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 31,
+      "inputs": [
+        "vgg19/b4/y4_act"
+      ],
+      "name": "vgg19/b4/down",
+      "output": "vgg19/b4/down_y",
+      "params_count": 589824,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b4/down.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            256,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 589824,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 32,
+      "inputs": [
+        "vgg19/b4/down_y"
+      ],
+      "name": "vgg19/b4/down/relu",
+      "output": "vgg19/b4/down_y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 256,
+        "input_height": 4,
+        "input_width": 4,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 256,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 33,
+      "inputs": [
+        "vgg19/b4/down_y_act"
+      ],
+      "name": "vgg19/b5/c1",
+      "output": "vgg19/b5/y1",
+      "params_count": 589824,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b5/c1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            256,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 589824,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 34,
+      "inputs": [
+        "vgg19/b5/y1"
+      ],
+      "name": "vgg19/b5/c1/relu",
+      "output": "vgg19/b5/y1_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 256,
+        "input_height": 4,
+        "input_width": 4,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 256,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 35,
+      "inputs": [
+        "vgg19/b5/y1_act"
+      ],
+      "name": "vgg19/b5/c2",
+      "output": "vgg19/b5/y2",
+      "params_count": 589824,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b5/c2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            256,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 589824,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 36,
+      "inputs": [
+        "vgg19/b5/y2"
+      ],
+      "name": "vgg19/b5/c2/relu",
+      "output": "vgg19/b5/y2_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 256,
+        "input_height": 4,
+        "input_width": 4,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 256,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 37,
+      "inputs": [
+        "vgg19/b5/y2_act"
+      ],
+      "name": "vgg19/b5/c3",
+      "output": "vgg19/b5/y3",
+      "params_count": 589824,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b5/c3.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            256,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 589824,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 38,
+      "inputs": [
+        "vgg19/b5/y3"
+      ],
+      "name": "vgg19/b5/c3/relu",
+      "output": "vgg19/b5/y3_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 256,
+        "input_height": 4,
+        "input_width": 4,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 256,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 39,
+      "inputs": [
+        "vgg19/b5/y3_act"
+      ],
+      "name": "vgg19/b5/c4",
+      "output": "vgg19/b5/y4",
+      "params_count": 589824,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b5/c4.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            256,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 589824,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 40,
+      "inputs": [
+        "vgg19/b5/y4"
+      ],
+      "name": "vgg19/b5/c4/relu",
+      "output": "vgg19/b5/y4_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 256,
+        "input_height": 4,
+        "input_width": 4,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 256,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 41,
+      "inputs": [
+        "vgg19/b5/y4_act"
+      ],
+      "name": "vgg19/b5/down",
+      "output": "vgg19/b5/down_y",
+      "params_count": 589824,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/b5/down.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            256,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 589824,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 42,
+      "inputs": [
+        "vgg19/b5/down_y"
+      ],
+      "name": "vgg19/b5/down/relu",
+      "output": "vgg19/b5/down_y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "in_channels": 256,
+        "input_height": 2,
+        "input_width": 2,
+        "kernel_size": 0,
+        "padding": 0,
+        "stride": 1
+      },
+      "index": 43,
+      "inputs": [
+        "vgg19/b5/down_y_act"
+      ],
+      "name": "vgg19/gap",
+      "output": "vgg19/gap_y",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GlobalAvgPool2d"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 256,
+        "out_features": 512
+      },
+      "index": 44,
+      "inputs": [
+        "vgg19/gap_y"
+      ],
+      "name": "vgg19/fc1",
+      "output": "vgg19/fc1_y",
+      "params_count": 131584,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            512,
+            256
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 131072,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 45,
+      "inputs": [
+        "vgg19/fc1_y"
+      ],
+      "name": "vgg19/fc1_act",
+      "output": "vgg19/fc1_h",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 512,
+        "out_features": 1000
+      },
+      "index": 46,
+      "inputs": [
+        "vgg19/fc1_h"
+      ],
+      "name": "vgg19/head",
+      "output": "x",
+      "params_count": 513000,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vgg19/head.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1000,
+            512
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 512000,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    }
+  ],
+  "model_config": {
+    "base_channels": 32,
+    "dtype": "float32",
+    "fc_hidden": 512,
+    "image_c": 3,
+    "image_h": 64,
+    "image_w": 64,
+    "num_classes": 1000,
+    "type": "vgg19"
+  },
+  "model_name": "VGG19Model",
+  "num_layers": 47,
+  "timestamp": 1783546806,
+  "tokenizer": {
+    "has_vocab": true,
+    "vocab_size": 47
+  },
+  "total_params": 7022920,
+  "default_params": {
+    "base_channels": 32,
+    "fc_hidden": 512,
+    "image_c": 3,
+    "image_h": 64,
+    "image_w": 64,
+    "num_classes": 1000
+  }
+}

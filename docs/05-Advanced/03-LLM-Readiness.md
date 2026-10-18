@@ -1,21 +1,12 @@
-# LLM readiness (état réel)
-
-## Pour qui
-
-Utilisateur intermédiaire à avancé.
-
-## Objectif
+# État de préparation aux LLM
 
 Optimiser, diagnostiquer et stabiliser des runs complexes.
 
-## Avant de commencer
+**Public concerné :** Utilisateur intermédiaire à avancé.
 
-Avoir déjà exécuté au moins un pipeline complet.
-
-## Résultat attendu
-
-Tu peux investiguer les problèmes de perf et de stabilité.
-
+> **Prérequis**
+>
+> Avoir déjà exécuté au moins un pipeline complet.
 
 Cette page décrit ce qui est **effectivement** en place dans le codebase pour un LLM, et ce qui manque pour une génération utile au quotidien.
 
@@ -23,10 +14,13 @@ Point d’entrée conseillé : [04-Source-Code-Map.md](04-Source-Code-Map.md).
 
 ## 1) Ce qui existe déjà
 
-- Une architecture Transformer côté registry (builder) : `src/Models/NLP/TransformerModel.cpp`.
-- Un chemin “tokens int” (Embedding lit dans un store d’ints) : ex. conventions `__input__` côté NLP (voir aussi la carte du code source).
-- Des kernels CPU pour attention et matmul (OpenMP/SIMD selon build) : `src/LayerOps.hpp`, `src/SIMD_Ops.hpp`.
-- Une API tokenizer/encoder en Lua : `Mimir.Tokenizer.*` et `Mimir.Model.encode_prompt(...)` (bindings dans `src/scriptings/Lua/luaScripting/LuaScripting.cpp`).
+- Une architecture decoder-only native : `src/Models/NLP/CausalLMModel.cpp`,
+  avec RMSNorm, RoPE, GQA, SwiGLU et poids embedding/LM head partagés.
+- Une architecture encodeur Transformer : `src/Models/NLP/TransformerModel.cpp`.
+- Un chemin tokens entiers via `__input__` pour `causal_lm`.
+- Des kernels CPU pour attention et matmul (OpenMP/SIMD selon build) : `src/runtimes/cpu/LayerOps.hpp`, `src/runtimes/cpu/SIMD_Ops.hpp`.
+- Une API tokenizer en Lua via `Mimir.Tokenizer.*` et un bootstrap de
+  tokenizer compatible dans `scripts/modules/causal_lm_tokenizer.lua`.
 
 ## 2) Ce que `Mimir.Model.infer()` fait vraiment (important)
 
@@ -44,7 +38,7 @@ Conclusion : **ne pas** considérer `infer()` comme une génération LLM valide 
 
 ## 3) Limites actuelles pour un LLM “pratique”
 
-- Pas de KV-cache dédié : une génération token-par-token coûterait un forward complet à chaque token.
+- Pas de frontend Lua de génération autoregressive/sampling pour `causal_lm`.
 - Pas d’API runtime de sampling (top-k/top-p/temperature) côté C++ ; si vous voulez sampler, ça doit être implémenté côté scripts Lua pour l’instant.
 - Offload GPU : l’offload Vulkan/OpenCL est ciblé sur `Linear` en inférence, pas une stack LLM complète (voir `src/Model.cpp`).
 
@@ -61,10 +55,17 @@ Pour passer de “Transformer entraînable” à “LLM utilisable” :
 
 - Registry + config merge : `src/Models/Registry/ModelArchitectures.*`.
 - Builder Transformer : `src/Models/NLP/TransformerModel.cpp`.
-- Ops d’attention : `src/LayerOps.hpp`.
+- Ops d’attention : `src/runtimes/cpu/LayerOps.hpp`.
 - Bindings Lua (forward, infer, encode prompt) : `src/scriptings/Lua/luaScripting/LuaScripting.cpp`.
 
 Et côté scripts (utile pour comprendre l’intention et l’usage actuel) :
 
-- `scripts/examples/example_gpt.lua` : montre la création d’un Transformer causal via registry, l’allocation des params et un appel à `Mimir.Model.infer(...)`.
-- `scripts/training/train_llm.lua` : exemple d’entraînement “LLM-like” (mais sans API de génération autoregressive côté runtime).
+- `scripts/examples/example_conf_inference.lua` : inférence config-driven sur architecture transformer.
+- `scripts/benchmarks/benchmark_attention.lua` : cas transformer/attention en benchmark (dont mode causal).
+- `scripts/templates/template_pipeline_only.lua` et `scripts/templates/template_pipeline_args.lua` : pipelines template pour workflows autoregressifs.
+
+## Étapes suivantes
+
+- [Page précédente : Debugging & stabilité numérique](02-Debugging.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Advanced — Carte du code source (C/C++)](04-Source-Code-Map.md)

@@ -1,0 +1,762 @@
+{
+  "default_dtype": "float32",
+  "encoder": {
+    "architecture": "ViT",
+    "has_encoder": true
+  },
+  "features": [
+    "layer_config",
+    "real_shapes",
+    "layer_io",
+    "extended_layer_types",
+    "framework_state",
+    "checksums"
+  ],
+  "format": "mimir_debug_dump",
+  "format_version": "1.3.0",
+  "framework_state": {
+    "memory": {
+      "advanced_ram_manager": {
+        "allocations_blocked": false,
+        "current_bytes": 0,
+        "current_mb": 0.0,
+        "freeze_mode": false,
+        "peak_bytes": 0,
+        "peak_mb": 0.0,
+        "usage_percent": 0.0
+      },
+      "dynamic_tensor_allocator": {
+        "loaded_count": 7,
+        "tensor_count": 7
+      },
+      "memory_guard": {
+        "allocations_blocked": false,
+        "current_bytes": 40020480,
+        "current_mb": 38.16650390625,
+        "freeze_mode": false,
+        "limit_bytes": 10737418240,
+        "limit_mb": 10240.0,
+        "peak_bytes": 40020480,
+        "peak_mb": 38.16650390625,
+        "usage_percent": 0.37271976470947266
+      }
+    },
+    "model": {
+      "default_dtype": "float32",
+      "has_encoder": true,
+      "image_height": 64,
+      "image_width": 64,
+      "model_config": {
+        "context_dim": 2048,
+        "cross_attn_out_bias": true,
+        "d_model": 640,
+        "ff_hidden": 2560,
+        "kv_len": 77,
+        "num_heads": 10,
+        "q_len": 64,
+        "self_attn_out_bias": true,
+        "self_attn_qkv_bias": false,
+        "type": "hf_sdxl_transformer_block"
+      },
+      "model_name": "HFSDXLTransformerBlockModel",
+      "num_layers": 14,
+      "parameters_frozen": false,
+      "tokenizer_vocab_size": 47,
+      "total_params": 10005120
+    },
+    "registry": {
+      "supported_layer_count": 70,
+      "supported_layer_types": [
+        "Conv2d",
+        "ConvTranspose2d",
+        "Conv1d",
+        "DepthwiseConv2d",
+        "Linear",
+        "Bilinear",
+        "Embedding",
+        "EmbeddingBag",
+        "BatchNorm2d",
+        "BatchNorm1d",
+        "LayerNorm",
+        "GroupNorm",
+        "InstanceNorm2d",
+        "RMSNorm",
+        "ReLU",
+        "LeakyReLU",
+        "GELU",
+        "GEGLU",
+        "SiLU",
+        "Tanh",
+        "Sigmoid",
+        "Softmax",
+        "LogSoftmax",
+        "Softplus",
+        "Mish",
+        "HardSigmoid",
+        "HardSwish",
+        "MaxPool2d",
+        "AvgPool2d",
+        "AdaptiveAvgPool2d",
+        "GlobalAvgPool2d",
+        "MaxPool1d",
+        "AvgPool1d",
+        "TokenMeanPool",
+        "Dropout",
+        "Dropout2d",
+        "AlphaDropout",
+        "Flatten",
+        "Reshape",
+        "Transpose",
+        "Permute",
+        "Squeeze",
+        "Unsqueeze",
+        "View",
+        "Add",
+        "Subtract",
+        "Multiply",
+        "Divide",
+        "Concat",
+        "Split",
+        "Chunk",
+        "Stack",
+        "MatMul",
+        "BatchMatMul",
+        "SelfAttention",
+        "MultiHeadAttention",
+        "CrossAttention",
+        "UpsampleNearest",
+        "UpsampleBilinear",
+        "UpsampleBicubic",
+        "PixelShuffle",
+        "LSTM",
+        "GRU",
+        "RNN",
+        "ZeroPad2d",
+        "ReflectionPad2d",
+        "ReplicationPad2d",
+        "Identity",
+        "Constant",
+        "Lambda"
+      ]
+    },
+    "runtime": {
+      "backends": {
+        "cpu": {
+          "available": true,
+          "compiled": true,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CPU",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "cuda": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CUDA",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "opencl": {
+          "available": false,
+          "compiled": true
+        },
+        "rocm": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "ROCM",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "vulkan": {
+          "available": true,
+          "compiled": true
+        }
+      },
+      "cpu_features": {
+        "avx2": true,
+        "bmi2": true,
+        "f16c": true,
+        "fma": true
+      },
+      "environment_overrides": {},
+      "framework_logs_suppressed": false
+    },
+    "snapshot_timestamp": 1783546791,
+    "snapshot_version": "1.0.0"
+  },
+  "git": {
+    "branch": "unknown",
+    "commit": "unknown"
+  },
+  "layers": [
+    {
+      "index": 0,
+      "inputs": [
+        "__input__"
+      ],
+      "name": "sdxl/transformer_block/in",
+      "output": "sdxl/transformer_block/packed",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Identity"
+    },
+    {
+      "config": {
+        "num_splits": 2,
+        "split_axis": 0,
+        "split_sizes": [
+          40960,
+          157696
+        ]
+      },
+      "index": 1,
+      "inputs": [
+        "sdxl/transformer_block/packed"
+      ],
+      "name": "sdxl/transformer_block/split",
+      "output": "sdxl/transformer_block/split",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Split"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 640,
+        "momentum": 0.10000000149011612,
+        "num_features": 640,
+        "num_groups": 1
+      },
+      "index": 2,
+      "inputs": [
+        "sdxl/transformer_block/split_0"
+      ],
+      "name": "sdxl/transformer_block/norm1",
+      "output": "sdxl/transformer_block/norm1_out",
+      "params_count": 1280,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/transformer_block/norm1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1280
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1280,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "causal": false,
+        "embed_dim": 640,
+        "head_dim": 64,
+        "num_heads": 10,
+        "seq_len": 64,
+        "use_mask": false
+      },
+      "index": 3,
+      "inputs": [
+        "sdxl/transformer_block/norm1_out"
+      ],
+      "name": "sdxl/transformer_block/attn1",
+      "output": "sdxl/transformer_block/attn1_out",
+      "params_count": 1639040,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/transformer_block/attn1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1639040
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1639040,
+          "truncated": true
+        }
+      ],
+      "type": "SelfAttention",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 4,
+      "inputs": [
+        "sdxl/transformer_block/split_0",
+        "sdxl/transformer_block/attn1_out"
+      ],
+      "name": "sdxl/transformer_block/add1",
+      "output": "sdxl/transformer_block/res1",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 640,
+        "momentum": 0.10000000149011612,
+        "num_features": 640,
+        "num_groups": 1
+      },
+      "index": 5,
+      "inputs": [
+        "sdxl/transformer_block/res1"
+      ],
+      "name": "sdxl/transformer_block/norm2",
+      "output": "sdxl/transformer_block/norm2_out",
+      "params_count": 1280,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/transformer_block/norm2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1280
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1280,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "causal": false,
+        "embed_dim": 640,
+        "head_dim": 64,
+        "in_features": 2048,
+        "num_heads": 10,
+        "use_mask": false
+      },
+      "index": 6,
+      "inputs": [
+        "sdxl/transformer_block/norm2_out",
+        "sdxl/transformer_block/split_1"
+      ],
+      "name": "sdxl/transformer_block/attn2",
+      "output": "sdxl/transformer_block/attn2_out",
+      "params_count": 3441280,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/transformer_block/attn2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3441280
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 3441280,
+          "truncated": true
+        }
+      ],
+      "type": "CrossAttention",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 7,
+      "inputs": [
+        "sdxl/transformer_block/res1",
+        "sdxl/transformer_block/attn2_out"
+      ],
+      "name": "sdxl/transformer_block/add2",
+      "output": "sdxl/transformer_block/res2",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "eps": 0.000009999999747378752,
+        "in_features": 640,
+        "momentum": 0.10000000149011612,
+        "num_features": 640,
+        "num_groups": 1
+      },
+      "index": 8,
+      "inputs": [
+        "sdxl/transformer_block/res2"
+      ],
+      "name": "sdxl/transformer_block/norm3",
+      "output": "sdxl/transformer_block/norm3_out",
+      "params_count": 1280,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/transformer_block/norm3.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1280
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1280,
+          "truncated": true
+        }
+      ],
+      "type": "LayerNorm",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 640,
+        "out_features": 5120
+      },
+      "index": 9,
+      "inputs": [
+        "sdxl/transformer_block/norm3_out"
+      ],
+      "name": "sdxl/transformer_block/ff_proj",
+      "output": "sdxl/transformer_block/ff_proj_out",
+      "params_count": 3281920,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/transformer_block/ff_proj.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            5120,
+            640
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 3276800,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "out_features": 2560
+      },
+      "index": 10,
+      "inputs": [
+        "sdxl/transformer_block/ff_proj_out"
+      ],
+      "name": "sdxl/transformer_block/geglu",
+      "output": "sdxl/transformer_block/geglu_out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GEGLU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 2560,
+        "out_features": 640
+      },
+      "index": 11,
+      "inputs": [
+        "sdxl/transformer_block/geglu_out"
+      ],
+      "name": "sdxl/transformer_block/ff_out",
+      "output": "sdxl/transformer_block/ff_out_out",
+      "params_count": 1639040,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "sdxl/transformer_block/ff_out.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            640,
+            2560
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1638400,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 12,
+      "inputs": [
+        "sdxl/transformer_block/res2",
+        "sdxl/transformer_block/ff_out_out"
+      ],
+      "name": "sdxl/transformer_block/add3",
+      "output": "sdxl/transformer_block/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "index": 13,
+      "inputs": [
+        "sdxl/transformer_block/out"
+      ],
+      "name": "sdxl/transformer_block/out_id",
+      "output": "x",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Identity"
+    }
+  ],
+  "model_config": {
+    "context_dim": 2048,
+    "cross_attn_out_bias": true,
+    "d_model": 640,
+    "dtype": "float32",
+    "ff_hidden": 2560,
+    "kv_len": 77,
+    "num_heads": 10,
+    "q_len": 64,
+    "self_attn_out_bias": true,
+    "self_attn_qkv_bias": false,
+    "type": "hf_sdxl_transformer_block"
+  },
+  "model_name": "HFSDXLTransformerBlockModel",
+  "num_layers": 14,
+  "timestamp": 1783546791,
+  "tokenizer": {
+    "has_vocab": true,
+    "vocab_size": 47
+  },
+  "total_params": 10005120,
+  "default_params": {
+    "context_dim": 2048,
+    "cross_attn_out_bias": true,
+    "d_model": 640,
+    "ff_hidden": 2560,
+    "kv_len": 77,
+    "num_heads": 10,
+    "q_len": 64,
+    "self_attn_out_bias": true,
+    "self_attn_qkv_bias": false
+  }
+}

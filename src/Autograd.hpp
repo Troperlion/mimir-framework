@@ -4,6 +4,9 @@
 #include <unordered_map>
 #include <string>
 #include <cmath>
+#include <limits>
+#include <stdexcept>
+#include "TypedTensor.hpp"
 
 // Structure pour stocker les activations du forward pass
 struct ComputationGraph {
@@ -55,15 +58,23 @@ struct Gradients {
     
     // Clipper les gradients
     void clip(float max_norm) {
-        float total_norm = 0.0f;
-        for (const auto& [idx, grad] : param_grads) {
-            total_norm += grad * grad;
+        if (!std::isfinite(max_norm) || max_norm < 0.0f) {
+            throw std::invalid_argument("Gradients::clip: max_norm must be finite and non-negative");
         }
-        total_norm = std::sqrt(total_norm);
+        double total_norm_sq = 0.0;
+        for (const auto& [idx, grad] : param_grads) {
+            (void)idx;
+            if (!std::isfinite(grad)) {
+                throw std::runtime_error("Gradients::clip: non-finite gradient");
+            }
+            total_norm_sq += static_cast<double>(grad) * static_cast<double>(grad);
+        }
+        const double total_norm = std::sqrt(total_norm_sq);
         
-        if (total_norm > max_norm) {
-            float scale = max_norm / (total_norm + 1e-6f);
+        if (total_norm > static_cast<double>(max_norm) && total_norm > 0.0) {
+            const float scale = static_cast<float>(static_cast<double>(max_norm) / total_norm);
             for (auto& [idx, grad] : param_grads) {
+                (void)idx;
                 grad *= scale;
             }
         }
@@ -72,84 +83,74 @@ struct Gradients {
 
 // Fonctions de backprop pour chaque opération
 namespace Autograd {
+    inline Mimir::DType gradient_dtype(Mimir::DType primal) {
+        if (!Mimir::dtype_is_floating(primal)) {
+            throw std::invalid_argument(
+                std::string("Autograd: dtype '") + Mimir::dtype_to_string(primal) +
+                "' is not differentiable");
+        }
+        return primal == Mimir::DType::F64 ? Mimir::DType::F64 : Mimir::DType::F32;
+    }
+
+    inline Mimir::TypedTensor mse_backward(const Mimir::TypedTensor& pred,
+                                           const Mimir::TypedTensor& target) {
+        if (pred.shape() != target.shape())
+            throw std::invalid_argument("Autograd::mse_backward: shape mismatch");
+        const Mimir::DType grad_type = gradient_dtype(pred.dtype());
+        if (!Mimir::dtype_is_floating(target.dtype()))
+            throw std::invalid_argument("Autograd::mse_backward: target must be floating");
+        Mimir::TypedTensor gradient(pred.shape(), grad_type);
+        if (pred.numel() == 0) return gradient;
+        const double inv_n = 1.0 / static_cast<double>(pred.numel());
+        for (size_t index = 0; index < pred.numel(); ++index)
+            gradient.set(index, 2.0 * (pred.get(index) - target.get(index)) * inv_n);
+        return gradient;
+    }
+
     // Gradient de MSE: dL/dx = 2(x - target) / n
     inline std::vector<float> mse_backward(const std::vector<float>& pred, 
                                            const std::vector<float>& target) {
+        if (pred.size() != target.size()) {
+            throw std::invalid_argument("Autograd::mse_backward: size mismatch");
+        }
+        if (pred.empty()) {
+            return {};
+        }
         std::vector<float> grad(pred.size());
+        const float inv_n = 1.0f / static_cast<float>(pred.size());
         #pragma omp simd
         for (size_t i = 0; i < pred.size(); ++i) {
-            grad[i] = 2.0f * (pred[i] - target[i]) / pred.size();
+            grad[i] = 2.0f * (pred[i] - target[i]) * inv_n;
         }
         return grad;
     }
     
-    // Gradient de LayerNorm
-    inline std::vector<float> layernorm_backward(const std::vector<float>& grad_output,
-                                                  const std::vector<float>& input,
-                                                  const std::vector<float>& normalized) {
-        size_t n = input.size();
-        
-        // Calculer mean et std du forward pass
-        float mean = 0.0f;
-        #pragma omp simd reduction(+:mean)
-        for (size_t i = 0; i < n; ++i) mean += input[i];
-        mean /= n;
-        
-        float var = 0.0f;
-        #pragma omp simd reduction(+:var)
-        for (size_t i = 0; i < n; ++i) {
-            float diff = input[i] - mean;
-            var += diff * diff;
+    // Compatibility entry points. Layer derivatives are dispatched to runtimes;
+    // configure RuntimeRouter (normally through Model) before using these helpers.
+    std::vector<float> layernorm_backward(const std::vector<float>& grad_output,
+                                         const std::vector<float>& input,
+                                         const std::vector<float>& normalized);
+    float gelu_backward(float x, float grad_output);
+
+    inline float sigmoid(float x) {
+        if (x >= 0.0f) {
+            const float z = std::exp(-x);
+            return 1.0f / (1.0f + z);
         }
-        var /= n;
-        float std = std::sqrt(var + 1e-5f);
-        
-        // Gradient
-        std::vector<float> grad_input(n);
-        float grad_var = 0.0f;
-        float grad_mean = 0.0f;
-        
-        #pragma omp simd reduction(+:grad_var)
-        for (size_t i = 0; i < n; ++i) {
-            grad_var += grad_output[i] * (input[i] - mean);
+        const float z = std::exp(x);
+        return z / (1.0f + z);
+    }
+
+    inline float softplus(float x) {
+        return x > 20.0f ? x : std::log1p(std::exp(x));
+    }
+
+    inline bool all_finite(const std::vector<float>& values) {
+        for (float value : values) {
+            if (!std::isfinite(value)) return false;
         }
-        grad_var *= -0.5f / (std * std * std);
-        
-        #pragma omp simd reduction(+:grad_mean)
-        for (size_t i = 0; i < n; ++i) {
-            grad_mean += grad_output[i] * (-1.0f / std);
-            grad_mean += grad_var * (-2.0f * (input[i] - mean) / n);
-        }
-        
-        #pragma omp simd
-        for (size_t i = 0; i < n; ++i) {
-            grad_input[i] = grad_output[i] / std;
-            grad_input[i] += grad_var * (2.0f * (input[i] - mean) / n);
-            grad_input[i] += grad_mean / n;
-        }
-        
-        return grad_input;
+        return true;
     }
     
-    // Gradient de GELU
-    inline float gelu_backward(float x, float grad_output) {
-        const float sqrt_2_pi = 0.7978845608f;
-        const float coeff = 0.044715f;
-        
-        float x_cubed = x * x * x;
-        float tanh_arg = sqrt_2_pi * (x + coeff * x_cubed);
-        float tanh_val = std::tanh(tanh_arg);
-        
-        float sech_sq = 1.0f - tanh_val * tanh_val;
-        float dtanh = sqrt_2_pi * (1.0f + 3.0f * coeff * x * x) * sech_sq;
-        
-        float dgelu = 0.5f * (1.0f + tanh_val) + 0.5f * x * dtanh;
-        
-        return grad_output * dgelu;
-    }
-    
-    // Gradient de Residual Connection: grad passe tel quel
-    inline std::vector<float> residual_backward(const std::vector<float>& grad_output) {
-        return grad_output; // Le gradient se propage directement
-    }
+    std::vector<float> residual_backward(const std::vector<float>& grad_output);
 }

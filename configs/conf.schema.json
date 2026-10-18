@@ -1,0 +1,438 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mimir-conf",
+  "title": "Mimir --conf schema",
+  "description": "Schéma JSON pour les fichiers de configuration passés via --conf à l'exécutable mimir.",
+  "type": "object",
+
+  "required": [],
+
+  "properties": {
+
+    "$schema": {
+      "type": "string",
+      "description": "Référence au schéma JSON (optionnel, pour validation IDE)."
+    },
+
+    "description": {
+      "type": "string",
+      "description": "Description libre de la configuration."
+    },
+
+    "js": { "$ref": "#/definitions/jsBlock" },
+
+    "lua": {
+      "$ref": "#/definitions/luaBlock",
+      "description": "Scripts Lua à exécuter (variante principale). Mutuellement exclusif avec 'run.lua'."
+    },
+
+    "run": {
+      "type": "object",
+      "description": "Variante alternative : scripts Lua imbriqués sous run.lua.",
+      "properties": {
+        "js": { "$ref": "#/definitions/jsBlock" },
+        "lua": { "$ref": "#/definitions/luaBlock" }
+      },
+      "additionalProperties": false
+    },
+
+    "visualization": {
+      "$ref": "#/definitions/visualizationBlock",
+      "description": "Configuration de la fenêtre de visualisation SFML (Visualizer / AsyncMonitor)."
+    },
+
+    "model": {
+      "type": "object",
+      "description": "Configuration de l'architecture modèle, accessible via CONF.model dans les scripts Lua.",
+      "properties": {
+        "architecture": {
+          "type": "string",
+          "description": "Nom de l'architecture (ex: transformer, vae_conv, diffusion, vgg16)."
+        },
+        "vocab_size":   { "type": "integer", "minimum": 1 },
+        "seq_len":      { "type": "integer", "minimum": 1 },
+        "d_model":      { "type": "integer", "minimum": 1 },
+        "num_layers":   { "type": "integer", "minimum": 1 },
+        "num_heads":    { "type": "integer", "minimum": 1 },
+        "mlp_hidden":   { "type": "integer", "minimum": 1 },
+        "latent_spatial_context": { "type": "boolean", "description": "VAEConv: contexte résiduel local et dilaté dans le latent." },
+        "latent_context_channels": { "type": "integer", "minimum": 2, "description": "VAEConv: largeur des features du contexte latent (défaut 32)." },
+        "latent_detail_path": { "type": "boolean", "description": "VAEConv: chemin de détails sous-pixel passant exclusivement par le latent." }
+      },
+      "additionalProperties": true
+    },
+
+    "tokenizer": {
+      "type": "object",
+      "description": "Configuration du tokenizer, accessible via CONF.tokenizer dans les scripts Lua.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["bpe", "word", "char"],
+          "description": "Type de tokenizer."
+        },
+        "max_vocab": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Taille maximale du vocabulaire."
+        },
+        "max_sequence_length": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Longueur maximale des séquences."
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "training": {
+      "type": "object",
+      "description": "Hyperparamètres d'entraînement, accessible via CONF.training dans les scripts Lua.",
+      "properties": {
+        "num_epochs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nombre d'époques."
+        },
+        "batch_size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Taille du batch."
+        },
+        "learning_rate": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Learning rate initial."
+        },
+        "optimizer": {
+          "type": "string",
+          "enum": ["adamw", "adam", "sgd", "lion", "adafactor", "radam", "nadam", "rmsprop", "lamb"],
+          "description": "Optimiseur à utiliser."
+        },
+        "weight_decay": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Décroissance des poids (L2 regularization)."
+        },
+        "rmsprop_alpha": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 1,
+          "default": 0.99,
+          "description": "Facteur de décroissance de la moyenne quadratique RMSprop."
+        },
+        "adafactor_clip_threshold": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 1.0,
+          "description": "Seuil de clipping RMS de l'update Adafactor."
+        },
+        "adafactor_decay_rate": {
+          "type": "number",
+          "maximum": 0,
+          "default": -0.8,
+          "description": "Exposant de décroissance dynamique du second moment Adafactor."
+        },
+        "adafactor_eps2": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 0.001,
+          "description": "Seuil minimal d'échelle des paramètres Adafactor."
+        },
+        "adafactor_beta1": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 1,
+          "default": 0,
+          "description": "Momentum optionnel Adafactor ; 0 le désactive."
+        },
+        "adafactor_scale_parameter": {
+          "type": "boolean",
+          "default": true,
+          "description": "Adapte le pas Adafactor à l'échelle RMS des paramètres."
+        },
+        "adafactor_relative_step": {
+          "type": "boolean",
+          "default": false,
+          "description": "Utilise le planning de pas relatif interne à Adafactor."
+        },
+        "warmup_steps": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Nombre de steps de warmup du learning rate."
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "dataset": {
+      "type": "object",
+      "description": "Informations sur le dataset, accessible via CONF.dataset dans les scripts Lua.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Identifiant ou chemin du dataset."
+        },
+        "split": {
+          "type": "string",
+          "enum": ["train", "val", "test"],
+          "description": "Partition du dataset."
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "inference": {
+      "type": "object",
+      "description": "Paramètres d'inférence/génération, accessible via CONF.inference dans les scripts Lua.",
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Température d'échantillonnage (0 = greedy)."
+        },
+        "top_k": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Top-K sampling (0 = désactivé)."
+        },
+        "top_p": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Nucleus sampling (top-p). 1.0 = désactivé."
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "tasks": {
+      "type": "object",
+      "description": "Tâches nommées sélectionnables via --run <task>. Chaque clé est un identifiant de tâche (ex: 'train', 'infer'). Sans --run, la section 'lua' racine est utilisée.",
+      "additionalProperties": {
+        "$ref": "#/definitions/taskEntry"
+      }
+    },
+
+    "logging": {
+      "type": "object",
+      "description": "Options de log console. Accessible via CONF.logging dans les scripts Lua.",
+      "properties": {
+        "show_htop_display": { "type": "boolean", "description": "Active le moniteur htop en console." },
+        "show_viz_display":  { "type": "boolean", "description": "Ouvre la fenêtre de visualisation SFML." }
+      },
+      "additionalProperties": true
+    },
+
+    "env": {
+      "type": "object",
+      "description": "Variables d'environnement appliquées par Mímir avant l'exécution de la configuration. Les valeurs de la conf remplacent celles héritées du shell.",
+      "properties": {
+        "MIMIR_ACCEL_VERBOSE": { "type": "integer", "enum": [0, 1], "description": "Verbosité du backend d'accélération (0 = silencieux, 1 = verbose)." },
+        "MIMIR_PLANNER_TRACE": { "type": "integer", "enum": [0, 1], "description": "Trace du planificateur de graphe de calcul (0 = off, 1 = on)." },
+        "MIMIR_PLANNER_DUMP":  { "type": "integer", "enum": [0, 1], "description": "Dump JSON du plan de graphe dans le répertoire courant (0 = off, 1 = on)." },
+        "OMP_NUM_THREADS":     { "type": "integer", "minimum": 1,   "description": "Nombre de threads OpenMP utilisés pour les opérations CPU." }
+      },
+      "additionalProperties": true
+    }
+  },
+
+  "oneOf": [
+    { "required": ["js"] },
+    { "required": ["run"], "properties": { "run": { "required": ["js"] } } },
+    { "required": ["lua"] },
+    { "required": ["run"], "properties": { "run": { "required": ["lua"] } } }
+  ],
+
+  "additionalProperties": true,
+
+  "definitions": {
+
+    "taskEntry": {
+      "type": "object",
+      "description": "Définition d'une tâche nommée. Sélectionnée via --run <task>.",
+      "required": [],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Description courte affichée dans les logs et dans --help."
+        },
+        "js": { "$ref": "#/definitions/jsBlock" },
+        "lua": {
+          "$ref": "#/definitions/luaBlock",
+          "description": "Scripts Lua à exécuter pour cette tâche."
+        },
+        "run": {
+          "type": "object",
+          "description": "Variante alternative : scripts imbriqués sous run.lua.",
+          "properties": {
+            "js": { "$ref": "#/definitions/jsBlock" },
+            "lua": { "$ref": "#/definitions/luaBlock" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "oneOf": [
+        { "required": ["js"] },
+        { "required": ["lua"] },
+        { "required": ["run"] }
+      ],
+      "additionalProperties": false
+    },
+
+    "jsBlock": {
+      "description": "Scripts JavaScript exécutés par le bridge Node.js.",
+      "allOf": [{ "$ref": "#/definitions/luaBlock" }]
+    },
+
+    "luaBlock": {
+      "type": "object",
+      "description": "Bloc de configuration des scripts Lua.",
+      "oneOf": [
+        {
+          "required": ["scripts"],
+          "properties": {
+            "scripts": {
+              "type": "array",
+              "description": "Liste de scripts Lua à exécuter séquentiellement.",
+              "minItems": 1,
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "description": "Chemin vers un script Lua (relatif au CWD ou absolu)."
+                  },
+                  {
+                    "type": "object",
+                    "description": "Script Lua avec arguments.",
+                    "required": ["script"],
+                    "properties": {
+                      "script": {
+                        "type": "string",
+                        "description": "Chemin vers le script Lua."
+                      },
+                      "args": {
+                        "type": "array",
+                        "description": "Arguments passés au script (accessibles via arg[] en Lua).",
+                        "items": { "type": "string" }
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["script"],
+          "properties": {
+            "script": {
+              "type": "string",
+              "description": "Chemin vers un script Lua unique."
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "visualizationBlock": {
+      "type": "object",
+      "description": "Options de la fenêtre SFML du Visualizer.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Active la fenêtre de visualisation."
+        },
+        "window_width": {
+          "type": "integer",
+          "minimum": 320,
+          "default": 1280,
+          "description": "Largeur de la fenêtre en pixels."
+        },
+        "window_height": {
+          "type": "integer",
+          "minimum": 240,
+          "default": 720,
+          "description": "Hauteur de la fenêtre en pixels."
+        },
+        "window_title": {
+          "type": "string",
+          "default": "FLUX Model Visualization",
+          "description": "Titre de la fenêtre."
+        },
+        "fps_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60,
+          "description": "Limite de FPS du rendu SFML."
+        },
+        "update_interval_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Intervalle de rafraîchissement de la Viz en millisecondes."
+        },
+        "show_generated_images": {
+          "type": "boolean",
+          "default": true,
+          "description": "Affiche les images générées dans la fenêtre."
+        },
+        "show_training_progress": {
+          "type": "boolean",
+          "default": true,
+          "description": "Affiche la barre de progression d'entraînement."
+        },
+        "show_loss_graph": {
+          "type": "boolean",
+          "default": true,
+          "description": "Affiche le graphe de la loss en temps réel."
+        },
+        "show_detection_overlay": {
+          "type": "boolean",
+          "default": true,
+          "description": "Affiche les encadrés publiés par les modèles de détection."
+        },
+        "graph_history_size": {
+          "type": "integer",
+          "minimum": 10,
+          "default": 200,
+          "description": "Nombre de points conservés dans l'historique du graphe de loss."
+        },
+        "image_grid_cols": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "Nombre de colonnes dans la grille d'images générées."
+        },
+        "image_grid_rows": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Nombre de lignes dans la grille d'images générées."
+        },
+        "loss_log_file": {
+          "type": "string",
+          "description": "Chemin vers le fichier CSV de log de la loss (créé automatiquement)."
+        },
+        "hide_activation_blocks": {
+          "type": "boolean",
+          "default": false,
+          "description": "Masque les blocs d'activation dans la vue architecture."
+        },
+        "hide_normalisation_blocks": {
+          "type": "boolean",
+          "default": false,
+          "description": "Masque les blocs de normalisation dans la vue architecture."
+        },
+        "architecture_path": {
+          "type": "string",
+          "description": "Chemin optionnel vers un fichier JSON d'architecture à charger dans la vue."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

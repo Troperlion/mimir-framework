@@ -142,6 +142,10 @@ public:
     // Statistiques
     size_t getCurrentBytes() const { return current_bytes_.load(); }
     size_t getPeakBytes() const { return peak_bytes_.load(); }
+    size_t getAllocationsCount() const { return allocations_count_.load(); }
+    size_t getDeallocationsCount() const { return deallocations_count_.load(); }
+    size_t getBlockedAttempts() const { return blocked_attempts_.load(); }
+    size_t getFrozenAttempts() const { return frozen_attempts_.load(); }
     float getUsagePercent() const {
         size_t max = max_bytes_.load();
         if (max == 0) return 0.0f;  // Éviter division par zéro

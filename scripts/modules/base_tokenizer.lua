@@ -6,11 +6,13 @@
 --   - Pour forcer la présence: $MIMIR_REQUIRE_BASE_TOKENIZER=1
 --
 -- Usage (dans un script):
---   local BaseTok = dofile("scripts/modules/base_tokenizer.lua")
+--   local BaseTok = dofile(ROOTWORK.."/scripts/modules/base_tokenizer.lua")
 --   BaseTok.load_base({ max_vocab = 50000, require = true })
 --   cfg.vocab_size = BaseTok.vocab_size()  -- important pour Embedding
 
+---@class MimirBaseTokenizerModule
 local BaseTok = {}
+local FS = dofile(ROOTWORK.."/scripts/modules/fs.lua")
 
 local function env_str(k, d)
   local v = os.getenv(k)
@@ -27,25 +29,14 @@ local function env_bool(k, d)
   return d
 end
 
-local function shell_quote(s)
-  if s == nil then return "''" end
-  s = tostring(s)
-  return "'" .. s:gsub("'", "'\\''") .. "'"
-end
-
 local function file_exists(path)
-  if not path or #tostring(path) == 0 then return false end
-  local cmd = "test -f " .. shell_quote(path) .. " >/dev/null 2>&1"
-  local ok, why, code = os.execute(cmd)
-  if type(ok) == "number" then return ok == 0 end
-  if type(ok) == "boolean" then return ok end
-  return (why == "exit" and code == 0)
+  return FS.file_exists(path)
 end
 
 local function ensure_parent_dir(filepath)
-  local dir = tostring(filepath):match("^(.*)/[^/]*$")
+  local dir = FS.dirname(filepath)
   if dir and #dir > 0 then
-    os.execute("mkdir -p " .. shell_quote(dir) .. " >/dev/null 2>&1")
+    FS.mkdir_p(dir)
   end
 end
 
@@ -53,6 +44,9 @@ function BaseTok.default_path()
   return env_str("MIMIR_BASE_TOKENIZER", "checkpoint/base_tokenizer/tokenizer.json")
 end
 
+---@param opts? MimirBaseTokenizerOptions
+---@return boolean ok
+---@return string? err
 function BaseTok.load_base(opts)
   opts = opts or {}
   local path = opts.path or BaseTok.default_path()

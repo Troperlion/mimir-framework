@@ -11,6 +11,7 @@
 
 // Needed for inline access to weight_block storage
 #include "tensors.hpp"
+#include "DType.hpp"
 
 // ============================================================================
 // Énumérations et structures
@@ -88,9 +89,12 @@ struct Layer {
     std::string type;  // String type for backward compat
     LayerType type_enum = LayerType::UNKNOWN;  // Enum type (NEW)
     size_t params_count;
+    Mimir::DType dtype = Mimir::DType::F32;
+    Mimir::DType accumulation_dtype = Mimir::DType::F32;
     
     // NOUVEAU: Pointeur vers le tensor de poids unifié pour ce layer
     tensor* weight_block = nullptr;  // Tous les poids du layer dans un seul tensor
+    std::string shared_weights_from; // Optional source layer for tied parameters
     
     // Données des paramètres (weights, bias) - conservé pour compatibilité
     std::vector<float> weights;
@@ -99,6 +103,10 @@ struct Layer {
     // Gradients (pour backprop)
     std::vector<float> grad_weights;
     std::vector<float> grad_bias;
+
+    // Les couches Constant sont fixes par défaut. Une Constant marquée
+    // trainable_parameter se comporte comme un tenseur paramètre sans entrée.
+    bool trainable_parameter = false;
     
     // État interne (pour BatchNorm, etc.)
     std::vector<float> running_mean;
@@ -153,6 +161,14 @@ struct Layer {
     // === Softmax / LogSoftmax ===
     int axis = -1;                // Axis pour softmax (default: dernier)
     bool use_mask = false;        // Causal mask pour attention
+
+    // === Non-Maximum Suppression ===
+    // Entrées: boxes [N,4] en xyxy, scores [N], classes [N] optionnelles.
+    // Sortie: indices originaux conservés, encodés en float.
+    float nms_iou_threshold = 0.5f;
+    float nms_score_threshold = 0.0f;
+    int nms_max_detections = 0;       // 0 = aucune limite
+    bool nms_class_agnostic = false;   // classes ignorées si true
     
     // === Reshape / View ===
     std::vector<int> target_shape;  // Shape cible pour reshape
@@ -160,6 +176,21 @@ struct Layer {
     std::vector<int> permute_dims;  // Ordre des dimensions pour permute [0,2,1]
     
     // === Concat / Split ===
+    // Explicit graph annotation; -1 preserves ordinary merge semantics.
+    int skip_input_index = -1;
+    int skipInputIndex() const {
+        if (type_enum != LayerType::Concat && type_enum != LayerType::Add) return -1;
+        if (skip_input_index >= 0 && static_cast<size_t>(skip_input_index) < inputs.size())
+            return skip_input_index;
+        // Older checkpoints predate the annotation. Recognize only native
+        // encoder-decoder skips, never arbitrary concatenations/residuals.
+        if (type_enum == LayerType::Concat && inputs.size() == 2 &&
+            ((name.rfind("vae_conv/dec/", 0) == 0 && name.size() >= 9 &&
+              name.compare(name.size() - 9, 9, "/skip_cat") == 0) ||
+             (name.rfind("unet/up", 0) == 0 && name.size() >= 7 &&
+              name.compare(name.size() - 7, 7, "/concat") == 0))) return 1;
+        return -1;
+    }
     int concat_axis = 1;               // Axis de concatenation (default: channels)
     int num_splits = 2;                // Nombre de splits (splits égaux si split_sizes vide)
     std::vector<int> split_sizes;      // Tailles explicites de chaque split (si vide: splits égaux)
@@ -173,9 +204,11 @@ struct Layer {
     
     // === Attention ===
     int num_heads = 8;            // Multi-head attention
+    int num_kv_heads = 0;         // 0 = num_heads; smaller enables GQA
     int head_dim = 64;            // Dimension par head
     int seq_len = 0;              // Sequence length pour attention
     bool causal = false;          // Causal mask
+    float rope_theta = 0.0f;      // > 0 applies RoPE to Q and K
 
     // === Custom: PatchEmbed (projection learnable des patches) ===
     int patch_dim = 0;            // Dimension d'un patch aplati (p*p)
@@ -626,6 +659,7 @@ inline void conv2d(const std::vector<float>& input, std::vector<float>& output,
         for (int oh = 0; oh < out_height; ++oh) {
             for (int ow = 0; ow < out_width; ++ow) {
                 __m256 acc = _mm256_setzero_ps();
+                float scalar_tail = 0.0f;
                 
                 for (int ic = 0; ic < in_channels; ++ic) {
                     for (int kh = 0; kh < kernel_size; ++kh) {
@@ -661,7 +695,7 @@ inline void conv2d(const std::vector<float>& input, std::vector<float>& output,
                                 int in_idx = (ic * in_height + ih) * in_width + iw;
                                 int kernel_idx = ((oc * in_channels + ic) * kernel_size + kh) * kernel_size + kw;
                                 float prod = input[in_idx] * kernel[kernel_idx];
-                                acc = _mm256_add_ps(acc, _mm256_set1_ps(prod));
+                                scalar_tail += prod;
                             }
                         }
                     }
@@ -675,7 +709,7 @@ inline void conv2d(const std::vector<float>& input, std::vector<float>& output,
                 __m128 sums = _mm_add_ps(sum, shuf);
                 shuf = _mm_movehl_ps(shuf, sums);
                 sums = _mm_add_ss(sums, shuf);
-                float result = _mm_cvtss_f32(sums);
+                float result = _mm_cvtss_f32(sums) + scalar_tail;
                 
                 // Ajout du bias
                 if (!bias.empty()) {

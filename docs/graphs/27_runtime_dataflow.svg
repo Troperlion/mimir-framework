@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="620" viewBox="0 0 1700 620" role="img" aria-labelledby="title desc">
+<title id="title">Flux de données runtime</title><desc id="desc">Diagramme vectoriel éditable généré depuis les dumps du framework.</desc>
+<defs>
+<marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#475569"/></marker>
+<marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#2563eb"/></marker>
+<style><![CDATA[text{font-family:Inter,Segoe UI,Arial,sans-serif}.title{font-size:34px;font-weight:800;fill:#0f172a}.subtitle{font-size:16px;fill:#475569}.label{font-size:17px;font-weight:700;fill:#0f172a}.small{font-size:13px;fill:#475569}.tiny{font-size:11px;fill:#64748b}.box{stroke:#94a3b8;stroke-width:1.4;rx:14}.edge{stroke:#475569;stroke-width:2.2;fill:none;marker-end:url(#arrow)}.edgeB{stroke:#2563eb;stroke-width:2.4;fill:none;marker-end:url(#arrowBlue)}.dash{stroke-dasharray:7 7}.note{font-size:12px;fill:#475569}]]></style>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="60" y="62" class="title" text-anchor="start">Flux de données runtime</text>
+<text x="60" y="92" class="subtitle" text-anchor="start">Chemin des tenseurs depuis les entrées jusqu’aux sorties à travers le graphe.</text>
+<line x1="60" y1="112" x2="1640" y2="112" stroke="#e2e8f0" stroke-width="2"/>
+<rect x="70.0" y="240" width="236.66666666666666" height="110" rx="14" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="188.33333333333331" y="265" class="label" text-anchor="middle">Input tensors</text>
+<text x="188.33333333333331" y="322" class="small" text-anchor="middle">x, labels, t</text>
+<rect x="334.66666666666663" y="240" width="236.66666666666666" height="110" rx="14" fill="#ffedd5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="452.99999999999994" y="265" class="label" text-anchor="middle">Node queue</text>
+<text x="452.99999999999994" y="322" class="small" text-anchor="middle">ordre planner</text>
+<path d="M306.66666666666663,295.0 L334.66666666666663,295.0" class="edgeB"/>
+<rect x="599.3333333333333" y="240" width="236.66666666666666" height="110" rx="14" fill="#dbeafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="717.6666666666666" y="265" class="label" text-anchor="middle">Layer kernel</text>
+<text x="717.6666666666666" y="322" class="small" text-anchor="middle">opération C++</text>
+<path d="M571.3333333333333,295.0 L599.3333333333333,295.0" class="edgeB"/>
+<rect x="863.9999999999999" y="240" width="236.66666666666666" height="110" rx="14" fill="#fef3c7" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="982.3333333333333" y="265" class="label" text-anchor="middle">Tensor store</text>
+<text x="982.3333333333333" y="322" class="small" text-anchor="middle">outputs temporaires</text>
+<path d="M835.9999999999999,295.0 L863.9999999999999,295.0" class="edgeB"/>
+<rect x="1128.6666666666665" y="240" width="236.66666666666666" height="110" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1246.9999999999998" y="265" class="label" text-anchor="middle">Loss / output</text>
+<text x="1246.9999999999998" y="322" class="small" text-anchor="middle">résultat</text>
+<path d="M1100.6666666666665,295.0 L1128.6666666666665,295.0" class="edgeB"/>
+<rect x="1393.333333333333" y="240" width="236.66666666666666" height="110" rx="14" fill="#fee2e2" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1511.6666666666663" y="265" class="label" text-anchor="middle">Free/reuse</text>
+<text x="1511.6666666666663" y="322" class="small" text-anchor="middle">mémoire</text>
+<path d="M1365.3333333333333,295.0 L1393.333333333333,295.0" class="edgeB"/>
+<text x="1640" y="596" class="tiny" text-anchor="end">Mímir Framework — SVG vectoriel éditable</text>
+</svg>

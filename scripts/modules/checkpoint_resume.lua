@@ -1,39 +1,44 @@
 -- Simple checkpoint resume helper (raw_folder + epoch_* layout)
 -- Usage:
---   local Ckpt = dofile("scripts/modules/checkpoint_resume.lua")
+--   local Ckpt = dofile(ROOTWORK.."/scripts/modules/checkpoint_resume.lua")
 --   local dir = Ckpt.resolve_dir("checkpoint/MyModel")
 
+---@class MimirCheckpointResumeModule
 local M = {}
+local FS = dofile(ROOTWORK.."/scripts/modules/fs.lua")
 
 local function file_exists(path)
-  local f = io.open(path, "rb")
-  if f then f:close(); return true end
-  return false
-end
-
-local function shell_quote(s)
-  s = tostring(s or "")
-  return "'" .. s:gsub("'", "'\\''") .. "'"
+  return FS.file_exists(path)
 end
 
 local function find_latest_epoch_dir(base)
   base = tostring(base or "")
   if #base == 0 then return nil end
-  local q = shell_quote(base)
-  local p = io.popen("ls -1d " .. q .. "/epoch_* 2>/dev/null | sort | tail -n 1")
-  if not p then return nil end
-  local line = p:read("*l")
-  p:close()
-  if line and #line > 0 then return line end
+
+  local entries = FS.list_dir(base)
+  local epochs = {}
+  for _, name in ipairs(entries) do
+    if tostring(name):match("^epoch_%d+") then
+      local full = FS.join(base, name)
+      if FS.is_dir(full) then
+        epochs[#epochs + 1] = full
+      end
+    end
+  end
+
+  table.sort(epochs)
+  if #epochs > 0 then
+    return epochs[#epochs]
+  end
   return nil
 end
 
 local function looks_like_raw_folder(dir)
   dir = tostring(dir or "")
   if #dir == 0 then return false end
-  return file_exists(dir .. "/model/architecture.json")
-      or file_exists(dir .. "/model/model.safetensors")
-      or file_exists(dir .. "/model.safetensors")
+    return file_exists(FS.join(dir, "model", "architecture.json"))
+      or file_exists(FS.join(dir, "model", "model.safetensors"))
+      or file_exists(FS.join(dir, "model.safetensors"))
 end
 
 function M.file_exists(path)

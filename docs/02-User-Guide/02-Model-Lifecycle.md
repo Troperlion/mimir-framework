@@ -1,25 +1,34 @@
-# Workflow modèle (lifecycle)
-
-## Pour qui
-
-Débutant à intermédiaire.
-
-## Objectif
+# Cycle de vie d’un modèle
 
 Suivre le bon ordre d'appels pour éviter les erreurs courantes.
 
-## Avant de commencer
+**Public concerné :** Débutant à intermédiaire.
 
-Savoir lancer un script Lua.
+> **Prérequis**
+>
+> Savoir lancer un script Lua.
 
-## Résultat attendu
+## Sur cette page
 
-Tu peux créer, initialiser, charger et exécuter un modèle sans casse.
+- [Diagramme d'explication](#diagramme-dexplication)
+- [Vue d'ensemble (ordre recommandé - Moderne)](#vue-densemble-ordre-recommandé---moderne)
+- [1) Récupérer une config (et la surcharger)](#1-récupérer-une-config-et-la-surcharger)
+- [2) Create (structure + construction automatique)](#2-create-structure-construction-automatique)
+- [Types de layers gérés (table rapide)](#types-de-layers-gérés-table-rapide)
+- [3) Allouer les paramètres (poids)](#3-allouer-les-paramètres-poids)
+- [4) Initialiser OU charger un checkpoint](#4-initialiser-ou-charger-un-checkpoint)
+- [5) Forward (inputs)](#5-forward-inputs)
+- [6) Backward / optimizer (niveau bas)](#6-backward-optimizer-niveau-bas)
+- [Étapes suivantes](#étapes-suivantes)
+
+## Diagramme d'explication
+
+![Cycle de vie d'un modèle](../graphs/03_model_lifecycle.svg)
 
 
 Cette page explique **l’ordre des appels** et surtout **pourquoi** cet ordre existe.
 
-Si tu suis ce lifecycle, tu évites 90% des “ça crash / ça renvoie vide / ça explose en mémoire”.
+Si vous suivez ce lifecycle, vous évitez 90% des “ça crash / ça renvoie vide / ça explose en mémoire”.
 
 ## Vue d'ensemble (ordre recommandé - Moderne)
 
@@ -43,10 +52,10 @@ assert(cfg, err)
 
 cfg.seq_len = 128
 cfg.vocab_size = 8000
-cfg.dtype = "float16" -- optionnel: contrôle le dtype de stockage au save (runtime reste float32-first)
+cfg.dtype = "float16" -- optionnel: dtype du modèle et des exports compatibles
 ```
 
-Conseil : évite de fabriquer une config “from scratch” : tu risques d’oublier des champs attendus.
+Conseil : évite de fabriquer une config “from scratch” : vous risquez d’oublier des champs attendus.
 
 ## 2) Create (structure + construction automatique)
 
@@ -181,7 +190,7 @@ local ok, total_or_err = Mimir.Model.allocate_params()
 assert(ok ~= false, total_or_err)
 ```
 
-Pourquoi c’est séparé : tu peux construire la structure et choisir ensuite comment/si tu alloues (utile pour debug / estimation mémoire).
+Pourquoi c’est séparé : vous pouvez construire la structure et choisir ensuite comment/si vous allouez (utile pour debug / estimation mémoire).
 
 ## 4) Initialiser OU charger un checkpoint
 
@@ -196,11 +205,9 @@ assert(Mimir.Model.init_weights("xavier", 42))
 ```lua
 local ok, err = Mimir.Serialization.load("checkpoint/my_model.safetensors")
 assert(ok ~= false, err)
-
-Note dtype : si le checkpoint embarque `model_config.dtype`, il est réappliqué automatiquement au modèle au load (utile pour garder des saves cohérents en reprise).
 ```
 
-Note dtype : si le checkpoint embarque `model_config.dtype`, il est réappliqué automatiquement au modèle au load. C’est utile si tu veux reprendre un run puis réécrire un checkpoint sans changer la politique de stockage des tenseurs float.
+Note dtype : si le checkpoint embarque `model_config.dtype`, il est réappliqué automatiquement au modèle au load. C’est utile si vous voulez reprendre un run puis réécrire un checkpoint sans changer la politique de stockage des tenseurs float.
 
 Exemple de reprise minimal :
 
@@ -219,7 +226,7 @@ local out = Mimir.Model.forward({ __input__ = {1, 1, 1, 1} }, false)
 assert(out)
 ```
 
-Conseil : la config doit matcher (ex: `seq_len`, `vocab_size`, dims). Sinon tu auras un mismatch de shapes.
+Conseil : la config doit matcher (ex: `seq_len`, `vocab_size`, dims). Sinon vous aurez un mismatch de shapes.
 
 ## 5) Forward (inputs)
 
@@ -234,12 +241,18 @@ Pourquoi : ça rend les scripts compatibles multi-input (ex: texte+image) sans r
 
 ## 6) Backward / optimizer (niveau bas)
 
-Si tu construis ta boucle à la main :
+Si vous construisez votre boucle à la main :
 
 - `Mimir.Model.zero_grads()`
 - `Mimir.Model.forward(...)`
 - construire `grad_out` (gradient par rapport à la sortie)
 - `Mimir.Model.backward(grad_out)`
-- `Mimir.Model.optimizer_step()`
+- `Mimir.Model.optimizer_step(learning_rate, optimizer?)`
 
 Note : selon les layers, tous les backward ne sont pas au même niveau de maturité (donc commence par des tests unitaires courts).
+
+## Étapes suivantes
+
+- [Page précédente : Concepts essentiels](01-Core-Concepts.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Données / datasets](03-Data.md)

@@ -1,3 +1,4 @@
+#include "training/SpatialRelation.hpp"
 #pragma once
 
 #include <string>
@@ -14,10 +15,13 @@
 #include "Encoder.hpp"
 #include "Autograd.hpp"   // Pour la structure Gradients
 #include "HardwareOpt.hpp" // Optimisations hardware avancées
+#include "SkipConnectionControl.hpp"
+#include "LiveModelConfig.hpp"
 #include "Layers.hpp"      // Pour la structure Layer
 #include "MemoryGuard.hpp" // Pour le strict mode
 #include "DType.hpp"
 #include "Planning/Planner.hpp"
+#include <chrono>
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -33,13 +37,20 @@ enum class LRDecayStrategy {
 
 // Optimizer types
 enum class OptimizerType {
-    SGD,      // Stochastic Gradient Descent
-    ADAM,     // Adam optimizer
-    ADAMW     // Adam with weight decay (L2 regularization)
+    SGD = 0,      // Stochastic Gradient Descent
+    ADAM = 1,     // Adam optimizer
+    ADAMW = 2,    // Adam with decoupled weight decay
+    LION = 3,
+    ADAFACTOR = 4,
+    RADAM = 5,
+    NADAM = 6,
+    RMSPROP = 7,
+    LAMB = 8
 };
 
 // Optimizer (Adam-like) state with LR decay
 struct Optimizer {
+
     OptimizerType type = OptimizerType::ADAM;
 
     // Adam moments are stored per parameter block (stable within a run) using the
@@ -54,10 +65,31 @@ struct Optimizer {
     // The runtime optimizerStep uses mv_by_param_ptr.
     std::vector<float> m;
     std::vector<float> v;
+    // Stable checkpoint mapping; runtime pointers are never persisted.
+    struct StateBlock {
+        std::string name;
+        size_t offset = 0;
+        size_t size = 0;
+    };
+    std::vector<StateBlock> parameter_layout;
+    bool usesFirstMoment() const {
+        return type != OptimizerType::SGD && type != OptimizerType::RMSPROP &&
+            (type != OptimizerType::ADAFACTOR || adafactor_beta1 > 0.0f);
+    }
+    bool usesSecondMoment() const {
+        return type != OptimizerType::SGD && type != OptimizerType::LION;
+    }
     float beta1 = 0.9f;
     float beta2 = 0.999f;
     float eps = 1e-8f;
     float weight_decay = 0.01f;  // Pour AdamW
+    float rmsprop_alpha = 0.99f;
+    float adafactor_clip_threshold = 1.0f;
+    float adafactor_decay_rate = -0.8f;
+    float adafactor_eps2 = 1e-3f;
+    float adafactor_beta1 = 0.0f;
+    bool adafactor_scale_parameter = true;
+    bool adafactor_relative_step = false;
     size_t step = 0;
     
     // LR Decay parameters
@@ -90,9 +122,11 @@ struct Optimizer {
             return initial_lr * (static_cast<float>(step + 1) / static_cast<float>(wu));
         }
         
-        int effective_step = static_cast<int>(step) - warmup_steps;
-        int effective_total = total_steps - warmup_steps;
+        const int safe_warmup = std::max(0, warmup_steps);
+        const int effective_step = std::max(0, static_cast<int>(step) - safe_warmup);
+        int effective_total = total_steps - safe_warmup;
         if (effective_total <= 0) effective_total = 1;
+        const int safe_decay_steps = std::max(1, decay_steps);
         
         switch (decay_strategy) {
             case LRDecayStrategy::NONE:
@@ -107,13 +141,13 @@ struct Optimizer {
             
             case LRDecayStrategy::STEP: {
                 // Step decay: lr *= decay_rate chaque decay_steps
-                int num_decays = effective_step / decay_steps;
+                int num_decays = effective_step / safe_decay_steps;
                 return std::max(min_lr, initial_lr * std::pow(decay_rate, static_cast<float>(num_decays)));
             }
             
             case LRDecayStrategy::EXPONENTIAL: {
                 // Exponential decay: lr = initial_lr * decay_rate^(step / decay_steps)
-                float exponent = static_cast<float>(effective_step) / decay_steps;
+                float exponent = static_cast<float>(effective_step) / static_cast<float>(safe_decay_steps);
                 return std::max(min_lr, initial_lr * std::pow(decay_rate, exponent));
             }
             
@@ -129,9 +163,19 @@ struct Optimizer {
     }
 };
 
+bool optimizerTypeFromString(const std::string& name, OptimizerType& type);
+const char* optimizerTypeName(OptimizerType type);
+void configureOptimizerFromJson(Optimizer& optimizer, const json& config);
+
 // -------------------- Model class --------------------
 class Model {
 public:
+    virtual std::shared_ptr<SkipConnectionControl> skipConnectionControl();
+    std::shared_ptr<LiveModelConfig> runtimeConfiguration() { return runtime_config_; }
+    void publishRuntimeConfiguration(Optimizer* optimizer = nullptr);
+    void applyRuntimeConfiguration();
+    void applyRuntimeOptimizerConfiguration(Optimizer& optimizer);
+
     Model();
     virtual ~Model();
 
@@ -143,9 +187,8 @@ public:
     void setDensity(double d);
     double getDensity() const;
 
-    // Default dtype preference for the model. Note: the current runtime is
-    // still float32-first; this setting is used for planning/serialization
-    // and for raw tensor allocations.
+    // Default storage dtype propagated to every layer. FP16/BF16 accumulate
+    // in FP32; FP64 accumulates in FP64. Integer/bool models are forward-only.
     void setDefaultDType(const std::string& dtype);
     const std::string& getDefaultDType() const { return default_dtype_; }
 
@@ -181,10 +224,10 @@ public:
                                               const std::vector<float>& image_vec,
                                               uint32_t seed,
                                               bool training = false);
-    // Nouveau: forward en entrée tokens int (Embedding consomme des ids)
+    // Forward en entrée tokens int: délègue au chemin float après conversion des ids.
     std::vector<float> forwardPass(const std::vector<int> &input_ids, bool training = true);
 
-    // Variante "view": évite la copie/allocation du std::vector de sortie.
+    // Variante "view": conserve la même délégation au chemin float.
     const std::vector<float>& forwardPassView(const std::vector<int> &input_ids, bool training = true);
 
     // Nouveau: forward multi-entrées (floats + ids) via TensorStore.
@@ -194,23 +237,40 @@ public:
                                         bool training = true);
 
     // Variante "view": évite la copie/allocation du std::vector de sortie.
-    const std::vector<float>& forwardPassNamedView(const std::unordered_map<std::string, std::vector<float>>& float_inputs,
+    virtual const std::vector<float>& forwardPassNamedView(const std::unordered_map<std::string, std::vector<float>>& float_inputs,
                                                    const std::unordered_map<std::string, std::vector<int>>& int_inputs,
                                                    bool training = true);
+
+    // KV cache pour décodage auto-régressif (SelfAttention en inférence).
+    void setKVCacheEnabled(bool enabled);
+    bool isKVCacheEnabled() const { return kv_cache_enabled_; }
+    void clearKVCache();
+    size_t getKVCacheTokenCount() const;
 
     // ========================================================================
     // Viz taps: capture d'images intermédiaires par bloc/layer (best-effort)
     // ========================================================================
     struct VizFrame {
         std::vector<uint8_t> pixels;      // heatmap (ou naturel pour image_like)
-        std::vector<uint8_t> pixels_real; // niveaux de gris naturels (1ch), vide si image_like
+        std::vector<uint8_t> pixels_real; // RGB des canaux, vide si image_like
         int w = 0;
         int h = 0;
         int channels = 1;
         std::string label;
+        int heatmap_kind = 0; // 0: image/scalar, 1: signed mean + energy
+        std::string tensor_info;
+        std::vector<float> tensor_values; // interleaved raw samples, before colour mapping
+        std::vector<size_t> tensor_indices;
+        int tensor_sample_channels = 0;
     };
 
-    void setVizTapsEnabled(bool enabled) { viz_taps_enabled_ = enabled; }
+    void setVizTapsEnabled(bool enabled) {
+        if (viz_taps_enabled_ == enabled) return;
+        viz_taps_enabled_ = enabled;
+        viz_tips_init_done_ = false;
+        viz_tips_custom_enabled_ = false;
+        clearVizTipsRegistry();
+    }
     bool isVizTapsEnabled() const { return viz_taps_enabled_; }
     int getVizTapsMaxSide() const { return viz_taps_max_side_; }
     void setVizTapsLimits(int max_frames, int max_side) {
@@ -220,77 +280,56 @@ public:
     // Permet à des modèles spécialisés d'ajouter des vignettes (recon/dénoise/etc.).
     // Respecte le mode enabled, la déduplication par label, et évince en fin de liste si plein.
     void addVizTapFrame(VizFrame vf);
-    void clearVizTaps() { viz_taps_.clear(); }
-    std::vector<VizFrame> consumeVizTaps() {
-        auto out = std::move(viz_taps_);
+    void clearVizTaps() {
         viz_taps_.clear();
-        return out;
+        viz_tips_init_done_ = false;
+        viz_tips_custom_enabled_ = false;
+        clearVizTipsRegistry();
     }
+    // Retourne le snapshot complet sans vider le cache. Les frames sont mises à
+    // jour en place par label; clearVizTaps() réalise l'effacement explicite.
+    std::vector<VizFrame> consumeVizTaps();
 
-    // Variante trainStep pour forwardPassNamed.
-    // Calcule loss (MSE) puis backward+optimizerStep.
-    struct StepStats {
+    // Hooks de personnalisation des tips Viz (par modèle enfant).
+    // Par défaut: désactivés (retournent false / ne modifient rien).
+    virtual bool InitVizTips();
+    virtual bool UpdateVizTips(const Layer& layer, VizFrame& frame);
+
+    enum class TrainStepMode {
+        Optimize,
+        Accumulate
+    };
+
+    struct TrainStepRequest {
+        std::unordered_map<std::string, const std::vector<float>*> float_inputs;
+        std::unordered_map<std::string, const std::vector<int>*> int_inputs;
+        const std::vector<float>* target = nullptr;
+        const std::vector<float>* loss_weights = nullptr;
+        const std::vector<SpatialRelation>* relations = nullptr;
+        const json* annotation = nullptr; // Optional structured dataset annotation.
+        Optimizer* optimizer = nullptr;
+        float learning_rate = 0.0f;
+        TrainStepMode mode = TrainStepMode::Optimize;
+        float grad_scale = 1.0f;
+        bool capture_prediction = false;
+    };
+
+    struct TrainStepResult {
         float loss = 0.0f;
         float grad_norm = 0.0f;
         float grad_max_abs = 0.0f;
-
-        // Métriques de divergence / cohérence (best-effort) basées sur prediction vs target.
-        float kl_divergence = 0.0f;
-        float wasserstein = 0.0f;
-        float entropy_diff = 0.0f;
-        float moment_mismatch = 0.0f;
-        float spatial_coherence = 0.0f;
-        float temporal_consistency = 0.0f;
+        std::unordered_map<std::string, float> metrics;
+        std::vector<float> prediction;
     };
-    StepStats trainStepNamed(const std::unordered_map<std::string, std::vector<float>>& float_inputs,
-                             const std::unordered_map<std::string, std::vector<int>>& int_inputs,
-                             const std::vector<float>& target,
-                             Optimizer& opt,
-                             float learning_rate);
 
-    // VAE helper: assumes the model output packs [recon(image_dim), mu(latent_dim), logvar(latent_dim)].
-    struct VAEStepStats {
-        float loss = 0.0f;
-        // Reconstruction metric (historical name kept for compatibility).
-        // Depending on modelConfig["recon_loss"], this may be MSE or L1/MAE.
-        float mse = 0.0f;
-        float kl = 0.0f;
-        // Monitoring/marker metrics computed on recon vs target image.
-        float wass = 0.0f;
-        float temp = 0.0f;
-        float align = 0.0f; // loss d'alignement image/texte (si activé)
-        float kl_beta_effective = 0.0f;
-        int latent_dim = 0;
-        float grad_norm = 0.0f;
-        float grad_max_abs = 0.0f;
-        // Distribution diagnostics (compare recon vs input distributions).
-        // entropy_diff  = 0.5*(log σ²_recon − log σ²_input)  >0 = recon plus lisse/floue
-        // moment_mismatch = |skewness_recon − skewness_input|  near-0 = bon alignement
-        float entropy_diff = 0.0f;
-        float moment_mismatch = 0.0f;
-    };
-    VAEStepStats trainStepVAE(const std::vector<float>& x, Optimizer& opt, float learning_rate);
-
-    // VAE texte: output packs [recon(image_dim), mu(latent_dim), logvar(latent_dim), img_proj(proj_dim), text_proj(proj_dim)]
-    // Loss: recon (MSE/L1 via modelConfig["recon_loss"]) + beta*KL + align_weight*(1-cos(img_proj, text_proj))
-    VAEStepStats trainStepVAEText(const std::vector<float>& x,
-                                 const std::vector<int>& text_ids,
-                                 Optimizer& opt,
-                                 float learning_rate);
-
-    // Accumulate gradients for VAE (no zeroGradients, no optimizerStep). Use grad_scale=1/accum_steps.
-    VAEStepStats backwardStepVAE(const std::vector<float>& x, Optimizer& opt, float grad_scale = 1.0f);
-
-    // Accumulate gradients for VAE+text (no zeroGradients, no optimizerStep). Use grad_scale=1/accum_steps.
-    VAEStepStats backwardStepVAEText(const std::vector<float>& x,
-                                     const std::vector<int>& text_ids,
-                                     Optimizer& opt,
-                                     float grad_scale = 1.0f);
+    // Optional high-level training hook. Models without a training contract return nullopt.
+    virtual std::optional<TrainStepResult> trainStep(const TrainStepRequest& request);
     Gradients backwardPass(const std::vector<float> &loss_gradient);
     // Gradient d'entrée capturé au dernier backward (si l'architecture route "__input__")
     bool hasLastInputGradient() const { return has_last_input_gradient_; }
     const std::vector<float>& getLastInputGradient() const { return last_input_gradient_; }
     void zeroGradients();  // Réinitialise tous les gradients à zéro
+    void releaseTrainingWorkingSet(size_t completed_step);
     Gradients getGradients() const;  // Récupère les gradients actuels
     float computeLoss(const std::vector<float> &prediction, const std::vector<float> &target, const std::string &loss_type = "mse");
     std::vector<float> computeLossGradient(const std::vector<float> &prediction, const std::vector<float> &target, const std::string &loss_type = "mse");
@@ -320,6 +359,8 @@ public:
 
         // Optional training state (for checkpoint/debug)
         void setSerializedOptimizer(Optimizer opt);
+        Optimizer optimizerSnapshot(const Optimizer& opt) const;
+        void restoreOptimizerState(Optimizer& opt) const;
         const Optimizer* getSerializedOptimizer() const { return serialized_optimizer_ ? &(*serialized_optimizer_) : nullptr; }
         Optimizer* getMutableSerializedOptimizer() { return serialized_optimizer_ ? &(*serialized_optimizer_) : nullptr; }
         void clearSerializedOptimizer() { serialized_optimizer_.reset(); }
@@ -340,9 +381,9 @@ public:
     const std::vector<Layer>& getLayers() const { return layers; }
     std::vector<Layer>& getMutableLayers() { return layers; }
     bool getHasEncoder() const { return hasEncoder; }
-    // Invariant framework: tous les modèles doivent avoir un encoder.
-    // On autorise uniquement l'activation explicite; ignorer les tentatives de désactivation.
-    void setHasEncoder(bool val) { if (val) hasEncoder = true; }
+    bool getHasTokenizer() const { return hasTokenizer; }
+    void setHasTokenizer(bool val) { hasTokenizer = val; }
+    void setHasEncoder(bool val) { hasEncoder = val; }
     const std::string& getModelName() const { return model_name; }
     void setModelName(const std::string& name) { model_name = name; }
 
@@ -391,82 +432,8 @@ public:
     void shutdownComputeEngine();
     
     // =============================
-    // Layer Operations (Hardware/Software Dispatch)
-    // =============================
-    
-    // Structure pour paramètres de layer
-    struct LayerParams {
-        std::vector<float> weights;
-        std::vector<float> bias;
-        int in_features = 0;
-        int out_features = 0;
-        int kernel_size = 3;
-        int stride = 1;
-        int padding = 0;
-        int dilation = 1;
-        int groups = 1;
-        bool use_hardware = true;  // Dynamic dispatch
-    };
-    
-    // Convolution 2D avec dispatch hardware/software
-    static void computeConv2D(const std::vector<float>& input, std::vector<float>& output,
-                             const LayerParams& params, int in_h, int in_w, int in_c, int out_c,
-                             bool use_hardware = true);
-    
-    // Linear/Dense avec dispatch
-    static void computeLinear(const std::vector<float>& input, std::vector<float>& output,
-                             const LayerParams& params, bool use_hardware = true);
-    
-    // Pooling avec dispatch
-    static void computeMaxPool2D(const std::vector<float>& input, std::vector<float>& output,
-                                int in_h, int in_w, int channels, int kernel_size, int stride,
-                                bool use_hardware = true);
-    
-    static void computeAvgPool2D(const std::vector<float>& input, std::vector<float>& output,
-                                int in_h, int in_w, int channels, int kernel_size, int stride,
-                                bool use_hardware = true);
-    
-    // Activation avec dispatch
-    static void computeActivation(std::vector<float>& data, const std::string& activation_type,
-                                 float param = 0.0f, bool use_hardware = true);
-    
-    // Batch Normalization avec dispatch
-    static void computeBatchNorm(std::vector<float>& data, const std::vector<float>& gamma,
-                                const std::vector<float>& beta, const std::vector<float>& running_mean,
-                                const std::vector<float>& running_var, int batch_size, int channels,
-                                int spatial_size, float eps = 1e-5f, bool training = false,
-                                bool use_hardware = true);
-    
-    // Layer Normalization avec dispatch
-    static void computeLayerNorm(std::vector<float>& data, const std::vector<float>& gamma,
-                                const std::vector<float>& beta, int normalized_size,
-                                float eps = 1e-5f, bool use_hardware = true);
-    
-    // Transpose Convolution avec dispatch
-    static void computeConvTranspose2D(const std::vector<float>& input, std::vector<float>& output,
-                                      const LayerParams& params, int in_h, int in_w, int in_c, int out_c,
-                                      bool use_hardware = true);
-    
-    // Attention mechanism (pour transformers)
-    static void computeAttention(const std::vector<float>& query, const std::vector<float>& key,
-                                const std::vector<float>& value, std::vector<float>& output,
-                                int seq_len, int d_model, int num_heads, bool use_hardware = true);
-    
-    // =============================
     // Branch Operations (pour résiduals, skip connections, etc.)
     // =============================
-    
-    // Calcul des opérations de branche avec dispatch automatique
-    static void computeBranchMerge(const std::vector<float>& branch1, 
-                                   const std::vector<float>& branch2,
-                                   std::vector<float>& output,
-                                   MergeOperation merge_op,
-                                   bool use_hardware = true);
-    
-    // Split d'un tensor en plusieurs branches
-    static void computeBranchSplit(const std::vector<float>& input,
-                                   std::vector<std::vector<float>>& outputs,
-                                   const std::vector<int>& split_sizes);
     
     // Détection et exécution automatique des branches pendant forward/backward
     void detectAndSetupBranches();
@@ -479,9 +446,8 @@ public:
                               const std::vector<float>& grad_output,
                               std::vector<std::vector<float>>& layer_gradients);
     
-    // Configuration globale hardware
-    static inline bool global_use_hardware = true;
-    static void setHardwareAcceleration(bool enable) { global_use_hardware = enable; }
+    static void setFrameworkLogsSuppressed(bool enable);
+    static bool frameworkLogsSuppressed();
 
     // Configuration du modèle (pour dimensionnement dynamique des layers)
     json modelConfig;
@@ -492,95 +458,6 @@ public:
     // Dernier gradient d'entrée (debug/usage avancé)
     std::vector<float> last_input_gradient_;
     bool has_last_input_gradient_ = false;
-
-    // Aux models used by some training steps (perceptual/adversarial).
-    // Stored here to avoid rebuild/alloc each step.
-    std::shared_ptr<Model> aux_perceptual_;
-    std::shared_ptr<Model> aux_discriminator_;
-    Optimizer aux_discriminator_opt_{};
-    bool aux_discriminator_opt_inited_ = false;
-
-    static void conv2d_same(const std::vector<float> &in, std::vector<float> &out, int W, int H, const std::vector<float> &kernel, int ksize);
-
-    static inline void add_inplace(std::vector<float> &a, const std::vector<float> &b)
-    {
-        const size_t n = std::min(a.size(), b.size());
-        for (size_t i = 0; i < n; ++i)
-            a[i] += b[i];
-    }
-
-    static inline void relu_inplace(std::vector<float> &x)
-    {
-        for (auto &v : x)
-            if (v < 0.0f)
-                v = 0.0f;
-    }
-
-    static inline void leaky_relu_inplace(std::vector<float> &x, float slope = 0.01f)
-    {
-        for (auto &v : x)
-            if (v < 0.0f)
-                v *= slope;
-    }
-
-    static inline void tanh_inplace(std::vector<float> &x)
-    {
-        for (auto &v : x)
-            v = std::tanh(v);
-    }
-
-    static inline void elu_inplace(std::vector<float> &x, float alpha = 1.0f)
-    {
-        for (auto &v : x)
-            v = (v >= 0.0f) ? v : alpha * (std::exp(v) - 1.0f);
-    }
-
-    // Sigmoid « image » (centre 128, échelle 32 -> [0..255])
-    static inline void sigmoid_image_inplace(std::vector<float> &x)
-    {
-        for (auto &v : x)
-        {
-            float z = (v - 128.0f) / 32.0f;
-            v = 255.0f * sigmoidf(z);
-        }
-    }
-
-    // Softmax in-place (stable) sur un petit vecteur
-    static inline void softmax_inplace(std::vector<float> &x)
-    {
-        if (x.empty())
-            return;
-        float m = *std::max_element(x.begin(), x.end());
-        float s = 0.f;
-        for (auto &v : x)
-        {
-            v = std::exp(v - m);
-            s += v;
-        }
-        for (auto &v : x)
-            v /= s;
-    }
-
-    // BatchNorm « globale » : (x-mean)/std * gamma + beta
-    static inline void batchnorm_global_inplace(std::vector<float> &x, float gamma, float beta, float eps = 1e-5f)
-    {
-        if (x.empty())
-            return;
-        double mean = 0.0;
-        for (float v : x)
-            mean += v;
-        mean /= double(x.size());
-        double var = 0.0;
-        for (float v : x)
-        {
-            double d = v - mean;
-            var += d * d;
-        }
-        var = var / double(x.size());
-        float inv_std = 1.0f / std::sqrt(float(var) + eps);
-        for (auto &v : x)
-            v = gamma * ((v - float(mean)) * inv_std) + beta;
-    }
 
     // Chaque layer a son propre bloc de poids (weight_block)
     std::vector<tensor> layer_weight_blocks;  // 1 tensor = tous les poids d'un layer
@@ -611,6 +488,7 @@ public:
 
         std::vector<std::vector<float>> activations;
         std::vector<float> final_output;
+        bool skip_connections_enabled = true;
         bool is_valid = false;
         
         void clear() {
@@ -626,6 +504,9 @@ public:
         }
     };
     ForwardState forward_state;
+    std::shared_ptr<SkipConnectionControl> skip_control_ = std::make_shared<SkipConnectionControl>();
+    bool skip_control_initialized_ = false;
+    std::shared_ptr<LiveModelConfig> runtime_config_ = std::make_shared<LiveModelConfig>();
     
     // ========================================================================
     // TENSOR STORE (Multi-input/Branch Support)
@@ -633,6 +514,9 @@ public:
     
     // TensorStore : stockage nommé des tensors pour routing
     std::unordered_map<std::string, std::vector<float>> tensor_store;
+    // Authoritative typed representation. The float store above is a
+    // compatibility compute view for kernels not migrated to TypedTensor yet.
+    std::unordered_map<std::string, Mimir::TypedTensor> typed_tensor_store;
     // Nouveau: TensorStore d'IDs (int) pour layers type Embedding
     std::unordered_map<std::string, std::vector<int>> tensor_store_int;
 
@@ -643,6 +527,8 @@ public:
     // Helper pour récupérer un tensor (avec erreur explicite si manquant)
     const std::vector<float>& getTensor(const std::string& name) const;
     std::vector<float>& getTensorMutable(const std::string& name);
+    const Mimir::TypedTensor& getTypedTensor(const std::string& name) const;
+    bool hasTypedTensor(const std::string& name) const;
 
     const std::vector<int>& getTensorInt(const std::string& name) const;
     std::vector<int>& getTensorIntMutable(const std::string& name);
@@ -674,13 +560,20 @@ public:
     std::vector<float> scratch_embedding_ids_tmp_;
     std::vector<int> scratch_embedding_ids_fallback_;
     std::vector<float> scratch_loss_grad_;
-    std::vector<float> scratch_packed_grad_;
+
+    // Registre des tips Viz (layer.name -> label tip personnalisé)
+    void clearVizTipsRegistry();
+    void registerVizTip(const std::string& layer_name, const std::string& tip_label);
+    bool applyVizTipByLayerName(const Layer& layer, VizFrame& frame) const;
 
     // Viz taps state
     bool viz_taps_enabled_ = false;
     int viz_taps_max_frames_ = 12;
     int viz_taps_max_side_ = 64;
     std::vector<VizFrame> viz_taps_;
+    bool viz_tips_init_done_ = false;
+    bool viz_tips_custom_enabled_ = false;
+    std::unordered_map<std::string, std::string> viz_tips_by_layer_name_;
 
 protected:
     std::vector<Layer> layers;
@@ -710,13 +603,40 @@ protected:
     struct StaticPlanCache {
         bool built = false;
         bool built_for_training = false;
+        bool built_with_fusion = false;
+        bool built_with_buffer_reuse = false;
+        Mimir::Planning::PlannerMode mode = Mimir::Planning::PlannerMode::Legacy;
         bool dumped = false;
+        bool runtime_scan_dumped = false;
+        std::string runtime_scan_signature;
         Mimir::Planning::ExecutionPlan execution;
     };
     StaticPlanCache static_plan_;
+    std::chrono::steady_clock::time_point graph_snapshot_time_{};
 
     // Cache du résultat de graph_uses_mag_mod() — recalculé à chaque push().
     // Évite le scan O(layers*inputs) à chaque forward pass.
     mutable bool uses_mag_mod_cached_ = false;
     mutable bool uses_mag_mod_         = false;
+
+    struct KVCacheEntry {
+        int embed_dim = 0;
+        int num_heads = 0;
+        int head_dim = 0;
+        int seq_len = 0;
+        std::vector<float> key;
+        std::vector<float> value;
+
+        void clear() {
+            embed_dim = 0;
+            num_heads = 0;
+            head_dim = 0;
+            seq_len = 0;
+            key.clear();
+            value.clear();
+        }
+    };
+
+    bool kv_cache_enabled_ = false;
+    std::unordered_map<size_t, KVCacheEntry> kv_cache_by_layer_;
 };

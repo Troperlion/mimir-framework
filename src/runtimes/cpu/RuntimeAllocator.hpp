@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <cstdint>
 #include <cstring>
+#include <sstream>
+#include <iomanip>
 #include "MemoryGuard.hpp"
 #include "DynamicTensorAllocator.hpp"
 #include "tensors.hpp"
@@ -89,7 +91,7 @@ public:
     
     BufferHandle(BufferHandle&& other) noexcept
         : data_(other.data_), size_bytes_(other.size_bytes_),
-          tag_(other.tag_), guard_(other.guard_) {
+          tag_(std::move(other.tag_)), guard_(other.guard_) {
         other.data_ = nullptr;
         other.guard_ = nullptr;
     }
@@ -105,7 +107,7 @@ public:
             
             data_ = other.data_;
             size_bytes_ = other.size_bytes_;
-            tag_ = other.tag_;
+            tag_ = std::move(other.tag_);
             guard_ = other.guard_;
             
             other.data_ = nullptr;
@@ -144,7 +146,7 @@ public:
     TensorHandle& operator=(const TensorHandle&) = delete;
     
     TensorHandle(TensorHandle&& other) noexcept
-        : data_(std::move(other.data_)), descriptor_(other.descriptor_), guard_(other.guard_) {
+        : data_(std::move(other.data_)), descriptor_(std::move(other.descriptor_)), guard_(other.guard_) {
         other.guard_ = nullptr;
     }
     
@@ -153,7 +155,7 @@ public:
             if (guard_ && !data_.empty()) guard_->releaseAllocation(descriptor_.size_bytes);
             
             data_ = std::move(other.data_);
-            descriptor_ = other.descriptor_;
+            descriptor_ = std::move(other.descriptor_);
             guard_ = other.guard_;
             
             other.guard_ = nullptr;
@@ -192,7 +194,7 @@ public:
     RawTensorHandle& operator=(const RawTensorHandle&) = delete;
 
     RawTensorHandle(RawTensorHandle&& other) noexcept
-        : data_(std::move(other.data_)), descriptor_(other.descriptor_), guard_(other.guard_) {
+        : data_(std::move(other.data_)), descriptor_(std::move(other.descriptor_)), guard_(other.guard_) {
         other.guard_ = nullptr;
     }
 
@@ -200,7 +202,7 @@ public:
         if (this != &other) {
             if (guard_ && descriptor_.size_bytes) guard_->releaseAllocation(descriptor_.size_bytes);
             data_ = std::move(other.data_);
-            descriptor_ = other.descriptor_;
+            descriptor_ = std::move(other.descriptor_);
             guard_ = other.guard_;
             other.guard_ = nullptr;
         }
@@ -229,6 +231,14 @@ private:
 
 class RuntimeAllocator {
 public:
+    struct BackendMemoryAttribution {
+        size_t cpu_bytes = 0;
+        size_t vulkan_bytes = 0;
+        size_t cuda_bytes = 0;
+        size_t rocm_bytes = 0;
+        size_t other_bytes = 0;
+    };
+
     RuntimeAllocator(MemoryGuard& guard, size_t max_ram_mb = 4096)
         : memory_guard_(guard), max_ram_bytes_(max_ram_mb * 1024ULL * 1024ULL) {
         // IMPORTANT: ne jamais modifier la limite globale du MemoryGuard ici.
@@ -315,6 +325,17 @@ public:
     
     // Allocation d'un buffer brut (pour calculs temporaires)
     BufferHandle allocate_buffer(size_t bytes, const std::string& tag = "") {
+        return allocate_buffer_impl(bytes, tag, true);
+    }
+
+    // Kernels using this entry point overwrite all live elements before reading.
+    // Keep the zero-initialized public allocation path unchanged.
+    BufferHandle allocate_buffer_uninitialized(size_t bytes, const std::string& tag = "") {
+        return allocate_buffer_impl(bytes, tag, false);
+    }
+
+private:
+    BufferHandle allocate_buffer_impl(size_t bytes, const std::string& tag, bool zero) {
         // Cap local optionnel (sans toucher à la limite MemoryGuard)
         if (max_ram_bytes_ > 0 && (memory_guard_.getCurrentBytes() + bytes) > max_ram_bytes_) {
             throw std::runtime_error(
@@ -335,16 +356,24 @@ public:
             );
         }
         
-        // Allouer via new[] (ou aligned_alloc pour SIMD)
-        float* ptr = new float[bytes / sizeof(float)];
-        std::memset(ptr, 0, bytes);
-        
-        total_allocated_bytes_ += bytes;
-        num_allocations_++;
-        
-        return BufferHandle(ptr, bytes, tag, &memory_guard_);
+        try {
+            // Byte-sized requests also need enough float storage for their tail.
+            auto storage = std::unique_ptr<float[]>(
+                new float[bytes / sizeof(float) + (bytes % sizeof(float) != 0)]);
+            if (zero) std::memset(storage.get(), 0, bytes);
+            BufferHandle result(storage.get(), bytes, tag, &memory_guard_);
+            storage.release();
+            total_allocated_bytes_ += bytes;
+            num_allocations_++;
+            return result;
+        } catch (...) {
+            // Covers both allocation and copying the handle's diagnostic tag.
+            memory_guard_.releaseAllocation(bytes);
+            throw;
+        }
     }
     
+public:
     // Pool de buffers réutilisables (scratchpad)
     // Pour éviter alloc/free répétitifs dans les boucles
     BufferHandle get_scratchpad(size_t min_bytes, const std::string& tag = "scratchpad") {
@@ -361,6 +390,16 @@ public:
         return allocate_buffer(min_bytes, tag);
     }
     
+    BufferHandle get_scratchpad_uninitialized(size_t min_bytes, const std::string& tag = "scratchpad") {
+        auto it = scratchpad_pool_.find(tag);
+        if (it != scratchpad_pool_.end() && it->second.size_bytes() >= min_bytes) {
+            auto buffer = std::move(it->second);
+            scratchpad_pool_.erase(it);
+            return buffer;
+        }
+        return allocate_buffer_uninitialized(min_bytes, tag);
+    }
+
     // Retourner buffer au pool pour réutilisation
     void return_scratchpad(BufferHandle&& buffer) {
         std::string tag = buffer.tag();
@@ -383,6 +422,14 @@ public:
     size_t get_num_allocations() const { return num_allocations_; }
     size_t get_peak_usage() const { return memory_guard_.getPeakBytes(); }
     size_t get_current_usage() const { return memory_guard_.getCurrentBytes(); }
+    size_t get_scratchpad_pool_count() const { return scratchpad_pool_.size(); }
+    size_t get_scratchpad_pool_bytes() const {
+        size_t total = 0;
+        for (const auto& kv : scratchpad_pool_) {
+            total += kv.second.size_bytes();
+        }
+        return total;
+    }
     
     // Vérification post-forward
     bool check_no_leaks() const {
@@ -395,6 +442,85 @@ public:
     void reset_stats() {
         total_allocated_bytes_ = 0;
         num_allocations_ = 0;
+    }
+
+    std::string build_stats_line(const std::string& stage = "runtime",
+                                 const BackendMemoryAttribution* backend_mem = nullptr) const {
+        std::ostringstream oss;
+        const auto dyn = DynamicTensorAllocator::instance().getStatsSnapshot();
+
+        const size_t total_bytes = total_allocated_bytes_;
+        const size_t current_bytes = get_current_usage();
+        const size_t peak_bytes = get_peak_usage();
+        const double total_mb = static_cast<double>(total_bytes) / (1024.0 * 1024.0);
+        const double current_mb = static_cast<double>(current_bytes) / (1024.0 * 1024.0);
+        const double peak_mb = static_cast<double>(peak_bytes) / (1024.0 * 1024.0);
+        const size_t pool_count = get_scratchpad_pool_count();
+        const size_t pool_bytes = get_scratchpad_pool_bytes();
+        const double pool_mb = static_cast<double>(pool_bytes) / (1024.0 * 1024.0);
+        const double dyn_loaded_mb = static_cast<double>(dyn.loaded_bytes) / (1024.0 * 1024.0);
+        const double dyn_reserved_mb = static_cast<double>(dyn.reserved_bytes) / (1024.0 * 1024.0);
+        const size_t guard_allocs = memory_guard_.getAllocationsCount();
+        const size_t guard_deallocs = memory_guard_.getDeallocationsCount();
+        const size_t backend_cpu_bytes = backend_mem ? backend_mem->cpu_bytes : 0;
+        const size_t backend_vulkan_bytes = backend_mem ? backend_mem->vulkan_bytes : 0;
+        const size_t backend_cuda_bytes = backend_mem ? backend_mem->cuda_bytes : 0;
+        const size_t backend_rocm_bytes = backend_mem ? backend_mem->rocm_bytes : 0;
+        const size_t backend_other_bytes = backend_mem ? backend_mem->other_bytes : 0;
+        const double backend_cpu_mb = static_cast<double>(backend_cpu_bytes) / (1024.0 * 1024.0);
+        const double backend_vulkan_mb = static_cast<double>(backend_vulkan_bytes) / (1024.0 * 1024.0);
+        const double backend_cuda_mb = static_cast<double>(backend_cuda_bytes) / (1024.0 * 1024.0);
+        const double backend_rocm_mb = static_cast<double>(backend_rocm_bytes) / (1024.0 * 1024.0);
+        const double backend_other_mb = static_cast<double>(backend_other_bytes) / (1024.0 * 1024.0);
+
+        oss << std::fixed << std::setprecision(2);
+
+        oss << "[allocator] stage=" << stage
+            << " allocations=" << num_allocations_
+            << " total_allocated_mb=" << total_mb
+            << " total_allocated_bytes=" << total_bytes
+            << " current_mb=" << current_mb
+            << " current_bytes=" << current_bytes
+            << " peak_mb=" << peak_mb
+            << " peak_bytes=" << peak_bytes
+            << " scratchpad_pool_count=" << pool_count
+            << " scratchpad_pool_mb=" << pool_mb
+            << " scratchpad_pool_bytes=" << pool_bytes
+            << " guard_allocs=" << guard_allocs
+            << " guard_deallocs=" << guard_deallocs
+            << " dyn_tensors=" << dyn.tensor_count
+            << " dyn_loaded=" << dyn.loaded_count
+            << " dyn_compressed=" << dyn.compressed_count
+            << " dyn_reserved=" << dyn.reserved_count
+            << " dyn_loaded_mb=" << dyn_loaded_mb
+            << " dyn_loaded_bytes=" << dyn.loaded_bytes
+            << " dyn_reserved_mb=" << dyn_reserved_mb
+            << " dyn_reserved_bytes=" << dyn.reserved_bytes
+            << " backend_cpu_mb=" << backend_cpu_mb
+            << " backend_cpu_bytes=" << backend_cpu_bytes
+            << " backend_vulkan_mb=" << backend_vulkan_mb
+            << " backend_vulkan_bytes=" << backend_vulkan_bytes
+            << " backend_cuda_mb=" << backend_cuda_mb
+            << " backend_cuda_bytes=" << backend_cuda_bytes
+            << " backend_rocm_mb=" << backend_rocm_mb
+            << " backend_rocm_bytes=" << backend_rocm_bytes
+            << " backend_other_mb=" << backend_other_mb
+            << " backend_other_bytes=" << backend_other_bytes
+            << " leaks=" << (check_no_leaks() ? 0 : 1);
+        return oss.str();
+    }
+
+    void log_stats(const std::string& stage = "runtime",
+                   bool verbose = false,
+                   const BackendMemoryAttribution* backend_mem = nullptr) const {
+        std::cerr << build_stats_line(stage, backend_mem) << std::endl;
+        if (!verbose) return;
+
+        for (const auto& kv : scratchpad_pool_) {
+            std::cerr << "[allocator] scratchpad tag='" << kv.first
+                      << "' size_mb=" << (kv.second.size_bytes() / (1024ULL * 1024ULL))
+                      << std::endl;
+        }
     }
     
     // Vidage du pool (fin de batch)

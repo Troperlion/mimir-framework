@@ -1,4 +1,5 @@
 {
+  "$schema": "./conf.schema.json",
   "description": "Exemple de config pour --conf: charge une config et exécute des scripts Lua",
   
   "lua": {

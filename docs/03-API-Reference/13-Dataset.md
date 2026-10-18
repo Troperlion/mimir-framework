@@ -1,20 +1,12 @@
-# API : `Mimir.Dataset`
-
-## Pour qui
-
-Développeur et utilisateur intermédiaire/avancé.
-
-## Objectif
+# `Mimir.Dataset`
 
 Trouver rapidement le contrat API réel et les paramètres utilisables.
 
-## Avant de commencer
+**Public concerné :** Développeur et utilisateur intermédiaire/avancé.
 
-Connaître les commandes de base de Mímir.
-
-## Résultat attendu
-
-Tu peux appeler l'API sans ambiguïté de signature ou de comportement.
+> **Prérequis**
+>
+> Connaître les commandes de base de Mímir.
 
 
 Source : `src/scriptings/Lua/luaScripting/LuaScripting.cpp`.
@@ -41,3 +33,9 @@ Notes :
 
 - Nécessite un tokenizer courant.
 - Ce chemin est utile pour certains scripts legacy.
+
+## Étapes suivantes
+
+- [Page précédente : API : `Mimir.Tokenizer`](12-Tokenizer.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : API : mémoire](14-Memory.md)

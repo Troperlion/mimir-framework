@@ -1,0 +1,606 @@
+{
+  "default_dtype": "float32",
+  "encoder": {
+    "architecture": "ViT",
+    "has_encoder": true
+  },
+  "features": [
+    "layer_config",
+    "real_shapes",
+    "layer_io",
+    "extended_layer_types",
+    "framework_state",
+    "checksums"
+  ],
+  "format": "mimir_debug_dump",
+  "format_version": "1.3.0",
+  "framework_state": {
+    "memory": {
+      "advanced_ram_manager": {
+        "allocations_blocked": false,
+        "current_bytes": 0,
+        "current_mb": 0.0,
+        "freeze_mode": false,
+        "peak_bytes": 0,
+        "peak_mb": 0.0,
+        "usage_percent": 0.0
+      },
+      "dynamic_tensor_allocator": {
+        "loaded_count": 5,
+        "tensor_count": 5
+      },
+      "memory_guard": {
+        "allocations_blocked": false,
+        "current_bytes": 102294528,
+        "current_mb": 97.5556640625,
+        "freeze_mode": false,
+        "limit_bytes": 10737418240,
+        "limit_mb": 10240.0,
+        "peak_bytes": 102294528,
+        "peak_mb": 97.5556640625,
+        "usage_percent": 0.9526920318603516
+      }
+    },
+    "model": {
+      "default_dtype": "float32",
+      "has_encoder": true,
+      "image_height": 64,
+      "image_width": 64,
+      "model_config": {
+        "hidden_dim": 1024,
+        "image_c": 3,
+        "image_h": 64,
+        "image_w": 64,
+        "latent_dim": 128,
+        "type": "vae"
+      },
+      "model_name": "VAEModel",
+      "num_layers": 11,
+      "parameters_frozen": false,
+      "tokenizer_vocab_size": 47,
+      "total_params": 25573632
+    },
+    "registry": {
+      "supported_layer_count": 70,
+      "supported_layer_types": [
+        "Conv2d",
+        "ConvTranspose2d",
+        "Conv1d",
+        "DepthwiseConv2d",
+        "Linear",
+        "Bilinear",
+        "Embedding",
+        "EmbeddingBag",
+        "BatchNorm2d",
+        "BatchNorm1d",
+        "LayerNorm",
+        "GroupNorm",
+        "InstanceNorm2d",
+        "RMSNorm",
+        "ReLU",
+        "LeakyReLU",
+        "GELU",
+        "GEGLU",
+        "SiLU",
+        "Tanh",
+        "Sigmoid",
+        "Softmax",
+        "LogSoftmax",
+        "Softplus",
+        "Mish",
+        "HardSigmoid",
+        "HardSwish",
+        "MaxPool2d",
+        "AvgPool2d",
+        "AdaptiveAvgPool2d",
+        "GlobalAvgPool2d",
+        "MaxPool1d",
+        "AvgPool1d",
+        "TokenMeanPool",
+        "Dropout",
+        "Dropout2d",
+        "AlphaDropout",
+        "Flatten",
+        "Reshape",
+        "Transpose",
+        "Permute",
+        "Squeeze",
+        "Unsqueeze",
+        "View",
+        "Add",
+        "Subtract",
+        "Multiply",
+        "Divide",
+        "Concat",
+        "Split",
+        "Chunk",
+        "Stack",
+        "MatMul",
+        "BatchMatMul",
+        "SelfAttention",
+        "MultiHeadAttention",
+        "CrossAttention",
+        "UpsampleNearest",
+        "UpsampleBilinear",
+        "UpsampleBicubic",
+        "PixelShuffle",
+        "LSTM",
+        "GRU",
+        "RNN",
+        "ZeroPad2d",
+        "ReflectionPad2d",
+        "ReplicationPad2d",
+        "Identity",
+        "Constant",
+        "Lambda"
+      ]
+    },
+    "runtime": {
+      "backends": {
+        "cpu": {
+          "available": true,
+          "compiled": true,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CPU",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "cuda": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CUDA",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "opencl": {
+          "available": false,
+          "compiled": true
+        },
+        "rocm": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "ROCM",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "vulkan": {
+          "available": true,
+          "compiled": true
+        }
+      },
+      "cpu_features": {
+        "avx2": true,
+        "bmi2": true,
+        "f16c": true,
+        "fma": true
+      },
+      "environment_overrides": {},
+      "framework_logs_suppressed": false
+    },
+    "snapshot_timestamp": 1783546796,
+    "snapshot_version": "1.0.0"
+  },
+  "git": {
+    "branch": "unknown",
+    "commit": "unknown"
+  },
+  "layers": [
+    {
+      "index": 0,
+      "inputs": [
+        "__input__"
+      ],
+      "name": "vae/raw_in",
+      "output": "vae/in",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Identity"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 12288,
+        "out_features": 1024
+      },
+      "index": 1,
+      "inputs": [
+        "vae/in"
+      ],
+      "name": "vae/enc_fc1",
+      "output": "vae/enc_h",
+      "params_count": 12583936,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae/enc_fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1024,
+            12288
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 12582912,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 2,
+      "inputs": [
+        "vae/enc_h"
+      ],
+      "name": "vae/enc_act1",
+      "output": "vae/enc_h_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 1024,
+        "out_features": 128
+      },
+      "index": 3,
+      "inputs": [
+        "vae/enc_h_act"
+      ],
+      "name": "vae/mu",
+      "output": "vae/mu",
+      "params_count": 131200,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae/mu.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            1024
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 131072,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 1024,
+        "out_features": 128
+      },
+      "index": 4,
+      "inputs": [
+        "vae/enc_h_act"
+      ],
+      "name": "vae/logvar",
+      "output": "vae/logvar",
+      "params_count": 131200,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae/logvar.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            1024
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 131072,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 5,
+      "inputs": [
+        "vae/mu"
+      ],
+      "name": "vae/latent_act",
+      "output": "vae/z",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Identity"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 128,
+        "out_features": 1024
+      },
+      "index": 6,
+      "inputs": [
+        "vae/z"
+      ],
+      "name": "vae/dec_fc1",
+      "output": "vae/dec_h",
+      "params_count": 132096,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae/dec_fc1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1024,
+            128
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 131072,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 7,
+      "inputs": [
+        "vae/dec_h"
+      ],
+      "name": "vae/dec_act1",
+      "output": "vae/dec_h_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GELU"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 1024,
+        "out_features": 12288
+      },
+      "index": 8,
+      "inputs": [
+        "vae/dec_h_act"
+      ],
+      "name": "vae/recon",
+      "output": "vae/recon_pre",
+      "params_count": 12595200,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae/recon.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            12288,
+            1024
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 12582912,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 9,
+      "inputs": [
+        "vae/recon_pre"
+      ],
+      "name": "vae/recon_tanh",
+      "output": "vae/recon",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Tanh"
+    },
+    {
+      "config": {
+        "concat_axis": 0
+      },
+      "index": 10,
+      "inputs": [
+        "vae/recon",
+        "vae/mu",
+        "vae/logvar"
+      ],
+      "name": "vae/out_concat",
+      "output": "x",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Concat"
+    }
+  ],
+  "model_config": {
+    "dtype": "float32",
+    "hidden_dim": 1024,
+    "image_c": 3,
+    "image_h": 64,
+    "image_w": 64,
+    "latent_dim": 128,
+    "type": "vae"
+  },
+  "model_name": "VAEModel",
+  "num_layers": 11,
+  "timestamp": 1783546796,
+  "tokenizer": {
+    "has_vocab": true,
+    "vocab_size": 47
+  },
+  "total_params": 25573632,
+  "default_params": {
+    "hidden_dim": 1024,
+    "image_c": 3,
+    "image_h": 64,
+    "image_w": 64,
+    "latent_dim": 128
+  }
+}

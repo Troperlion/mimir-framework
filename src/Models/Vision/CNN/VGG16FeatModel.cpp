@@ -1,10 +1,26 @@
 #include "VGG16FeatModel.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <stdexcept>
 
 static inline int conv_out(int in, int k, int s, int p) {
     return (in + 2 * p - k) / s + 1;
+}
+
+static std::string canonical_enc_norm(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if (value == "groupnorm" || value == "group_norm" || value == "gn") {
+        return "groupnorm";
+    }
+    if (value == "lineargroup" || value == "linear_group" ||
+        value == "layernorm" || value == "ln") {
+        return "lineargroup";
+    }
+    throw std::invalid_argument(
+        "vgg16_feat.enc_norm must be 'groupnorm' or 'lineargroup' (got '" + value + "')");
 }
 
 VGG16FeatModel::VGG16FeatModel() {
@@ -26,6 +42,8 @@ void VGG16FeatModel::buildInto(Model& model, const Config& cfg) {
     const int H = std::max(1, cfg.image_h);
     const int C = std::max(1, cfg.image_c);
     const int base = std::max(4, cfg.base_channels);
+    const std::string enc_norm = canonical_enc_norm(cfg.enc_norm);
+    const int max_gn_groups = std::max(1, cfg.enc_gn_groups);
 
     const int image_dim = W * H * C;
     model.modelConfig["task"] = "perceptual_features";
@@ -33,6 +51,8 @@ void VGG16FeatModel::buildInto(Model& model, const Config& cfg) {
     model.modelConfig["image_h"] = H;
     model.modelConfig["image_c"] = C;
     model.modelConfig["base_channels"] = base;
+    model.modelConfig["enc_norm"] = enc_norm;
+    model.modelConfig["enc_gn_groups"] = max_gn_groups;
     model.modelConfig["input_dim"] = image_dim;
 
     auto sat_mul = [](size_t a, size_t b) -> size_t {
@@ -89,37 +109,45 @@ void VGG16FeatModel::buildInto(Model& model, const Config& cfg) {
             L->use_bias = false;
         }
 
-        // --- LayerNorm (normalisation de toute la carte d'activation, sans affine) ---
-        // But: borner l'échelle des activations entre chaque conv pour empêcher
-        // l'explosion de gradient (cause de la divergence d'un VGG sans normalisation).
-        //
-        // Choix techniques (contraints par le moteur):
-        //   * GroupNorm   -> pas de backward implémenté  => inutilisable.
-        //   * BatchNorm2d -> backward bugué (dims figées) => inutilisable.
-        //   * MaxPool2d   -> backward bugué (paires 1D)   => downsampling gardé en conv s2.
-        //   * LayerNorm   -> forward+backward corrects/cohérents => RETENU.
-        //
-        // On normalise sur l'ensemble C*H*W (groups=1, affine=false): cela retire
-        // seulement la composante continue + l'échelle globale, en préservant les
-        // magnitudes relatives par canal (indispensable car la sortie est un GAP
-        // par canal régressé vers des moyennes de patchs).
-        const std::string ln = name + "/ln";
-        model.push(ln, "LayerNorm", 0);
-        if (auto* N = model.getLayerByName(ln)) {
-            N->inputs = {out};
-            N->output = out + "_ln";
-            N->in_channels = out_c;
-            N->input_height = out_h;
-            N->input_width = out_w;
-            N->in_features = std::max(1, out_c * out_h * out_w); // groups = 1 (carte entière)
-            N->affine = false;
-            N->use_bias = false;
+        std::string normalized;
+        if (enc_norm == "groupnorm") {
+            int groups = std::min(max_gn_groups, out_c);
+            while (groups > 1 && out_c % groups != 0) --groups;
+            const std::string gn = name + "/gn";
+            model.push(gn, "GroupNorm", static_cast<size_t>(out_c) * 2ULL);
+            if (auto* N = model.getLayerByName(gn)) {
+                N->inputs = {out};
+                N->output = out + "_gn";
+                N->in_channels = out_c;
+                N->input_height = out_h;
+                N->input_width = out_w;
+                N->num_groups = groups;
+                N->eps = 1e-5f;
+                N->affine = true;
+                N->use_bias = true;
+            }
+            normalized = out + "_gn";
+        } else {
+            // Normalisation historique sur toute la carte C*H*W, sans affine.
+            const std::string ln = name + "/ln";
+            model.push(ln, "LayerNorm", 0);
+            if (auto* N = model.getLayerByName(ln)) {
+                N->inputs = {out};
+                N->output = out + "_ln";
+                N->in_channels = out_c;
+                N->input_height = out_h;
+                N->input_width = out_w;
+                N->in_features = std::max(1, out_c * out_h * out_w);
+                N->affine = false;
+                N->use_bias = false;
+            }
+            normalized = out + "_ln";
         }
 
         // --- ReLU ---
         model.push(name + "/act", "ReLU", 0);
         if (auto* A = model.getLayerByName(name + "/act")) {
-            A->inputs = {out + "_ln"};
+            A->inputs = {normalized};
             A->output = out + "_act";
         }
         return out + "_act";

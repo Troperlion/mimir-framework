@@ -1,4 +1,7 @@
+#include "runtimes/fpga/FpgaIo.hpp"
 #include "LuaScripting.hpp"
+#include "VizTextPayload.hpp"
+#include "training/TagAnnotation.hpp"
 #include "Models/Registry/ModelArchitectures.hpp"
 #include "Serialization/Serialization.hpp"
 #include "Serialization/DebugJsonDump.hpp"
@@ -7,7 +10,6 @@
 #include "MemoryGuard.hpp"
 #include "DynamicTensorAllocator.hpp"
 #include "AsyncMonitor.hpp"
-#include "Models/Diffusion/PonyXLDDPMModel.hpp"
 #include "Helpers.hpp"
 #include <fstream>
 #include <sstream>
@@ -363,6 +365,7 @@ int LuaScripting::lua_getDataset(lua_State* L) {
     auto& ctx = LuaContext::getInstance();
     
     int index = luaL_checkinteger(L, 1);
+    const bool load_image = lua_gettop(L) < 2 || lua_toboolean(L, 2);
     
     if (ctx.currentDataset.empty()) {
         lua_pushnil(L);
@@ -391,6 +394,10 @@ int LuaScripting::lua_getDataset(lua_State* L) {
             lua_pushstring(L, item.image_file.c_str());
             lua_setfield(L, -2, "image_file");
         }
+        if (!item.mask_file.empty()) {
+            lua_pushstring(L, item.mask_file.c_str());
+            lua_setfield(L, -2, "mask_file");
+        }
         if (!item.audio_file.empty()) {
             lua_pushstring(L, item.audio_file.c_str());
             lua_setfield(L, -2, "audio_file");
@@ -412,18 +419,38 @@ int LuaScripting::lua_getDataset(lua_State* L) {
         }
         
         // Charger et ajouter le contenu texte si présent
-        if (!item.text_file.empty() && !item.text.has_value()) {
-            item.loadText();
+        if ((!item.text_file.empty() || !item.text_inline.empty()) && !item.text.has_value()) {
+            if (!item.loadText() && !item.annotation_file.empty()) {
+                throw std::runtime_error(item.annotation_error.empty() ? "Cannot load dataset annotation (RAM limit?)" : item.annotation_error);
+            }
         }
-        if (!item.text_file.empty() && item.text.has_value()) {
+        if (item.text.has_value()) {
             lua_pushstring(L, item.text.value().c_str());
             lua_setfield(L, -2, "text");
         }
 
+        if (item.text.has_value()) {
+            const auto labels=TagAnnotation::labels(*item.text,item.annotation ? &*item.annotation : nullptr,false);
+            lua_newtable(L);
+            for(size_t i=0;i<labels.size();++i) {
+                lua_pushlstring(L,labels[i].data(),labels[i].size());
+                lua_rawseti(L,-2,static_cast<int>(i+1));
+            }
+            lua_setfield(L,-2,"label_candidates");
+        }
+        if (!item.annotation_file.empty()) {
+            lua_pushstring(L, item.annotation_file.c_str());
+            lua_setfield(L, -2, "annotation_file");
+            if (item.annotation) {
+                jsonToLuaTable(L, *item.annotation);
+                lua_setfield(L, -2, "annotation");
+            }
+        }
+
         // Charger et retourner l'image en bytes RGB u8 (utile pour diffusion).
         if (!item.image_file.empty()) {
-            item.loadImageRGB(target_w, target_h);
-            if (item.img_loaded) {
+            if (load_image) item.loadImageRGB(target_w, target_h);
+            if (load_image && item.img_loaded) {
                 lua_newtable(L);
                 for (size_t i = 0; i < item.img.size(); ++i) {
                     lua_pushinteger(L, (lua_Integer)item.img[i]);
@@ -438,6 +465,52 @@ int LuaScripting::lua_getDataset(lua_State* L) {
             lua_setfield(L, -2, "height");
             lua_pushinteger(L, item.img_c > 0 ? item.img_c : 3);
             lua_setfield(L, -2, "channels");
+
+            if (load_image && item.img_loaded) {
+                const size_t frame_count = item.animationFrameCount();
+                lua_pushboolean(L, item.isAnimatedImage());
+                lua_setfield(L, -2, "is_animated");
+                lua_pushinteger(L, static_cast<lua_Integer>(frame_count));
+                lua_setfield(L, -2, "frame_count");
+                lua_pushinteger(L, item.animation_loop_count);
+                lua_setfield(L, -2, "loop_count");
+
+                if (item.isAnimatedImage()) {
+                    lua_newtable(L);
+                    for (size_t i = 0; i < item.animation_frame_delays_ms.size(); ++i) {
+                        lua_pushinteger(L, item.animation_frame_delays_ms[i]);
+                        lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
+                    }
+                    lua_setfield(L, -2, "frame_delays_ms");
+
+                    const size_t frame_size = static_cast<size_t>(item.w) *
+                                              static_cast<size_t>(item.h) *
+                                              static_cast<size_t>(item.img_c);
+                    lua_newtable(L);
+                    for (size_t frame = 0; frame < frame_count; ++frame) {
+                        lua_newtable(L);
+                        const size_t offset = frame * frame_size;
+                        for (size_t i = 0; i < frame_size; ++i) {
+                            lua_pushinteger(L, static_cast<lua_Integer>(item.animation_frames[offset + i]));
+                            lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
+                        }
+                        lua_rawseti(L, -2, static_cast<lua_Integer>(frame + 1));
+                    }
+                    lua_setfield(L, -2, "animation_frames");
+                }
+            }
+
+            if (!item.mask_file.empty()) {
+                if (load_image) item.loadMask(target_w, target_h);
+                if (load_image && item.mask_loaded) {
+                    lua_newtable(L);
+                    for (size_t i = 0; i < item.mask.size(); ++i) {
+                        lua_pushinteger(L, (lua_Integer)item.mask[i]);
+                        lua_rawseti(L, -2, (int)i + 1);
+                    }
+                    lua_setfield(L, -2, "mask");
+                }
+            }
         }
         
         return 1;
@@ -446,6 +519,19 @@ int LuaScripting::lua_getDataset(lua_State* L) {
         lua_pushstring(L, e.what());
         return 2;
     }
+}
+
+int LuaScripting::lua_releaseDatasetItem(lua_State* L) {
+    auto& ctx = LuaContext::getInstance();
+    const int index = luaL_checkinteger(L, 1);
+    if (index < 1 || index > static_cast<int>(ctx.currentDataset.size())) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, "Index hors limites");
+        return 2;
+    }
+    ctx.currentDataset[static_cast<size_t>(index - 1)].unload();
+    lua_pushboolean(L, true);
+    return 1;
 }
 
 int LuaScripting::lua_readImageRGBU8(lua_State* L) {
@@ -484,6 +570,7 @@ int LuaScripting::lua_readImageRGBU8(lua_State* L) {
 
         std::vector<uint8_t> dst((size_t)target_w * (size_t)target_h * 3);
         resizeBicubicRGB_SRGBLinear(src.data(), w_img, h_img, dst.data(), target_w, target_h);
+        Mimir::fpgaStageDataset(dst);
 
         lua_newtable(L);
 
@@ -509,735 +596,6 @@ int LuaScripting::lua_readImageRGBU8(lua_State* L) {
     } catch (...) {
         lua_pushnil(L);
         lua_pushstring(L, "unknown error");
-        return 2;
-    }
-}
-
-// ============================================================================
-// PonyXL helpers
-// ============================================================================
-
-int LuaScripting::lua_ponyxlDdpmTrainStep(lua_State* L) {
-    auto& ctx = LuaContext::getInstance();
-
-    static int s_ponyxl_global_step = 0;
-
-    if (!ctx.currentModel) {
-        lua_pushnil(L);
-        lua_pushstring(L, "Aucun modèle créé");
-        return 2;
-    }
-
-    // Args:
-    // 1 prompt (string)
-    // 2 image (table of bytes u8)
-    // 3 w (int)
-    // 4 h (int)
-    // 5 lr (number)
-    // 6 optimizer (string, optional): "adamw" | "adam" | "sgd"
-    // 7 meta (table, optional): {epoch,total_epochs,batch,total_batches,avg_loss,dataset_i}
-    const char* prompt = luaL_checkstring(L, 1);
-    luaL_checktype(L, 2, LUA_TTABLE);
-    const int w = (int)luaL_checkinteger(L, 3);
-    const int h = (int)luaL_checkinteger(L, 4);
-    const float lr = (float)luaL_checknumber(L, 5);
-    const char* opt_type = luaL_optstring(L, 6, "adamw");
-
-    int meta_epoch = 0;
-    int meta_total_epochs = 0;
-    int meta_batch = 0;
-    int meta_total_batches = 0;
-    float meta_avg_loss = 0.0f;
-    int meta_dataset_i = 0;
-
-    const int nargs = lua_gettop(L);
-    if (nargs >= 7 && lua_istable(L, 7)) {
-        lua_getfield(L, 7, "epoch");
-        if (lua_isnumber(L, -1)) meta_epoch = (int)lua_tointeger(L, -1);
-        lua_pop(L, 1);
-
-        lua_getfield(L, 7, "total_epochs");
-        if (lua_isnumber(L, -1)) meta_total_epochs = (int)lua_tointeger(L, -1);
-        lua_pop(L, 1);
-
-        lua_getfield(L, 7, "batch");
-        if (lua_isnumber(L, -1)) meta_batch = (int)lua_tointeger(L, -1);
-        lua_pop(L, 1);
-
-        lua_getfield(L, 7, "total_batches");
-        if (lua_isnumber(L, -1)) meta_total_batches = (int)lua_tointeger(L, -1);
-        lua_pop(L, 1);
-
-        lua_getfield(L, 7, "avg_loss");
-        if (lua_isnumber(L, -1)) meta_avg_loss = (float)lua_tonumber(L, -1);
-        lua_pop(L, 1);
-
-        lua_getfield(L, 7, "dataset_i");
-        if (lua_isnumber(L, -1)) meta_dataset_i = (int)lua_tointeger(L, -1);
-        lua_pop(L, 1);
-    }
-
-    const size_t n = (size_t)lua_rawlen(L, 2);
-    if (n == 0) {
-        lua_pushnil(L);
-        lua_pushstring(L, "Image vide");
-        return 2;
-    }
-
-    std::vector<uint8_t> rgb;
-    rgb.resize(n);
-    for (size_t i = 0; i < n; ++i) {
-        lua_rawgeti(L, 2, (lua_Integer)i + 1);
-        int v = 0;
-        if (lua_isinteger(L, -1)) v = (int)lua_tointeger(L, -1);
-        else if (lua_isnumber(L, -1)) v = (int)lua_tonumber(L, -1);
-        lua_pop(L, 1);
-        v = std::clamp(v, 0, 255);
-        rgb[i] = (uint8_t)v;
-    }
-
-    // Validation stricte: le modèle attend RGB packed (w*h*3)
-    if (w <= 0 || h <= 0) {
-        lua_pushnil(L);
-        lua_pushstring(L, "w/h invalides (doivent être > 0)");
-        return 2;
-    }
-    const size_t expected = (size_t)w * (size_t)h * 3ULL;
-    if (rgb.size() != expected) {
-        const std::string msg = "Taille image invalide: got=" + std::to_string(rgb.size()) +
-                                " expected=" + std::to_string(expected);
-        lua_pushnil(L);
-        lua_pushstring(L, msg.c_str());
-        return 2;
-    }
-
-    try {
-        auto* pony = dynamic_cast<PonyXLDDPMModel*>(ctx.currentModel.get());
-        if (!pony) {
-            lua_pushnil(L);
-            lua_pushstring(L, "Le modèle courant n'est pas un PonyXLDDPMModel (type=ponyxl_ddpm attendu)");
-            return 2;
-        }
-
-        // Optimizer persistant: stocké dans le modèle pour compat avec save/load.
-        if (!ctx.currentModel->getSerializedOptimizer()) {
-            Optimizer opt;
-            opt.initial_lr = lr;
-
-            std::string t = opt_type ? std::string(opt_type) : std::string("adamw");
-            std::transform(t.begin(), t.end(), t.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
-            if (t == "sgd") opt.type = OptimizerType::SGD;
-            else if (t == "adam") opt.type = OptimizerType::ADAM;
-            else opt.type = OptimizerType::ADAMW;
-
-            // Paramètres depuis modelConfig si présents
-            try {
-                if (ctx.modelConfig.contains("beta1")) opt.beta1 = ctx.modelConfig["beta1"].get<float>();
-                if (ctx.modelConfig.contains("beta2")) opt.beta2 = ctx.modelConfig["beta2"].get<float>();
-                if (ctx.modelConfig.contains("epsilon")) opt.eps = ctx.modelConfig["epsilon"].get<float>();
-                if (ctx.modelConfig.contains("weight_decay")) opt.weight_decay = ctx.modelConfig["weight_decay"].get<float>();
-            } catch (...) {
-            }
-
-            ctx.currentModel->setSerializedOptimizer(opt);
-        } else {
-            // S'assurer que lr reflète l'argument
-            if (Optimizer* saved = ctx.currentModel->getMutableSerializedOptimizer()) {
-                saved->initial_lr = lr;
-            }
-        }
-
-        Optimizer* opt = ctx.currentModel->getMutableSerializedOptimizer();
-        if (!opt) {
-            throw std::runtime_error("optimizer state unavailable");
-        }
-
-        // If Viz is active, ensure taps are enabled before running the step so the model
-        // can emit custom previews (noise/denoise, recon, etc.) during the step.
-        const bool viz_active = (ctx.asyncMonitor && ctx.asyncMonitor->getViz() != nullptr);
-        if (viz_active && ctx.currentModel) {
-            if (!ctx.currentModel->isVizTapsEnabled()) {
-                ctx.currentModel->setVizTapsEnabled(true);
-            }
-            // Optional per-model limits from config.json / modelConfig.
-            try {
-                // PonyXL DDPM emits both preview frames (x0/eps/metrics) and per-layer state tiles.
-                // A tiny default like 12 makes the Blocks/Layers panel effectively unusable.
-                int max_frames = 256;
-                int max_side = 64;
-                if (ctx.modelConfig.contains("viz_taps_max_frames")) max_frames = ctx.modelConfig["viz_taps_max_frames"].get<int>();
-                if (ctx.modelConfig.contains("viz_taps_max_side")) max_side = ctx.modelConfig["viz_taps_max_side"].get<int>();
-                ctx.currentModel->setVizTapsLimits(max_frames, max_side);
-            } catch (...) {
-            }
-        }
-
-        const PonyXLDDPMModel::StepStats st = pony->trainStepSdxlLatentDiffusion(prompt, rgb, w, h, *opt, lr);
-
-        // Best-effort: si AsyncMonitor/Viz est actif, pousser l'input et les métriques.
-        if (ctx.asyncMonitor) {
-            s_ponyxl_global_step += 1;
-
-            static std::chrono::steady_clock::time_point s_last_pony_metrics_ts;
-            static bool s_has_last_pony_metrics_ts = false;
-
-            AsyncMonitor::Metrics m;
-            m.epoch = meta_epoch;
-            m.total_epochs = meta_total_epochs;
-            m.batch = (meta_batch > 0) ? meta_batch : s_ponyxl_global_step;
-            m.total_batches = meta_total_batches;
-            m.loss = st.loss;
-            m.avg_loss = (meta_avg_loss > 0.0f) ? meta_avg_loss : st.loss;
-            m.lr = lr;
-            m.mse = st.loss;
-            m.kl = st.kl_divergence;
-            m.wass = st.wasserstein;
-            m.ent = st.entropy_diff;
-            m.mom = st.moment_mismatch;
-            m.spat = st.spatial_coherence;
-            m.temp = st.temporal_consistency;
-            m.timestep = st.timestep;
-            m.grad_norm = st.grad_norm;
-            m.grad_max = st.grad_max_abs;
-            m.kl_beta_effective = st.kl_beta_effective;
-            m.params = ctx.currentModel ? ctx.currentModel->totalParamCount() : 0;
-            m.opt_type = (int)opt->type;
-            m.opt_step = opt->step;
-            m.opt_beta1 = opt->beta1;
-            m.opt_beta2 = opt->beta2;
-            m.opt_eps = opt->eps;
-            m.opt_weight_decay = opt->weight_decay;
-
-            {
-                auto& guard = MemoryGuard::instance();
-                m.memory_mb = guard.getCurrentBytes() / 1024 / 1024;
-            }
-
-            {
-                const auto now = std::chrono::steady_clock::now();
-                if (s_has_last_pony_metrics_ts) {
-                    const auto dt_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_last_pony_metrics_ts).count();
-                    if (dt_ms > 0 && dt_ms < 60LL * 60LL * 1000LL) {
-                        m.batch_time_ms = (int)dt_ms;
-                        m.bps = 1000.0f / (float)m.batch_time_ms;
-                    }
-                }
-                s_last_pony_metrics_ts = now;
-                s_has_last_pony_metrics_ts = true;
-            }
-            ctx.asyncMonitor->updateMetrics(m);
-
-            if (ctx.asyncMonitor->getViz() != nullptr) {
-                const bool viz_resync = [&]() -> bool {
-                    try {
-                        auto viz = ctx.asyncMonitor->getViz();
-                        if (!viz) return false;
-                        return viz->consumeResyncRequested();
-                    } catch (...) {
-                        return false;
-                    }
-                }();
-
-                // Afficher l'input dataset (image + prompt) dans la Viz.
-                std::string label = "ponyxl_ddpm/input/dataset/rgb";
-                if (meta_dataset_i > 0) {
-                    label += "/i=" + std::to_string(meta_dataset_i);
-                }
-                ctx.asyncMonitor->setDatasetSample(
-                    rgb,
-                    w,
-                    h,
-                    3,
-                    label,
-                    std::string(prompt ? prompt : ""),
-                    std::string(),
-                    std::string()
-                );
-
-                // Pousser les viz taps (frames) générés par le modèle pendant la step.
-                // Sans ça, les recon/noise previews ajoutés via Model::addVizTapFrame ne s'affichent jamais.
-                if (ctx.currentModel) {
-                    auto taps = ctx.currentModel->consumeVizTaps();
-                    std::vector<Visualizer::BlockFrame> frames;
-                    frames.reserve(taps.size());
-                    for (auto& f : taps) {
-                        Visualizer::BlockFrame bf;
-                        bf.pixels = std::move(f.pixels);
-                        bf.w = f.w;
-                        bf.h = f.h;
-                        bf.channels = f.channels;
-                        bf.pixels_real = std::move(f.pixels_real);
-                            bf.label = std::move(f.label);
-                        frames.push_back(std::move(bf));
-                    }
-                    // Important UX: si le dataset change mais que le modèle n'a pas émis de taps,
-                    // ne pas conserver les frames précédentes (sinon rendu stale/mélangé).
-                    ctx.asyncMonitor->setLayerBlockImages(frames);
-                }
-
-                // Si l'utilisateur a demandé une resynchronisation (touche R), forcer une preview
-                // de reconstruction (best-effort) afin de rafraîchir la vue avec l'état courant.
-                if (viz_resync) {
-                    try {
-                        // seed/t choisis pour être stables et peu coûteux à interpréter.
-                        const int seed = 12345;
-                        const int ddpm_step = -1;
-                        auto prev = pony->reconstructPreviewSdxlLatentDiffusion(
-                            std::string(prompt ? prompt : ""),
-                            rgb,
-                            w,
-                            h,
-                            256,
-                            seed,
-                            ddpm_step
-                        );
-                        if (!prev.pixels.empty() && prev.w > 0 && prev.h > 0) {
-                            std::string tag = "RESYNC recon";
-                            if (meta_dataset_i > 0) tag += " i=" + std::to_string(meta_dataset_i);
-                            ctx.asyncMonitor->addImage(prev.pixels, prev.w, prev.h, prev.channels, tag);
-                        }
-                    } catch (...) {
-                        // ignore
-                    }
-                }
-            }
-        }
-
-        lua_newtable(L);
-        lua_pushnumber(L, st.loss);
-        lua_setfield(L, -2, "loss");
-        lua_pushnumber(L, st.grad_norm);
-        lua_setfield(L, -2, "grad_norm");
-        lua_pushnumber(L, st.grad_max_abs);
-        lua_setfield(L, -2, "grad_max_abs");
-        lua_pushnumber(L, st.timestep);
-        lua_setfield(L, -2, "timestep");
-        lua_pushnumber(L, st.kl_divergence);
-        lua_setfield(L, -2, "kl_divergence");
-        return 1;
-    } catch (const std::exception& e) {
-        lua_pushnil(L);
-        lua_pushstring(L, e.what());
-        return 2;
-    }
-}
-
-int LuaScripting::lua_ponyxlDdpmValidateStep(lua_State* L) {
-    auto& ctx = LuaContext::getInstance();
-
-    if (!ctx.currentModel) {
-        lua_pushnil(L);
-        lua_pushstring(L, "Aucun modèle créé");
-        return 2;
-    }
-
-    // Args:
-    // 1 prompt (string)
-    // 2 wrong_prompt (string, optional)
-    // 3 image (table of bytes u8)
-    // 4 w (int)
-    // 5 h (int)
-    // 6 seed (int, optional) : graine pour eps (validation déterministe)
-    // 7 ddpm_step (int, optional) : timestep t dans [0..T-1], -1 => T/2
-    const char* prompt = luaL_checkstring(L, 1);
-    const char* wrong_prompt = luaL_optstring(L, 2, "");
-    luaL_checktype(L, 3, LUA_TTABLE);
-    const int w = (int)luaL_checkinteger(L, 4);
-    const int h = (int)luaL_checkinteger(L, 5);
-    const int seed = (int)luaL_optinteger(L, 6, 12345);
-    const int ddpm_step = (int)luaL_optinteger(L, 7, -1);
-
-    const size_t n = (size_t)lua_rawlen(L, 3);
-    if (n == 0) {
-        lua_pushnil(L);
-        lua_pushstring(L, "Image vide");
-        return 2;
-    }
-
-    std::vector<uint8_t> rgb;
-    rgb.resize(n);
-    for (size_t i = 0; i < n; ++i) {
-        lua_rawgeti(L, 3, (lua_Integer)i + 1);
-        int v = 0;
-        if (lua_isinteger(L, -1)) v = (int)lua_tointeger(L, -1);
-        else if (lua_isnumber(L, -1)) v = (int)lua_tonumber(L, -1);
-        lua_pop(L, 1);
-        v = std::clamp(v, 0, 255);
-        rgb[i] = (uint8_t)v;
-    }
-
-    if (w <= 0 || h <= 0) {
-        lua_pushnil(L);
-        lua_pushstring(L, "w/h invalides (doivent être > 0)");
-        return 2;
-    }
-    const size_t expected = (size_t)w * (size_t)h * 3ULL;
-    if (rgb.size() != expected) {
-        const std::string msg = "Taille image invalide: got=" + std::to_string(rgb.size()) +
-                                " expected=" + std::to_string(expected);
-        lua_pushnil(L);
-        lua_pushstring(L, msg.c_str());
-        return 2;
-    }
-
-    try {
-        auto* pony = dynamic_cast<PonyXLDDPMModel*>(ctx.currentModel.get());
-        if (!pony) {
-            lua_pushnil(L);
-            lua_pushstring(L, "Le modèle courant n'est pas un PonyXLDDPMModel (type=ponyxl_ddpm attendu)");
-            return 2;
-        }
-
-        const PonyXLDDPMModel::ValStats st = pony->validateStepSdxlLatentDiffusion(
-            prompt ? std::string(prompt) : std::string(),
-            wrong_prompt ? std::string(wrong_prompt) : std::string(),
-            rgb,
-            w,
-            h,
-            seed,
-            ddpm_step
-        );
-
-        lua_newtable(L);
-        lua_pushnumber(L, (lua_Number)st.eps_mse);
-        lua_setfield(L, -2, "eps_mse");
-        lua_pushnumber(L, (lua_Number)st.x0_mse);
-        lua_setfield(L, -2, "x0_mse");
-        lua_pushnumber(L, (lua_Number)st.img_mse);
-        lua_setfield(L, -2, "img_mse");
-        lua_pushnumber(L, (lua_Number)st.eps_mse_wrong);
-        lua_setfield(L, -2, "eps_mse_wrong");
-        lua_pushnumber(L, (lua_Number)st.assoc_margin);
-        lua_setfield(L, -2, "assoc_margin");
-        lua_pushnumber(L, (lua_Number)st.t_norm);
-        lua_setfield(L, -2, "t_norm");
-        return 1;
-    } catch (const std::exception& e) {
-        lua_pushnil(L);
-        lua_pushstring(L, e.what());
-        return 2;
-    }
-}
-
-int LuaScripting::lua_ponyxlDdpmSetVaeScale(lua_State* L) {
-    auto& ctx = LuaContext::getInstance();
-
-    if (!ctx.currentModel) {
-        lua_pushnil(L);
-        lua_pushstring(L, "Aucun modèle créé");
-        return 2;
-    }
-
-    const float s = (float)luaL_checknumber(L, 1);
-    try {
-        auto* pony = dynamic_cast<PonyXLDDPMModel*>(ctx.currentModel.get());
-        if (!pony) {
-            lua_pushnil(L);
-            lua_pushstring(L, "Modèle courant n'est pas ponyxl_ddpm");
-            return 2;
-        }
-        pony->setVaeScale(s);
-        lua_pushboolean(L, 1);
-        return 1;
-    } catch (const std::exception& e) {
-        lua_pushnil(L);
-        lua_pushstring(L, e.what());
-        return 2;
-    }
-}
-
-int LuaScripting::lua_ponyxlDdpmGetVaeScale(lua_State* L) {
-    auto& ctx = LuaContext::getInstance();
-
-    if (!ctx.currentModel) {
-        lua_pushnil(L);
-        lua_pushstring(L, "Aucun modèle créé");
-        return 2;
-    }
-
-    try {
-        auto* pony = dynamic_cast<PonyXLDDPMModel*>(ctx.currentModel.get());
-        if (!pony) {
-            lua_pushnil(L);
-            lua_pushstring(L, "Modèle courant n'est pas ponyxl_ddpm");
-            return 2;
-        }
-        lua_pushnumber(L, (lua_Number)pony->getConfig().vae_scale);
-        return 1;
-    } catch (const std::exception& e) {
-        lua_pushnil(L);
-        lua_pushstring(L, e.what());
-        return 2;
-    }
-}
-
-int LuaScripting::lua_ponyxlDdpmVaeMuMoments(lua_State* L) {
-    auto& ctx = LuaContext::getInstance();
-
-    if (!ctx.currentModel) {
-        lua_pushnil(L);
-        lua_pushstring(L, "Aucun modèle créé");
-        return 2;
-    }
-
-    // Args:
-    // 1 image (table of bytes u8)
-    // 2 w (int)
-    // 3 h (int)
-    luaL_checktype(L, 1, LUA_TTABLE);
-    const int w = (int)luaL_checkinteger(L, 2);
-    const int h = (int)luaL_checkinteger(L, 3);
-    const size_t nbytes = (size_t)lua_rawlen(L, 1);
-    if (nbytes == 0) {
-        lua_pushnil(L);
-        lua_pushstring(L, "Image vide");
-        return 2;
-    }
-
-    std::vector<uint8_t> rgb;
-    rgb.resize(nbytes);
-    for (size_t i = 0; i < nbytes; ++i) {
-        lua_rawgeti(L, 1, (lua_Integer)(i + 1));
-        const int v = (int)luaL_checkinteger(L, -1);
-        lua_pop(L, 1);
-        rgb[i] = (uint8_t)std::clamp(v, 0, 255);
-    }
-
-    try {
-        auto* pony = dynamic_cast<PonyXLDDPMModel*>(ctx.currentModel.get());
-        if (!pony) {
-            lua_pushnil(L);
-            lua_pushstring(L, "Modèle courant n'est pas ponyxl_ddpm");
-            return 2;
-        }
-
-        double sum = 0.0;
-        double sumsq = 0.0;
-        size_t n = 0;
-        pony->accumulateVaeMuMoments(rgb, w, h, sum, sumsq, n);
-
-        lua_newtable(L);
-        lua_pushnumber(L, (lua_Number)sum);
-        lua_setfield(L, -2, "sum");
-        lua_pushnumber(L, (lua_Number)sumsq);
-        lua_setfield(L, -2, "sumsq");
-        lua_pushinteger(L, (lua_Integer)n);
-        lua_setfield(L, -2, "n");
-        return 1;
-    } catch (const std::exception& e) {
-        lua_pushnil(L);
-        lua_pushstring(L, e.what());
-        return 2;
-    }
-}
-
-int LuaScripting::lua_ponyxlDdpmVizReconstructStep(lua_State* L) {
-    auto& ctx = LuaContext::getInstance();
-
-    if (!ctx.currentModel) {
-        lua_pushnil(L);
-        lua_pushstring(L, "Aucun modèle créé");
-        return 2;
-    }
-    if (!ctx.asyncMonitor || ctx.asyncMonitor->getViz() == nullptr) {
-        lua_pushnil(L);
-        lua_pushstring(L, "Viz non actif (démarrer avec --viz)");
-        return 2;
-    }
-
-    // Args:
-    // 1 prompt (string)
-    // 2 image (table of bytes u8)
-    // 3 w (int)
-    // 4 h (int)
-    // 5 label (string, optional)
-    // 6 max_side (int, optional)
-    // 7 seed (int, optional)
-    // 8 ddpm_step (int, optional)
-    const char* prompt = luaL_checkstring(L, 1);
-    luaL_checktype(L, 2, LUA_TTABLE);
-    const int w = (int)luaL_checkinteger(L, 3);
-    const int h = (int)luaL_checkinteger(L, 4);
-    const char* label = luaL_optstring(L, 5, "VAL recon");
-    const int max_side = (int)luaL_optinteger(L, 6, 256);
-    const int seed = (int)luaL_optinteger(L, 7, 12345);
-    const int ddpm_step = (int)luaL_optinteger(L, 8, -1);
-
-    const size_t n = (size_t)lua_rawlen(L, 2);
-    if (n == 0) {
-        lua_pushnil(L);
-        lua_pushstring(L, "Image vide");
-        return 2;
-    }
-
-    std::vector<uint8_t> rgb;
-    rgb.resize(n);
-    for (size_t i = 0; i < n; ++i) {
-        lua_rawgeti(L, 2, (lua_Integer)i + 1);
-        int v = 0;
-        if (lua_isinteger(L, -1)) v = (int)lua_tointeger(L, -1);
-        else if (lua_isnumber(L, -1)) v = (int)lua_tonumber(L, -1);
-        lua_pop(L, 1);
-        v = std::clamp(v, 0, 255);
-        rgb[i] = (uint8_t)v;
-    }
-
-    if (w <= 0 || h <= 0) {
-        lua_pushnil(L);
-        lua_pushstring(L, "w/h invalides (doivent être > 0)");
-        return 2;
-    }
-    const size_t expected = (size_t)w * (size_t)h * 3ULL;
-    if (rgb.size() != expected) {
-        const std::string msg = "Taille image invalide: got=" + std::to_string(rgb.size()) +
-                                " expected=" + std::to_string(expected);
-        lua_pushnil(L);
-        lua_pushstring(L, msg.c_str());
-        return 2;
-    }
-
-    try {
-        auto* pony = dynamic_cast<PonyXLDDPMModel*>(ctx.currentModel.get());
-        if (!pony) {
-            lua_pushnil(L);
-            lua_pushstring(L, "Le modèle courant n'est pas un PonyXLDDPMModel (type=ponyxl_ddpm attendu)");
-            return 2;
-        }
-
-        const PonyXLDDPMModel::ReconPreview rp = pony->reconstructPreviewSdxlLatentDiffusion(
-            prompt ? std::string(prompt) : std::string(),
-            rgb,
-            w,
-            h,
-            max_side,
-            seed,
-            ddpm_step
-        );
-
-        if (rp.pixels.empty() || rp.w <= 0 || rp.h <= 0) {
-            lua_pushnil(L);
-            lua_pushstring(L, "Reconstruction preview vide");
-            return 2;
-        }
-
-        ctx.asyncMonitor->addImage(rp.pixels, rp.w, rp.h, rp.channels, std::string(label ? label : "VAL recon"));
-        lua_pushboolean(L, true);
-        return 1;
-    } catch (const std::exception& e) {
-        lua_pushnil(L);
-        lua_pushstring(L, e.what());
-        return 2;
-    }
-}
-
-int LuaScripting::lua_ponyxlDdpmText2Img(lua_State* L) {
-    auto& ctx = LuaContext::getInstance();
-
-    if (!ctx.currentModel) {
-        lua_pushnil(L);
-        lua_pushstring(L, "Aucun modèle créé");
-        return 2;
-    }
-
-    // Args:
-    // 1 prompt (string)
-    // 2 seed (int, optional)
-    // 3 sample_steps (int, optional)
-    // 4 guidance_scale (number, optional)
-    // 5 max_side (int, optional)
-    const char* prompt = luaL_checkstring(L, 1);
-    const int seed = (int)luaL_optinteger(L, 2, 12345);
-    const int sample_steps = (int)luaL_optinteger(L, 3, 50);
-    const float guidance_scale = (float)luaL_optnumber(L, 4, 1.0);
-    const int max_side = (int)luaL_optinteger(L, 5, 0);
-
-    try {
-        auto* pony = dynamic_cast<PonyXLDDPMModel*>(ctx.currentModel.get());
-        if (!pony) {
-            lua_pushnil(L);
-            lua_pushstring(L, "Le modèle courant n'est pas un PonyXLDDPMModel (type=ponyxl_ddpm attendu)");
-            return 2;
-        }
-
-        const PonyXLDDPMModel::ReconPreview rp = pony->text2imgSdxlLatentDiffusion(
-            prompt ? std::string(prompt) : std::string(),
-            seed,
-            sample_steps,
-            guidance_scale,
-            max_side
-        );
-
-        if (rp.pixels.empty() || rp.w <= 0 || rp.h <= 0) {
-            lua_pushnil(L);
-            lua_pushstring(L, "text2img a retourné une image vide");
-            return 2;
-        }
-
-        lua_createtable(L, (int)rp.pixels.size(), 0);
-        for (size_t i = 0; i < rp.pixels.size(); ++i) {
-            lua_pushinteger(L, (lua_Integer)rp.pixels[i]);
-            lua_rawseti(L, -2, (lua_Integer)i + 1);
-        }
-        lua_pushinteger(L, (lua_Integer)rp.w);
-        lua_pushinteger(L, (lua_Integer)rp.h);
-        lua_pushinteger(L, (lua_Integer)rp.channels);
-        return 4;
-    } catch (const std::exception& e) {
-        lua_pushnil(L);
-        lua_pushstring(L, e.what());
-        return 2;
-    }
-}
-
-int LuaScripting::lua_ponyxlDdpmText2ImgLatent(lua_State* L) {
-    auto& ctx = LuaContext::getInstance();
-
-    if (!ctx.currentModel) {
-        lua_pushnil(L);
-        lua_pushstring(L, "Aucun modèle créé");
-        return 2;
-    }
-
-    const char* prompt = luaL_checkstring(L, 1);
-    const int seed = (int)luaL_optinteger(L, 2, 12345);
-    const int sample_steps = (int)luaL_optinteger(L, 3, 50);
-    const float guidance_scale = (float)luaL_optnumber(L, 4, 1.0);
-
-    try {
-        auto* pony = dynamic_cast<PonyXLDDPMModel*>(ctx.currentModel.get());
-        if (!pony) {
-            lua_pushnil(L);
-            lua_pushstring(L, "Le modèle courant n'est pas un PonyXLDDPMModel (type=ponyxl_ddpm attendu)");
-            return 2;
-        }
-
-        const PonyXLDDPMModel::ReconPreview rp = pony->text2imgSdxlLatentDiffusion(
-            prompt ? std::string(prompt) : std::string(),
-            seed,
-            sample_steps,
-            guidance_scale,
-            0,
-            false
-        );
-
-        if (rp.latent.empty() || rp.latent_w <= 0 || rp.latent_h <= 0 || rp.latent_c <= 0) {
-            lua_pushnil(L);
-            lua_pushstring(L, "text2img_latent a retourné un latent vide");
-            return 2;
-        }
-
-        lua_createtable(L, (int)rp.latent.size(), 0);
-        for (size_t i = 0; i < rp.latent.size(); ++i) {
-            lua_pushnumber(L, (lua_Number)rp.latent[i]);
-            lua_rawseti(L, -2, (lua_Integer)i + 1);
-        }
-        lua_pushinteger(L, (lua_Integer)rp.latent_w);
-        lua_pushinteger(L, (lua_Integer)rp.latent_h);
-        lua_pushinteger(L, (lua_Integer)rp.latent_c);
-        return 4;
-    } catch (const std::exception& e) {
-        lua_pushnil(L);
-        lua_pushstring(L, e.what());
         return 2;
     }
 }

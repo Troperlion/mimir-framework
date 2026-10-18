@@ -1,0 +1,1159 @@
+{
+  "default_dtype": "float32",
+  "encoder": {
+    "architecture": "ViT",
+    "has_encoder": true
+  },
+  "features": [
+    "layer_config",
+    "real_shapes",
+    "layer_io",
+    "extended_layer_types",
+    "framework_state",
+    "checksums"
+  ],
+  "format": "mimir_debug_dump",
+  "format_version": "1.3.0",
+  "framework_state": {
+    "memory": {
+      "advanced_ram_manager": {
+        "allocations_blocked": false,
+        "current_bytes": 0,
+        "current_mb": 0.0,
+        "freeze_mode": false,
+        "peak_bytes": 0,
+        "peak_mb": 0.0,
+        "usage_percent": 0.0
+      },
+      "dynamic_tensor_allocator": {
+        "loaded_count": 10,
+        "tensor_count": 10
+      },
+      "memory_guard": {
+        "allocations_blocked": false,
+        "current_bytes": 2005760,
+        "current_mb": 1.912841796875,
+        "freeze_mode": false,
+        "limit_bytes": 10737418240,
+        "limit_mb": 10240.0,
+        "peak_bytes": 2005760,
+        "peak_mb": 1.912841796875,
+        "usage_percent": 0.018680095672607422
+      }
+    },
+    "model": {
+      "default_dtype": "float32",
+      "has_encoder": true,
+      "image_height": 64,
+      "image_width": 64,
+      "model_config": {
+        "attn_heads": 4,
+        "attn_max_tokens": 0,
+        "base_channels": 64,
+        "d_model": 0,
+        "dec_gn_groups": 32,
+        "dec_norm": "groupnorm",
+        "decoder_upsample": "conv_transpose",
+        "enc_gn_groups": 32,
+        "enc_norm": "groupnorm",
+        "image_c": 3,
+        "image_h": 64,
+        "image_w": 64,
+        "latent_c": 256,
+        "latent_h": 16,
+        "latent_w": 16,
+        "proj_dim": 256,
+        "resnet_max_tokens": 0,
+        "seq_len": 64,
+        "stochastic_latent": false,
+        "text_cond": false,
+        "text_d_model": 256,
+        "type": "vae_conv_decode",
+        "use_attention": true,
+        "use_attn": false,
+        "use_encoder_prior": false,
+        "use_skip_connections": false,
+        "vocab_size": 32000
+      },
+      "model_name": "VAEConvModel",
+      "num_layers": 22,
+      "parameters_frozen": false,
+      "tokenizer_vocab_size": 47,
+      "total_params": 501440
+    },
+    "registry": {
+      "supported_layer_count": 70,
+      "supported_layer_types": [
+        "Conv2d",
+        "ConvTranspose2d",
+        "Conv1d",
+        "DepthwiseConv2d",
+        "Linear",
+        "Bilinear",
+        "Embedding",
+        "EmbeddingBag",
+        "BatchNorm2d",
+        "BatchNorm1d",
+        "LayerNorm",
+        "GroupNorm",
+        "InstanceNorm2d",
+        "RMSNorm",
+        "ReLU",
+        "LeakyReLU",
+        "GELU",
+        "GEGLU",
+        "SiLU",
+        "Tanh",
+        "Sigmoid",
+        "Softmax",
+        "LogSoftmax",
+        "Softplus",
+        "Mish",
+        "HardSigmoid",
+        "HardSwish",
+        "MaxPool2d",
+        "AvgPool2d",
+        "AdaptiveAvgPool2d",
+        "GlobalAvgPool2d",
+        "MaxPool1d",
+        "AvgPool1d",
+        "TokenMeanPool",
+        "Dropout",
+        "Dropout2d",
+        "AlphaDropout",
+        "Flatten",
+        "Reshape",
+        "Transpose",
+        "Permute",
+        "Squeeze",
+        "Unsqueeze",
+        "View",
+        "Add",
+        "Subtract",
+        "Multiply",
+        "Divide",
+        "Concat",
+        "Split",
+        "Chunk",
+        "Stack",
+        "MatMul",
+        "BatchMatMul",
+        "SelfAttention",
+        "MultiHeadAttention",
+        "CrossAttention",
+        "UpsampleNearest",
+        "UpsampleBilinear",
+        "UpsampleBicubic",
+        "PixelShuffle",
+        "LSTM",
+        "GRU",
+        "RNN",
+        "ZeroPad2d",
+        "ReflectionPad2d",
+        "ReplicationPad2d",
+        "Identity",
+        "Constant",
+        "Lambda"
+      ]
+    },
+    "runtime": {
+      "backends": {
+        "cpu": {
+          "available": true,
+          "compiled": true,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CPU",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "cuda": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CUDA",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "opencl": {
+          "available": false,
+          "compiled": true
+        },
+        "rocm": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "ROCM",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "vulkan": {
+          "available": true,
+          "compiled": true
+        }
+      },
+      "cpu_features": {
+        "avx2": true,
+        "bmi2": true,
+        "f16c": true,
+        "fma": true
+      },
+      "environment_overrides": {},
+      "framework_logs_suppressed": false
+    },
+    "snapshot_timestamp": 1783546797,
+    "snapshot_version": "1.0.0"
+  },
+  "git": {
+    "branch": "unknown",
+    "commit": "unknown"
+  },
+  "layers": [
+    {
+      "index": 0,
+      "inputs": [
+        "__input__"
+      ],
+      "name": "vae_conv/raw_z",
+      "output": "vae_conv/z",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Identity"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 256,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 1,
+      "inputs": [
+        "vae_conv/z"
+      ],
+      "name": "vae_conv/dec/conv_in",
+      "output": "vae_conv/dec/c0",
+      "params_count": 147456,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae_conv/dec/conv_in.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            256,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 147456,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 2,
+      "inputs": [
+        "vae_conv/dec/c0"
+      ],
+      "name": "vae_conv/dec/conv_in/act",
+      "output": "vae_conv/dec/c0_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "SiLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 3,
+      "inputs": [
+        "vae_conv/dec/c0_act"
+      ],
+      "name": "vae_conv/dec/bot_res/conv1",
+      "output": "vae_conv/dec/bot_res/c1",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae_conv/dec/bot_res/conv1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 4,
+      "inputs": [
+        "vae_conv/dec/bot_res/c1"
+      ],
+      "name": "vae_conv/dec/bot_res/act1",
+      "output": "vae_conv/dec/bot_res/c1a",
+      "params_count": 0,
+      "tensors": [],
+      "type": "SiLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 5,
+      "inputs": [
+        "vae_conv/dec/bot_res/c1a"
+      ],
+      "name": "vae_conv/dec/bot_res/conv2",
+      "output": "vae_conv/dec/bot_res/c2",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae_conv/dec/bot_res/conv2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 6,
+      "inputs": [
+        "vae_conv/dec/bot_res/c2",
+        "vae_conv/dec/c0_act"
+      ],
+      "name": "vae_conv/dec/bot_res/add",
+      "output": "vae_conv/dec/bot_res/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 4,
+        "kernel_w": 4,
+        "out_channels": 64,
+        "output_height": 32,
+        "output_width": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 7,
+      "inputs": [
+        "vae_conv/dec/bot_res/out"
+      ],
+      "name": "vae_conv/dec/up2/up",
+      "output": "vae_conv/dec/up2/up_y",
+      "params_count": 65536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae_conv/dec/up2/up.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            4,
+            4
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 65536,
+          "truncated": true
+        }
+      ],
+      "type": "ConvTranspose2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 8,
+      "inputs": [
+        "vae_conv/dec/up2/up_y"
+      ],
+      "name": "vae_conv/dec/up2/up/act",
+      "output": "vae_conv/dec/up2/up_y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "SiLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 9,
+      "inputs": [
+        "vae_conv/dec/up2/up_y_act"
+      ],
+      "name": "vae_conv/dec/up2/res/conv1",
+      "output": "vae_conv/dec/up2/res/c1",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae_conv/dec/up2/res/conv1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 10,
+      "inputs": [
+        "vae_conv/dec/up2/res/c1"
+      ],
+      "name": "vae_conv/dec/up2/res/act1",
+      "output": "vae_conv/dec/up2/res/c1a",
+      "params_count": 0,
+      "tensors": [],
+      "type": "SiLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 11,
+      "inputs": [
+        "vae_conv/dec/up2/res/c1a"
+      ],
+      "name": "vae_conv/dec/up2/res/conv2",
+      "output": "vae_conv/dec/up2/res/c2",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae_conv/dec/up2/res/conv2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 12,
+      "inputs": [
+        "vae_conv/dec/up2/res/c2",
+        "vae_conv/dec/up2/up_y_act"
+      ],
+      "name": "vae_conv/dec/up2/res/add",
+      "output": "vae_conv/dec/up2/res/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 4,
+        "kernel_w": 4,
+        "out_channels": 64,
+        "output_height": 64,
+        "output_width": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 13,
+      "inputs": [
+        "vae_conv/dec/up2/res/out"
+      ],
+      "name": "vae_conv/dec/up1/up",
+      "output": "vae_conv/dec/up1/up_y",
+      "params_count": 65536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae_conv/dec/up1/up.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            4,
+            4
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 65536,
+          "truncated": true
+        }
+      ],
+      "type": "ConvTranspose2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 14,
+      "inputs": [
+        "vae_conv/dec/up1/up_y"
+      ],
+      "name": "vae_conv/dec/up1/up/act",
+      "output": "vae_conv/dec/up1/up_y_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "SiLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 15,
+      "inputs": [
+        "vae_conv/dec/up1/up_y_act"
+      ],
+      "name": "vae_conv/dec/up1/res/conv1",
+      "output": "vae_conv/dec/up1/res/c1",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae_conv/dec/up1/res/conv1.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 16,
+      "inputs": [
+        "vae_conv/dec/up1/res/c1"
+      ],
+      "name": "vae_conv/dec/up1/res/act1",
+      "output": "vae_conv/dec/up1/res/c1a",
+      "params_count": 0,
+      "tensors": [],
+      "type": "SiLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 17,
+      "inputs": [
+        "vae_conv/dec/up1/res/c1a"
+      ],
+      "name": "vae_conv/dec/up1/res/conv2",
+      "output": "vae_conv/dec/up1/res/c2",
+      "params_count": 36864,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae_conv/dec/up1/res/conv2.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 36864,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 18,
+      "inputs": [
+        "vae_conv/dec/up1/res/c2",
+        "vae_conv/dec/up1/up_y_act"
+      ],
+      "name": "vae_conv/dec/up1/res/add",
+      "output": "vae_conv/dec/up1/res/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Add"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 3,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 19,
+      "inputs": [
+        "vae_conv/dec/up1/res/out"
+      ],
+      "name": "vae_conv/dec/out",
+      "output": "vae_conv/dec/out_pre",
+      "params_count": 1728,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "vae_conv/dec/out.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            3,
+            64,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1728,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 20,
+      "inputs": [
+        "vae_conv/dec/out_pre"
+      ],
+      "name": "vae_conv/dec/tanh",
+      "output": "vae_conv/recon_chw",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Tanh"
+    },
+    {
+      "config": {
+        "permute_dims": [
+          1,
+          2,
+          0
+        ],
+        "shape": [
+          3,
+          64,
+          64
+        ]
+      },
+      "index": 21,
+      "inputs": [
+        "vae_conv/recon_chw"
+      ],
+      "name": "vae_conv/recon_to_hwc",
+      "output": "x",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Permute"
+    }
+  ],
+  "model_config": {
+    "attn_heads": 4,
+    "attn_max_tokens": 0,
+    "base_channels": 64,
+    "d_model": 0,
+    "dec_gn_groups": 32,
+    "dec_norm": "groupnorm",
+    "decoder_upsample": "conv_transpose",
+    "dtype": "float32",
+    "enc_gn_groups": 32,
+    "enc_norm": "groupnorm",
+    "image_c": 3,
+    "image_h": 64,
+    "image_w": 64,
+    "latent_c": 256,
+    "latent_h": 16,
+    "latent_w": 16,
+    "proj_dim": 256,
+    "resnet_max_tokens": 0,
+    "seq_len": 64,
+    "stochastic_latent": false,
+    "text_cond": false,
+    "text_d_model": 256,
+    "type": "vae_conv_decode",
+    "use_attention": true,
+    "use_attn": false,
+    "use_encoder_prior": false,
+    "use_skip_connections": false,
+    "vocab_size": 32000
+  },
+  "model_name": "VAEConvModel",
+  "num_layers": 22,
+  "timestamp": 1783546797,
+  "tokenizer": {
+    "has_vocab": true,
+    "vocab_size": 47
+  },
+  "total_params": 501440,
+  "default_params": {
+    "attn_heads": 4,
+    "attn_max_tokens": 0,
+    "base_channels": 64,
+    "d_model": 0,
+    "dec_gn_groups": 32,
+    "dec_norm": "groupnorm",
+    "decoder_upsample": "conv_transpose",
+    "enc_gn_groups": 32,
+    "enc_norm": "groupnorm",
+    "image_c": 3,
+    "image_h": 64,
+    "image_w": 64,
+    "latent_c": 256,
+    "latent_h": 16,
+    "latent_w": 16,
+    "proj_dim": 256,
+    "resnet_max_tokens": 0,
+    "seq_len": 64,
+    "stochastic_latent": false,
+    "text_cond": false,
+    "text_d_model": 256,
+    "use_attention": true,
+    "use_attn": false,
+    "use_encoder_prior": false,
+    "use_skip_connections": false,
+    "vocab_size": 32000
+  }
+}

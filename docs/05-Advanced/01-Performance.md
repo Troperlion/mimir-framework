@@ -1,96 +1,98 @@
-# Performance (CPU)
+# Performance : calcul, copies et mémoire
 
-## Pour qui
+Cette page décrit les chemins implémentés dans le core. `Model.cpp` orchestre
+le graphe, les versions de tenseurs et les gradients ; les calculs des couches
+restent dans les runtimes et leur dispatcher. Les signatures C++/Lua et les
+formats des modèles existants sont conservés.
 
-Utilisateur intermédiaire à avancé.
+## Chemins CPU optimisés
 
-## Objectif
+| Opération | Implémentation | Effet et limite |
+| --- | --- | --- |
+| Linear backward | `src/runtimes/cpu/RuntimeLayerDispatch.hpp` | Réductions par blocs de features contiguës, SIMD et OpenMP selon la charge ; gradients de paramètres accumulés dans le bloc packed. |
+| MatMul/BatchMatMul backward | `src/runtimes/cpu/MatMulKernels.hpp` | Réduction SIMD pour dA et colonnes contiguës pour dB ; pas de tampon de transposition. |
+| BatchMatMul forward | Même header | Blocs de 24 puis 8 colonnes et reste scalaire ; une région parallèle pour les lignes des lots. |
+| Conv2d backward | `src/runtimes/cpu/ConvolutionKernels.hpp` | Réutilisation du tampon im2col pour dCol et accumulation directe de dW ; trois scratchpads au lieu de cinq. |
+| Convolution 1×1 | Même header | Chemin CHW direct pour stride 1, padding 0 et certaines formes ; les formes larges gardent le packing. |
+| Concat/Stack forward | `src/runtimes/cpu/FlatJoinKernels.hpp` | Entrées empruntées en lecture seule ; une allocation de sortie, sans copies propriétaires de toutes les entrées. |
+| SelfAttention/MultiHeadAttention/CrossAttention forward | `src/runtimes/cpu/LayerOps.hpp` | Lecture des projections combinées sans copies Q/K/V complètes ; scores et contexte temporaire par blocs de 128 requêtes. |
 
-Optimiser, diagnostiquer et stabiliser des runs complexes.
+Le bloc d’attention contient toutes les clés de chaque ligne : le softmax et
+le masque causal conservent leur sens. Le tampon de scores occupe
+`min(128, queries) × keys` flottants, contre `queries × keys` auparavant.
+La complexité du calcul reste quadratique. Les projections, le contexte final
+et le backward nécessitent encore leurs propres buffers.
 
-## Avant de commencer
+Les kernels comportent des seuils OpenMP : augmenter le nombre de threads
+n’accélère pas automatiquement les petites matrices. AVX2/FMA dépendent des
+options de compilation et de la machine. Les tailles non multiples de huit
+sont couvertes par les restes scalaires ; une réduction SIMD peut modifier
+légèrement l’arrondi flottant.
 
-Avoir déjà exécuté au moins un pipeline complet.
+## Orchestration et allocations
 
-## Résultat attendu
+- Le backward déplace les gradients consommés au lieu de les recopier lorsque
+  leur version ne doit plus être conservée. Les branches continuent de sommer
+  leurs contributions.
+- Pour les couches dont le backward ne lit que les tailles, `Model.cpp` peut
+  emprunter un gradient immuable de même taille. Si aucun ne convient, il crée
+  un tampon zéro par taille distincte. Il n’emprunte pas une version écrasée
+  dans TensorStore.
+- Le routeur réutilise les conteneurs de routes forward, mais réévalue type,
+  capacité et initialisation. Le backward garde son instantané de routes sur
+  la pile pour les six backends usuels.
+- `src/runtimes/FiniteCheck.hpp` classe les NaN/Inf par groupes SIMD avec reste
+  scalaire. Les contrôles de finitude et le repli après échec restent actifs.
+- Les conversions F32 de `TypedTensor` évitent un remplissage zéro suivi d’une
+  copie lorsque les données peuvent être construites directement.
 
-Tu peux investiguer les problèmes de perf et de stabilité.
+Les scratchpads sont décrits dans
+[RuntimeAllocator et scratchpads](../04-Architecture-Internals/18-RuntimeAllocator-And-Scratchpads.md).
+Leurs compteurs ne représentent pas le RSS total du processus ni la VRAM.
 
+## Vulkan/OpenCL et entraînement
 
-Cette page liste les leviers **réels** (implémentés) pour améliorer les perfs, et où les retrouver côté C/C++.
+Vulkan et OpenCL ont des chemins forward **et backward**, avec optimizers
+routés selon les capacités disponibles. Ils ne sont pas limités à l’inférence.
+Les kernels de référence privilégient la couverture et la conformité numérique ;
+les transferts et les limites de travail peuvent rendre le CPU plus rapide.
+Une capacité par type ne garantit pas l’acceptation de toute forme.
 
-Point d’entrée conseillé : [04-Source-Code-Map.md](04-Source-Code-Map.md).
+`RuntimeRouter` choisit une route native admissible ; dans un modèle qui autorise
+le repli, un refus peut conduire au CPU. Le microbenchmark Colab vérifie le
+runtime effectivement sélectionné et refuse d’attribuer une exécution CPU à
+Vulkan/OpenCL. Les budgets de sécurité des kernels portables restent actifs.
+Voir [Runtimes GPU](../04-Architecture-Internals/21-GPU-Runtimes.md).
 
-## 1) Où sont les hotspots ?
+## Mesurer et interpréter
 
-Dans ce repo, les goulots typiques côté CPU sont :
+Comparer sur la même machine et le même build : dtype, formes, threads,
+affinité, nombre d’essais, chauffe et frontière hôte/device doivent être fixes.
+Séparer forward, backward seul, étape d’entraînement et inférence complète.
+Conserver les sorties, les tolérances et les erreurs numériques avec les temps.
 
-- `Linear` / `MatMul` (projection, MLP, embeddings) : `src/LayerOps.hpp`, `src/SIMD_Ops.hpp`, et le dispatch dans `src/Model.cpp`.
-- Attention (QKV + softmax + matmul) : `src/LayerOps.hpp`.
-- Conv / ops “image” (si workload diffusion/vae) : `src/Layers.hpp`, `src/LayerOpsExt.hpp`.
-- Allocations temporaires / copies : `src/RuntimeAllocator.hpp`, `src/tensors.cpp`, `src/DynamicTensorAllocator.*`.
+Les mesures CPU locales du 18 octobre 2026, sur Ryzen 5 5500U, GCC 15,
+Release et un thread OpenMP, illustrent les gains ciblés :
 
-## 2) OpenMP (threads)
+| Cas isolé | Avant → après | Interprétation |
+| --- | --- | --- |
+| BatchMatMul backward, M128 K256 N192, batch 2 | 22,27 → 1,91 ms | Comparaison avec l’état déjà optimisé de la passe précédente. |
+| BatchMatMul forward, mêmes dimensions | 9,13 → 0,77 ms | Forward CPU isolé, pas une accélération globale du modèle. |
+| Concat, huit entrées de 1 048 576 flottants | 42,00 → 21,03 ms ; RSS 125,13 → 93,15 Mio | Allocations pendant l’appel : 10 → 1. |
+| SelfAttention, 2 048 tokens, dimension 128, quatre têtes | 323,21 → 263,04 ms ; RSS 32,48 → 14,23 Mio | Forward complet CPU ; scores seuls : 16 → 1 Mio. |
 
-Le code utilise OpenMP (si compilé avec support) pour paralléliser certaines boucles (matmul/conv/ops) avec des seuils de travail.
+Ces comparaisons utilisent quatre essais alternés avant/après et les médianes
+après chauffe. Le RSS est mesuré extérieurement par GNU time. Les étapes MLP
+MNIST de contrôle restent pratiquement stables, avec les pertes et sondes de
+paramètres comparées identiques ; les gains d’un kernel ne se transfèrent pas
+à tous les modèles. Ces chiffres ne mesurent pas CUDA/ROCm ni un GPU Colab.
 
-- Au démarrage, le binaire affiche le nombre de threads disponibles et appelle `omp_set_num_threads(omp_get_max_threads())` (voir `src/main.cpp`).
-- Les kernels ont souvent des directives du type `#pragma omp parallel for ... if(work >= 262144)` (par ex. dans `src/LayerOps.hpp`, `src/SIMD_Ops.hpp`, `src/LayerOpsExt.hpp`).
+Pour une procédure réutilisable, voir les
+[benchmarks Colab](07-Colab-Benchmarks.md), avec leurs profils, sources embarquées,
+validations natives, métriques de mémoire et limites de comparaison.
 
-Conseils pratiques :
+## Étapes suivantes
 
-- Si vous voulez *forcer* un nombre de threads, utilisez les mécanismes OpenMP habituels (ex: `OMP_NUM_THREADS`) avant de lancer le binaire.
-- Faites varier `seq_len`, `d_model`, `num_heads` : l’activation des chemins parallèles dépend de la taille du travail.
-
-## 3) SIMD (AVX2/FMA/F16C/BMI)
-
-Le runtime expose des kernels AVX2 sur certaines ops (et un fallback sinon) :
-
-- Détection des capacités + affichage au démarrage : `src/main.cpp` + helpers `Model::hasAVX2()` etc.
-- Kernels SIMD : `src/SIMD_Ops.hpp`, et certaines routines dans `src/Layers.hpp` / `src/HardwareOpt.hpp`.
-
-Conseils pratiques :
-
-- Favoriser des dimensions multiples de 8 (AVX2 traite 8 floats) quand c’est pertinent (ex: `d_model`, `mlp_hidden`).
-- Vérifier dans les logs de démarrage que l’AVX2 est bien détecté (sinon, vous êtes sur le fallback scalar/SIMD réduit).
-
-## 4) Allocations et “strict mode”
-
-Ce qui compte ici est moins “malloc vs new” et plus “qui alloue, quand, et sous quel garde-fou” :
-
-- Les tenseurs “dynamiques” (utilisés dans des chemins runtime) passent par `DynamicTensorAllocator` et sont comptabilisés par `MemoryGuard` (voir `src/tensors.cpp`, `src/DynamicTensorAllocator.*`, `src/MemoryGuard.hpp`).
-- Les scratchpads/temporaires RAII sont gérés par `RuntimeAllocator` (voir `src/RuntimeAllocator.hpp`) — utile pour limiter les pics de mémoire et stabiliser les perfs.
-
-Conseils pratiques :
-
-- Éviter de créer/détruire des gros buffers dans des boucles chaudes si un scratchpad/pool existe déjà.
-- Sur OOM, préférez d’abord réduire batch/seq/dims avant d’essayer d’“optimiser le CPU”.
-
-## 5) Offload Vulkan/OpenCL (Linear, inférence)
-
-Le code peut dispatcher certaines couches `Linear` vers Vulkan ou OpenCL **uniquement en inférence** et **si explicitement activé**.
-
-Pré-requis : le binaire doit avoir été compilé avec le support backend correspondant (gating via `ENABLE_VULKAN` / `ENABLE_OPENCL` dans le code).
-
-Variables d’environnement (voir `src/Model.cpp`) :
-
-- `MIMIR_VULKAN_LINEAR=1` active Vulkan pour `Linear`.
-- `MIMIR_VULKAN_LINEAR_MIN_OPS` (défaut `1<<20`) fixe le seuil minimal d’opérations.
-- `MIMIR_VULKAN_LINEAR_SPV=/chemin/vers/linear_forward.comp.spv` force le chemin du shader SPIR-V (sinon, le runtime cherche dans quelques emplacements standards, voir `src/VulkanCompute.hpp`).
-- `MIMIR_OPENCL_LINEAR=1` active OpenCL pour `Linear`.
-- `MIMIR_OPENCL_LINEAR_MIN_OPS` (défaut `1<<20`) fixe le seuil minimal d’opérations.
-- `MIMIR_ACCEL_VERBOSE=1` logge quand un offload est réellement utilisé.
-- `MIMIR_DISABLE_VULKAN=1` / `MIMIR_DISABLE_OPENCL=1` désactive le backend correspondant.
-
-Notes :
-
-- Si le seuil est trop haut, vous n’observerez aucun gain (le CPU restera le chemin pris).
-- Les gains seront surtout visibles sur gros `out_features` / gros batch (ou `seq_len` si batch=seq).
-
-## 6) Méthode de mesure (reproductible)
-
-Pour éviter les faux gains :
-
-- Mesurez séparément “forward seul” vs “train step” (backward + optimizer).
-- Isolez le coût tokenization/IO (Lua/dataset) du coût compute (layers).
-- Activez `MIMIR_ACCEL_VERBOSE` quand vous testez Vulkan/OpenCL, sinon vous ne savez pas si c’est réellement pris.
+- [Débogage et stabilité numérique](02-Debugging.md)
+- [Carte du code source](04-Source-Code-Map.md)
+- [Index de la documentation](../00-INDEX.md)

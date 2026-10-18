@@ -1,0 +1,253 @@
+# MPK - Mimir Package Template
+# Syntaxe lisible inspirée du pseudocode Visu.
+
+map mpk = []
+mpk.set("container", "pseudocode")
+mpk.set("extension", ".mpk")
+mpk.set("format", "Mimir Package Template")
+mpk.set("format_short", "MPK")
+map mpk_header_1 = []
+mpk_header_1.set("author", "Mimir")
+map mpk_header_1_checksum_2 = []
+mpk_header_1_checksum_2.set("algorithm", "fnv1a32")
+mpk_header_1_checksum_2.set("scope", "payload_json")
+mpk_header_1_checksum_2.set("value", "55500d33")
+mpk_header_1.set("checksum", mpk_header_1_checksum_2)
+mpk_header_1.set("created_at", "2026-10-02T22:02:17Z")
+mpk_header_1.set("modifiable", true)
+mpk_header_1.set("name", "ssd")
+mpk_header_1.set("signature", "checksum")
+mpk_header_1.set("size", 20811)
+mpk_header_1.set("type", "vgg16")
+mpk_header_1.set("viz_specified", true)
+mpk.set("header", mpk_header_1)
+map mpk_payload_3 = []
+mpk_payload_3.set("base_config_b64", "ewogICJiYXNlX2NoYW5uZWxzIjogMzIsCiAgImRyb3BvdXQiOiAwLjUsCiAgImZjX2hpZGRlbiI6IDUxMiwKICAiaW1hZ2VfYyI6IDMsCiAgImltYWdlX2giOiA2NCwKICAiaW1hZ2VfdyI6IDY0LAogICJtcGtfYXJjaGl0ZWN0dXJlIjogInNzZCIsCiAgIm1wa19kaXNwbGF5X25hbWUiOiAiU1NEIiwKICAibXBrX2V4ZWN1dGlvbl9kZWxlZ2F0ZSI6ICJ2Z2cxNiIsCiAgIm1wa19wcm90b3R5cGUiOiB0cnVlLAogICJtcGtfdGFzayI6ICJzaW5nbGVfc2hvdF9vYmplY3RfZGV0ZWN0aW9uIiwKICAibnVtX2NsYXNzZXMiOiAxMDAwCn0=")
+mpk_payload_3.set("description_b64", "UHJvdG90eXBlIE1QSyBTU0Qgw6AgYmFja2JvbmUgVkdHMTY6IGNhcnRlcyBtdWx0aS1yw6lzb2x1dGlvbnMgZXQgdMOqdGVzIGNsYXNzZS9ib8OudGUgZMOpY3JpdGVzOyBnw6luw6lyYXRpb24gZGVzIHByaW9ycyBldCBkw6ljb2RhZ2UgcmVzdGVudCBleHRlcm5lcywgTk1TIGVzdCBmb3VybmkgcGFyIGxlIHJ1bnRpbWUu")
+map mpk_payload_3_model_structure_4 = []
+mpk_payload_3_model_structure_4.set("architecture", "ssd")
+map mpk_payload_3_model_structure_4_build_5 = []
+mpk_payload_3_model_structure_4_build_5.set("dynamic_layer_assembly", false)
+mpk_payload_3_model_structure_4_build_5.set("generated_by", "scripts/tools/add_vision_mpk_architectures.lua")
+mpk_payload_3_model_structure_4.set("build", mpk_payload_3_model_structure_4_build_5)
+map mpk_payload_3_model_structure_4_execution_6 = []
+mpk_payload_3_model_structure_4_execution_6.set("base_architecture", "vgg16")
+mpk_payload_3_model_structure_4_execution_6.set("graph_is_documentary", true)
+mpk_payload_3_model_structure_4_execution_6.set("mode", "registry_delegate")
+mpk_payload_3_model_structure_4.set("execution", mpk_payload_3_model_structure_4_execution_6)
+list mpk_payload_3_model_structure_4_external_components_7 = []
+mpk_payload_3_model_structure_4_external_components_7.append("default_box_generation")
+mpk_payload_3_model_structure_4_external_components_7.append("box_decode")
+mpk_payload_3_model_structure_4.set("external_components", mpk_payload_3_model_structure_4_external_components_7)
+map mpk_payload_3_model_structure_4_graph_8 = []
+list mpk_payload_3_model_structure_4_graph_8_links_9 = []
+map mpk_payload_3_model_structure_4_graph_8_links_9_1_10 = []
+mpk_payload_3_model_structure_4_graph_8_links_9_1_10.set("from", "image")
+mpk_payload_3_model_structure_4_graph_8_links_9_1_10.set("kind", "tensor")
+mpk_payload_3_model_structure_4_graph_8_links_9_1_10.set("to", "vgg16_backbone")
+mpk_payload_3_model_structure_4_graph_8_links_9.append(mpk_payload_3_model_structure_4_graph_8_links_9_1_10)
+map mpk_payload_3_model_structure_4_graph_8_links_9_2_11 = []
+mpk_payload_3_model_structure_4_graph_8_links_9_2_11.set("from", "base_features")
+mpk_payload_3_model_structure_4_graph_8_links_9_2_11.set("kind", "tensor")
+mpk_payload_3_model_structure_4_graph_8_links_9_2_11.set("to", "extra_features_1")
+mpk_payload_3_model_structure_4_graph_8_links_9.append(mpk_payload_3_model_structure_4_graph_8_links_9_2_11)
+map mpk_payload_3_model_structure_4_graph_8_links_9_3_12 = []
+mpk_payload_3_model_structure_4_graph_8_links_9_3_12.set("from", "feature_1")
+mpk_payload_3_model_structure_4_graph_8_links_9_3_12.set("kind", "tensor")
+mpk_payload_3_model_structure_4_graph_8_links_9_3_12.set("to", "extra_features_2")
+mpk_payload_3_model_structure_4_graph_8_links_9.append(mpk_payload_3_model_structure_4_graph_8_links_9_3_12)
+map mpk_payload_3_model_structure_4_graph_8_links_9_4_13 = []
+mpk_payload_3_model_structure_4_graph_8_links_9_4_13.set("from", "base_features")
+mpk_payload_3_model_structure_4_graph_8_links_9_4_13.set("kind", "tensor")
+mpk_payload_3_model_structure_4_graph_8_links_9_4_13.set("to", "class_predictors")
+mpk_payload_3_model_structure_4_graph_8_links_9.append(mpk_payload_3_model_structure_4_graph_8_links_9_4_13)
+map mpk_payload_3_model_structure_4_graph_8_links_9_5_14 = []
+mpk_payload_3_model_structure_4_graph_8_links_9_5_14.set("from", "feature_1")
+mpk_payload_3_model_structure_4_graph_8_links_9_5_14.set("kind", "tensor")
+mpk_payload_3_model_structure_4_graph_8_links_9_5_14.set("to", "class_predictors")
+mpk_payload_3_model_structure_4_graph_8_links_9.append(mpk_payload_3_model_structure_4_graph_8_links_9_5_14)
+map mpk_payload_3_model_structure_4_graph_8_links_9_6_15 = []
+mpk_payload_3_model_structure_4_graph_8_links_9_6_15.set("from", "feature_2")
+mpk_payload_3_model_structure_4_graph_8_links_9_6_15.set("kind", "tensor")
+mpk_payload_3_model_structure_4_graph_8_links_9_6_15.set("to", "class_predictors")
+mpk_payload_3_model_structure_4_graph_8_links_9.append(mpk_payload_3_model_structure_4_graph_8_links_9_6_15)
+map mpk_payload_3_model_structure_4_graph_8_links_9_7_16 = []
+mpk_payload_3_model_structure_4_graph_8_links_9_7_16.set("from", "base_features")
+mpk_payload_3_model_structure_4_graph_8_links_9_7_16.set("kind", "tensor")
+mpk_payload_3_model_structure_4_graph_8_links_9_7_16.set("to", "box_predictors")
+mpk_payload_3_model_structure_4_graph_8_links_9.append(mpk_payload_3_model_structure_4_graph_8_links_9_7_16)
+map mpk_payload_3_model_structure_4_graph_8_links_9_8_17 = []
+mpk_payload_3_model_structure_4_graph_8_links_9_8_17.set("from", "feature_1")
+mpk_payload_3_model_structure_4_graph_8_links_9_8_17.set("kind", "tensor")
+mpk_payload_3_model_structure_4_graph_8_links_9_8_17.set("to", "box_predictors")
+mpk_payload_3_model_structure_4_graph_8_links_9.append(mpk_payload_3_model_structure_4_graph_8_links_9_8_17)
+map mpk_payload_3_model_structure_4_graph_8_links_9_9_18 = []
+mpk_payload_3_model_structure_4_graph_8_links_9_9_18.set("from", "feature_2")
+mpk_payload_3_model_structure_4_graph_8_links_9_9_18.set("kind", "tensor")
+mpk_payload_3_model_structure_4_graph_8_links_9_9_18.set("to", "box_predictors")
+mpk_payload_3_model_structure_4_graph_8_links_9.append(mpk_payload_3_model_structure_4_graph_8_links_9_9_18)
+map mpk_payload_3_model_structure_4_graph_8_links_9_10_19 = []
+mpk_payload_3_model_structure_4_graph_8_links_9_10_19.set("from", "class_logits")
+mpk_payload_3_model_structure_4_graph_8_links_9_10_19.set("kind", "tensor")
+mpk_payload_3_model_structure_4_graph_8_links_9_10_19.set("to", "ssd_outputs")
+mpk_payload_3_model_structure_4_graph_8_links_9.append(mpk_payload_3_model_structure_4_graph_8_links_9_10_19)
+map mpk_payload_3_model_structure_4_graph_8_links_9_11_20 = []
+mpk_payload_3_model_structure_4_graph_8_links_9_11_20.set("from", "box_offsets")
+mpk_payload_3_model_structure_4_graph_8_links_9_11_20.set("kind", "tensor")
+mpk_payload_3_model_structure_4_graph_8_links_9_11_20.set("to", "ssd_outputs")
+mpk_payload_3_model_structure_4_graph_8_links_9.append(mpk_payload_3_model_structure_4_graph_8_links_9_11_20)
+map mpk_payload_3_model_structure_4_graph_8_links_9_12_21 = []
+mpk_payload_3_model_structure_4_graph_8_links_9_12_21.set("from", "decoded_boxes")
+mpk_payload_3_model_structure_4_graph_8_links_9_12_21.set("kind", "tensor")
+mpk_payload_3_model_structure_4_graph_8_links_9_12_21.set("to", "nms")
+mpk_payload_3_model_structure_4_graph_8_links_9.append(mpk_payload_3_model_structure_4_graph_8_links_9_12_21)
+map mpk_payload_3_model_structure_4_graph_8_links_9_13_22 = []
+mpk_payload_3_model_structure_4_graph_8_links_9_13_22.set("from", "class_scores")
+mpk_payload_3_model_structure_4_graph_8_links_9_13_22.set("kind", "tensor")
+mpk_payload_3_model_structure_4_graph_8_links_9_13_22.set("to", "nms")
+mpk_payload_3_model_structure_4_graph_8_links_9.append(mpk_payload_3_model_structure_4_graph_8_links_9_13_22)
+map mpk_payload_3_model_structure_4_graph_8_links_9_14_23 = []
+mpk_payload_3_model_structure_4_graph_8_links_9_14_23.set("from", "class_ids")
+mpk_payload_3_model_structure_4_graph_8_links_9_14_23.set("kind", "tensor")
+mpk_payload_3_model_structure_4_graph_8_links_9_14_23.set("to", "nms")
+mpk_payload_3_model_structure_4_graph_8_links_9.append(mpk_payload_3_model_structure_4_graph_8_links_9_14_23)
+mpk_payload_3_model_structure_4_graph_8.set("links", mpk_payload_3_model_structure_4_graph_8_links_9)
+mpk_payload_3_model_structure_4_graph_8.set("mode", "node")
+list mpk_payload_3_model_structure_4_graph_8_nodes_24 = []
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25.set("id", "vgg16_backbone")
+list mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25_inputs_26 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25_inputs_26.append("image")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25.set("inputs", mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25_inputs_26)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25.set("name", "vgg16_backbone")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25.set("output", "base_features")
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25_params_27 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25_params_27.set("role", "backbone")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25.set("params", mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25_params_27)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25.set("params_count", 0)
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25_position_28 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25_position_28.set("x", 40)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25_position_28.set("y", 100)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25.set("position", mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25_position_28)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25.set("type", "Conv2d")
+mpk_payload_3_model_structure_4_graph_8_nodes_24.append(mpk_payload_3_model_structure_4_graph_8_nodes_24_1_25)
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29.set("id", "extra_features_1")
+list mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29_inputs_30 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29_inputs_30.append("base_features")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29.set("inputs", mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29_inputs_30)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29.set("name", "extra_features_1")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29.set("output", "feature_1")
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29_params_31 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29_params_31.set("stride", 2)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29.set("params", mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29_params_31)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29.set("params_count", 0)
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29_position_32 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29_position_32.set("x", 220)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29_position_32.set("y", 40)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29.set("position", mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29_position_32)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29.set("type", "Conv2d")
+mpk_payload_3_model_structure_4_graph_8_nodes_24.append(mpk_payload_3_model_structure_4_graph_8_nodes_24_2_29)
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33.set("id", "extra_features_2")
+list mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33_inputs_34 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33_inputs_34.append("feature_1")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33.set("inputs", mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33_inputs_34)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33.set("name", "extra_features_2")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33.set("output", "feature_2")
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33_params_35 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33_params_35.set("stride", 2)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33.set("params", mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33_params_35)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33.set("params_count", 0)
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33_position_36 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33_position_36.set("x", 220)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33_position_36.set("y", 160)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33.set("position", mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33_position_36)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33.set("type", "Conv2d")
+mpk_payload_3_model_structure_4_graph_8_nodes_24.append(mpk_payload_3_model_structure_4_graph_8_nodes_24_3_33)
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37.set("id", "class_predictors")
+list mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37_inputs_38 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37_inputs_38.append("base_features")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37_inputs_38.append("feature_1")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37_inputs_38.append("feature_2")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37.set("inputs", mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37_inputs_38)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37.set("name", "class_predictors")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37.set("output", "class_logits")
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37_params_39 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37_params_39.set("role", "multibox_classification")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37.set("params", mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37_params_39)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37.set("params_count", 0)
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37_position_40 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37_position_40.set("x", 440)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37_position_40.set("y", 40)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37.set("position", mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37_position_40)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37.set("type", "Conv2d")
+mpk_payload_3_model_structure_4_graph_8_nodes_24.append(mpk_payload_3_model_structure_4_graph_8_nodes_24_4_37)
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41.set("id", "box_predictors")
+list mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41_inputs_42 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41_inputs_42.append("base_features")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41_inputs_42.append("feature_1")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41_inputs_42.append("feature_2")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41.set("inputs", mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41_inputs_42)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41.set("name", "box_predictors")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41.set("output", "box_offsets")
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41_params_43 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41_params_43.set("role", "multibox_regression")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41.set("params", mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41_params_43)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41.set("params_count", 0)
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41_position_44 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41_position_44.set("x", 440)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41_position_44.set("y", 160)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41.set("position", mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41_position_44)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41.set("type", "Conv2d")
+mpk_payload_3_model_structure_4_graph_8_nodes_24.append(mpk_payload_3_model_structure_4_graph_8_nodes_24_5_41)
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45.set("id", "ssd_outputs")
+list mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45_inputs_46 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45_inputs_46.append("class_logits")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45_inputs_46.append("box_offsets")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45.set("inputs", mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45_inputs_46)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45.set("name", "ssd_outputs")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45.set("output", "detections_raw")
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45_params_47 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45_params_47.set("axis", 0)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45.set("params", mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45_params_47)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45.set("params_count", 0)
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45_position_48 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45_position_48.set("x", 640)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45_position_48.set("y", 100)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45.set("position", mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45_position_48)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45.set("type", "Concat")
+mpk_payload_3_model_structure_4_graph_8_nodes_24.append(mpk_payload_3_model_structure_4_graph_8_nodes_24_6_45)
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49.set("id", "nms")
+list mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49_inputs_50 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49_inputs_50.append("decoded_boxes")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49_inputs_50.append("class_scores")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49_inputs_50.append("class_ids")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49.set("inputs", mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49_inputs_50)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49.set("name", "nms")
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49.set("output", "kept_indices")
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49_params_51 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49_params_51.set("class_agnostic", false)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49_params_51.set("iou_threshold", 0.45)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49_params_51.set("score_threshold", 0.05)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49.set("params", mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49_params_51)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49.set("params_count", 0)
+map mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49_position_52 = []
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49_position_52.set("x", 840)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49_position_52.set("y", 100)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49.set("position", mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49_position_52)
+mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49.set("type", "NMS")
+mpk_payload_3_model_structure_4_graph_8_nodes_24.append(mpk_payload_3_model_structure_4_graph_8_nodes_24_7_49)
+mpk_payload_3_model_structure_4_graph_8.set("nodes", mpk_payload_3_model_structure_4_graph_8_nodes_24)
+mpk_payload_3_model_structure_4.set("graph", mpk_payload_3_model_structure_4_graph_8)
+mpk_payload_3_model_structure_4.set("status", "prototype")
+mpk_payload_3_model_structure_4.set("task", "single_shot_object_detection")
+mpk_payload_3_model_structure_4.set("template", "ssd")
+mpk_payload_3_model_structure_4.set("version", 1)
+mpk_payload_3.set("model_structure", mpk_payload_3_model_structure_4)
+mpk.set("payload", mpk_payload_3)
+mpk.set("version", 2)

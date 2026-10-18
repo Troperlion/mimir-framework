@@ -1,20 +1,28 @@
 # CLI (binaire `mimir`)
 
-## Pour qui
-
-Débutant à intermédiaire.
-
-## Objectif
-
 Comprendre les modes --lua et --conf sans ambiguïté.
 
-## Avant de commencer
+**Public concerné :** Débutant à intermédiaire.
 
-Binaire mimir compilé.
+> **Prérequis**
+>
+> Binaire mimir compilé.
 
-## Résultat attendu
+## Sur cette page
 
-Tu sais lancer un script, une config, et passer des overrides.
+- [Diagrammes d'explication](#diagrammes-dexplication)
+- [Usage](#usage)
+- [Exemples d'utilisation](#exemples-dutilisation)
+- [Variables injectées par --conf](#variables-injectées-par---conf)
+- [Exécuter un script Lua avec arguments](#exécuter-un-script-lua-avec-arguments)
+- [Sortie au démarrage](#sortie-au-démarrage)
+- [Étapes suivantes](#étapes-suivantes)
+
+## Diagrammes d'explication
+
+![Workflow Lua JSON CLI](../graphs/04_workflow_lua_json_cli.svg)
+
+![Détection des backends au démarrage](../graphs/14_backend_detection.svg)
 
 
 Le binaire principal est `bin/mimir`.
@@ -28,13 +36,17 @@ Le binaire principal est `bin/mimir`.
 Options :
 
 - `--lua <script.lua>` : exécute un script Lua.
-- `--config <config.json>` : charge une config JSON et crée un modèle via le registre (chemin “starter”).
+- `--conf <config.json>` : charge une config JSON et exécute les scripts Lua déclarés dans `lua.scripts`.
+- `--config <config.json>` : construit et entraîne directement depuis une configuration modèle historique.
+- `--run <task>` : sélectionne une tâche sous `tasks` avec `--conf`.
 ### Options principales
 
 | Option | Description |
 | --- | --- |
 | `--lua <script.lua>` | Exécute un script Lua standalone |
 | `--conf <config.json>` | Charge une config JSON et exécute les scripts Lua spécifiés dans `lua.scripts` |
+| `--config <config.json>` | Mode historique de construction/entraînement direct |
+| `--run <task>` | Sélectionne `tasks.<task>` en mode `--conf` |
 | `--override <path=value>` | Override des valeurs config (répétable, appliqué avant exécution) |
 
 ### Modes de fonctionnement
@@ -49,7 +61,7 @@ Exécute un script Lua directement. La config n'est pas injectée.
 
 **Injection disponible :**
 - `arg[]` : arguments du script (std Lua)
-- `Mimir.Args` : table de parsing des arguments
+- `Mimir` et les fonctions globales du framework
 
 #### Mode `--conf` (config-driven)
 
@@ -121,9 +133,10 @@ Les overrides sont appliqués avant l'exécution des scripts, donc les scripts v
 ./bin/mimir --lua scripts/examples/example_conf_inference.lua -- --num-samples 20
 ```
 
-Les arguments après `--` sont accessibles dans le script via `arg[]` ou `Mimir.Args`.
+Les arguments après `--` sont accessibles dans `arg[]`. Utilisez
+`scripts/modules/args.lua` pour les analyser.
 
-### Exemple 4: Créer ta propre config
+### Exemple 4: Créer votre propre config
 
 Crée un fichier `my_config.json`:
 
@@ -189,25 +202,34 @@ end
 
 ## Exécuter un script Lua avec arguments
 
-Le programme injecte la table globale `arg` (comme l’interpréteur Lua) et aussi `Mimir.Args`.
+Le programme injecte la table globale `arg`, comme l’interpréteur Lua.
 
 Exemple :
 
 ```bash
-./bin/mimir --lua scripts/examples/vae_text_sample.lua -- --ckpt checkpoint/_smoke_vae_text_ce --mode prior
+./bin/mimir --lua scripts/tools/inspect_architectures.lua -- \
+  --list vae_text --params --layers
 ```
 
 Notes :
 
-- Le séparateur `--` est un usage pratique pour “séparer” les args du binaire de ceux du script. Le binaire ne le consomme pas explicitement ; certains scripts l’acceptent/ignorent.
-- Dans un script, parsage recommandé : `local Args = dofile("scripts/modules/args.lua")` puis `Args.parse(arg)`.
+- Le séparateur `--` termine les options du CLI Mímir ; les valeurs suivantes sont transmises au script.
+- Dans un script, parsage recommandé : `local Args = dofile(ROOTWORK.."/scripts/modules/args.lua")` puis `Args.parse(arg)`.
 
 ## Sortie au démarrage
 
 Au lancement, Mímir affiche :
 
-- tests d’intégrité mémoire
-- capacités CPU (AVX2/FMA/F16C/BMI2)
-- configuration OpenMP
+- la version et le chemin du journal complet ;
+- le mode ou script demandé ;
+- les erreurs et résultats importants.
 
-Ces logs sont utiles pour diagnostiquer un build “lent” ou une machine non compatible AVX.
+La console est concise par défaut, tandis que `logs/*.log` conserve le détail.
+Utilisez `MIMIR_CONSOLE_VERBOSE=1` pour restaurer toutes les lignes du framework
+et `MIMIR_LAUNCH_VERBOSE=1` pour détailler le lanceur `run_mimir.sh`.
+
+## Étapes suivantes
+
+- [Page précédente : 🔧 Installation & Compilation détaillée](02-Installation.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Organisation du dépôt](04-Repo-Layout.md)

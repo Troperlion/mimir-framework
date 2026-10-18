@@ -1,5 +1,7 @@
+#include "runtimes/fpga/FpgaIo.hpp"
 #include "RawCheckpointWriter.hpp"
 #include "../Model.hpp"
+#include "CheckpointState.hpp"
 #include "../Tokenizer.hpp"
 #include "../Encoder.hpp"
 #include "HardwareOpt.hpp"
@@ -8,9 +10,45 @@
 #include <iomanip>
 #include <sstream>
 #include <ctime>
+#include <iostream>
+#include <chrono>
+#include <atomic>
 
 namespace Mimir {
 namespace Serialization {
+
+namespace {
+struct StagedRawFolder {
+    fs::path target, temporary, backup;
+    explicit StagedRawFolder(const fs::path& path) : target(path) {
+        if (fs::exists(target) && (!fs::is_directory(target) ||
+            (!fs::is_empty(target) && !fs::exists(target / "manifest.json")))) {
+            throw std::runtime_error("Refusing to replace a non-checkpoint directory: " + target.string());
+        }
+        static std::atomic<unsigned long long> sequence{0};
+        const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+            "-" + std::to_string(sequence++);
+        temporary = target.string() + ".writing-" + suffix;
+        backup = target.string() + ".previous-" + suffix;
+    }
+    ~StagedRawFolder() {
+        std::error_code ignored;
+        fs::remove_all(temporary, ignored);
+    }
+    void commit() {
+        const bool existed = fs::exists(target);
+        if (existed) fs::rename(target, backup);
+        try {
+            fs::rename(temporary, target);
+        } catch (...) {
+            if (existed) fs::rename(backup, target);
+            throw;
+        }
+        std::error_code ignored;
+        if (existed) fs::remove_all(backup, ignored);
+    }
+};
+} // namespace
 
 RawCheckpointWriter::RawCheckpointWriter() {
 }
@@ -21,11 +59,19 @@ RawCheckpointWriter::~RawCheckpointWriter() {
 bool RawCheckpointWriter::save(
     Model& model,
     const std::string& path,
-    const SaveOptions& options,
+    const SaveOptions& requested_options,
     std::string* error
 ) {
+    const auto options = effective_save_options(model, requested_options);
     try {
-        fs::path root(path);
+        auto destination = fs::path(path).lexically_normal();
+        if (destination.filename().empty()) destination = destination.parent_path();
+        StagedRawFolder staged(destination);
+        const fs::path root = staged.temporary;
+        std::cerr << "[serialization] raw save path=" << root.string()
+                  << " save_tokenizer=" << options.save_tokenizer
+                  << " save_encoder=" << options.save_encoder
+                  << " save_optimizer=" << options.save_optimizer << std::endl;
         
         // Create directory structure
         if (!create_structure(root.string(), error)) {
@@ -47,8 +93,8 @@ bool RawCheckpointWriter::save(
             return false;
         }
 
-        // Save training state (optimizer) if requested and available
-        if (options.save_optimizer) {
+        // Training state is independent of optional debug gradients.
+        if (options.save_optimizer || model.modelConfig.contains("training_state")) {
             if (!save_training(root.string(), model, error)) {
                 return false;
             }
@@ -73,6 +119,7 @@ bool RawCheckpointWriter::save(
             return false;
         }
         
+        staged.commit();
         return true;
         
     } catch (const std::exception& e) {
@@ -89,14 +136,12 @@ bool RawCheckpointWriter::create_structure(
 ) {
     try {
         fs::path root_path(root);
+        std::cerr << "[serialization] raw create_structure root=" << root_path.string() << std::endl;
         
         // Create directories
         fs::create_directories(root_path);
         fs::create_directories(root_path / "tensors");
         fs::create_directories(root_path / "model");
-        fs::create_directories(root_path / "tokenizer");
-        fs::create_directories(root_path / "encoder");
-        fs::create_directories(root_path / "dataset");
         
         return true;
         
@@ -114,6 +159,8 @@ std::vector<RawCheckpointWriter::TensorData> RawCheckpointWriter::collect_tensor
 ) {
     std::vector<TensorData> tensors;
 
+    owned_f32_buffers_.clear();
+    optimizer_metadata_ = json::object();
     owned_u16_buffers_.clear();
     owned_f64_buffers_.clear();
 
@@ -140,13 +187,13 @@ std::vector<RawCheckpointWriter::TensorData> RawCheckpointWriter::collect_tensor
 
         if (float_storage == DType::Float16) {
             owned_u16_buffers_.emplace_back(count);
-            HardwareOpt::fp32_to_fp16_f16c(owned_u16_buffers_.back().data(), data_ptr, count);
+            if (!Mimir::fpgaEncode16(owned_u16_buffers_.back().data(), data_ptr, count, false)) HardwareOpt::fp32_to_fp16_f16c(owned_u16_buffers_.back().data(), data_ptr, count);
             td.dtype = DType::Float16;
             td.byte_size = count * sizeof(uint16_t);
             td.data_ptr = owned_u16_buffers_.back().data();
         } else if (float_storage == DType::BFloat16) {
             owned_u16_buffers_.emplace_back(count);
-            HardwareOpt::fp32_to_bf16(owned_u16_buffers_.back().data(), data_ptr, count);
+            if (!Mimir::fpgaEncode16(owned_u16_buffers_.back().data(), data_ptr, count, true)) HardwareOpt::fp32_to_bf16(owned_u16_buffers_.back().data(), data_ptr, count);
             td.dtype = DType::BFloat16;
             td.byte_size = count * sizeof(uint16_t);
             td.data_ptr = owned_u16_buffers_.back().data();
@@ -200,13 +247,23 @@ std::vector<RawCheckpointWriter::TensorData> RawCheckpointWriter::collect_tensor
 
     // Optimizer state tensors (debug/resume): m and v
     if (options.save_optimizer) {
-        if (const Optimizer* opt = model.getSerializedOptimizer()) {
-            if (!opt->m.empty()) {
-                push_float_tensor("optimizer/m", {opt->m.size()}, opt->m.data(), opt->m.size());
-            }
-            if (!opt->v.empty()) {
-                push_float_tensor("optimizer/v", {opt->v.size()}, opt->v.data(), opt->v.size());
-            }
+        if (const Optimizer* live = model.getSerializedOptimizer()) {
+            auto snapshot = model.optimizerSnapshot(*live);
+            optimizer_metadata_ = optimizer_metadata(snapshot);
+            auto add_state = [&](const std::string& name, std::vector<float>& values) {
+                if (values.empty()) return;
+                owned_f32_buffers_.push_back(std::move(values));
+                const auto& data = owned_f32_buffers_.back();
+                TensorData td;
+                td.name = name;
+                td.dtype = DType::Float32; // Optimizer arithmetic is F32, even for F16/BF16 weights.
+                td.shape = {data.size()};
+                td.byte_size = data.size() * sizeof(float);
+                td.data_ptr = data.data();
+                tensors.push_back(td);
+            };
+            add_state("optimizer/m", snapshot.m);
+            add_state("optimizer/v", snapshot.v);
         }
     }
 
@@ -230,30 +287,9 @@ bool RawCheckpointWriter::save_training(
     try {
         fs::path training_path = fs::path(root) / "model" / "training.json";
 
-        json j;
-        j["has_optimizer"] = false;
-
-        if (const Optimizer* opt = model.getSerializedOptimizer()) {
-            j["has_optimizer"] = true;
-            j["type"] = static_cast<int>(opt->type);
-            j["step"] = opt->step;
-            j["lr_current"] = opt->getCurrentLR();
-            j["beta1"] = opt->beta1;
-            j["beta2"] = opt->beta2;
-            j["eps"] = opt->eps;
-            j["weight_decay"] = opt->weight_decay;
-            j["decay_strategy"] = static_cast<int>(opt->decay_strategy);
-            j["initial_lr"] = opt->initial_lr;
-            j["min_lr"] = opt->min_lr;
-            j["decay_rate"] = opt->decay_rate;
-            j["decay_steps"] = opt->decay_steps;
-            j["total_steps"] = opt->total_steps;
-            j["warmup_steps"] = opt->warmup_steps;
-            j["state_sizes"] = {
-                {"m", opt->m.size()},
-                {"v", opt->v.size()}
-            };
-        }
+        json j = optimizer_metadata_;
+        if (!j.contains("has_optimizer")) j["has_optimizer"] = false;
+        if (model.modelConfig.contains("training_state")) j["loop"] = model.modelConfig["training_state"];
 
         std::ofstream file(training_path);
         if (!file) {
@@ -283,6 +319,9 @@ bool RawCheckpointWriter::save_tensor(
         fs::path root_path(root);
         fs::path bin_path = root_path / "tensors" / (tensor.name + ".bin");
         fs::path json_path = root_path / "tensors" / (tensor.name + ".json");
+        std::cerr << "[serialization] raw save_tensor name=" << tensor.name
+                  << " dtype=" << dtype_to_string(tensor.dtype)
+                  << " bytes=" << tensor.byte_size << std::endl;
 
         // Ensure directories exist (tensor.name may contain subpaths like "vae/enc_fc0_weights")
         fs::create_directories(bin_path.parent_path());
@@ -341,12 +380,19 @@ bool RawCheckpointWriter::save_architecture(
 ) {
     try {
         fs::path arch_path = fs::path(root) / "model" / "architecture.json";
+        std::cerr << "[serialization] raw save_architecture path=" << arch_path.string() << std::endl;
         
         json arch;
         arch["model_name"] = model.getModelName();
         arch["total_params"] = model.totalParamCount();
         arch["num_layers"] = model.getLayers().size();
         arch["model_config"] = model.modelConfig;
+        try {
+            if (model.modelConfig.contains("type") && model.modelConfig["type"].is_string()) {
+                arch["model_type"] = model.modelConfig["type"].get<std::string>();
+            }
+        } catch (...) {
+        }
         {
             DType dt = DType::Float32;
             try { dt = string_to_dtype(model.getDefaultDType()); } catch (...) {}
@@ -362,7 +408,9 @@ bool RawCheckpointWriter::save_architecture(
             layer_obj["name"] = layer.name;
             layer_obj["type"] = layer.type;
             layer_obj["params_count"] = layer.params_count;
+            layer_obj["trainable_parameter"] = layer.trainable_parameter;
             layer_obj["inputs"] = layer.inputs;
+            if (layer.skip_input_index >= 0) layer_obj["skip_input_index"] = layer.skip_input_index;
             layer_obj["output"] = layer.output;
             // Common shape fields
             layer_obj["in_features"] = layer.in_features;
@@ -379,12 +427,6 @@ bool RawCheckpointWriter::save_architecture(
             layers_array.push_back(layer_obj);
         }
         arch["layers"] = layers_array;
-        
-        // Save I/O dimensions if known
-        if (model.width() > 0 && model.height() > 0) {
-            arch["image_width"] = model.width();
-            arch["image_height"] = model.height();
-        }
         
         std::ofstream file(arch_path);
         if (!file) {
@@ -414,7 +456,9 @@ bool RawCheckpointWriter::save_tokenizer(
 ) {
     try {
         fs::path tok_path = fs::path(root) / "tokenizer" / "tokenizer.json";
+        std::cerr << "[serialization] raw save_tokenizer path=" << tok_path.string() << std::endl;
         
+        fs::create_directories(tok_path.parent_path());
         const auto& tokenizer = model.getTokenizer();
         json tok_json = tokenizer.to_json();
         
@@ -446,7 +490,9 @@ bool RawCheckpointWriter::save_encoder(
 ) {
     try {
         fs::path enc_path = fs::path(root) / "encoder" / "encoder.json";
+        std::cerr << "[serialization] raw save_encoder path=" << enc_path.string() << std::endl;
         
+        fs::create_directories(enc_path.parent_path());
         const auto& encoder = model.getEncoder();
         json enc_json = encoder.to_json();
         
@@ -479,6 +525,8 @@ bool RawCheckpointWriter::save_manifest(
 ) {
     try {
         fs::path manifest_path = fs::path(root) / "manifest.json";
+        std::cerr << "[serialization] raw save_manifest path=" << manifest_path.string()
+                  << " tensors=" << tensors.size() << std::endl;
         
         json manifest;
         manifest["format"] = "mimir_raw_checkpoint";

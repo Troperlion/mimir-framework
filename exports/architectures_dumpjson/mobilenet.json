@@ -1,0 +1,1386 @@
+{
+  "default_dtype": "float32",
+  "encoder": {
+    "architecture": "ViT",
+    "has_encoder": true
+  },
+  "features": [
+    "layer_config",
+    "real_shapes",
+    "layer_io",
+    "extended_layer_types",
+    "framework_state",
+    "checksums"
+  ],
+  "format": "mimir_debug_dump",
+  "format_version": "1.3.0",
+  "framework_state": {
+    "memory": {
+      "advanced_ram_manager": {
+        "allocations_blocked": false,
+        "current_bytes": 0,
+        "current_mb": 0.0,
+        "freeze_mode": false,
+        "peak_bytes": 0,
+        "peak_mb": 0.0,
+        "usage_percent": 0.0
+      },
+      "dynamic_tensor_allocator": {
+        "loaded_count": 14,
+        "tensor_count": 14
+      },
+      "memory_guard": {
+        "allocations_blocked": false,
+        "current_bytes": 1571360,
+        "current_mb": 1.498565673828125,
+        "freeze_mode": false,
+        "limit_bytes": 10737418240,
+        "limit_mb": 10240.0,
+        "peak_bytes": 1571360,
+        "peak_mb": 1.498565673828125,
+        "usage_percent": 0.014634430408477783
+      }
+    },
+    "model": {
+      "default_dtype": "float32",
+      "has_encoder": true,
+      "image_height": 64,
+      "image_width": 64,
+      "model_config": {
+        "base_channels": 32,
+        "image_c": 3,
+        "image_h": 64,
+        "image_w": 64,
+        "num_classes": 1000,
+        "type": "mobilenet"
+      },
+      "model_name": "MobileNetModel",
+      "num_layers": 29,
+      "parameters_frozen": false,
+      "tokenizer_vocab_size": 47,
+      "total_params": 392840
+    },
+    "registry": {
+      "supported_layer_count": 70,
+      "supported_layer_types": [
+        "Conv2d",
+        "ConvTranspose2d",
+        "Conv1d",
+        "DepthwiseConv2d",
+        "Linear",
+        "Bilinear",
+        "Embedding",
+        "EmbeddingBag",
+        "BatchNorm2d",
+        "BatchNorm1d",
+        "LayerNorm",
+        "GroupNorm",
+        "InstanceNorm2d",
+        "RMSNorm",
+        "ReLU",
+        "LeakyReLU",
+        "GELU",
+        "GEGLU",
+        "SiLU",
+        "Tanh",
+        "Sigmoid",
+        "Softmax",
+        "LogSoftmax",
+        "Softplus",
+        "Mish",
+        "HardSigmoid",
+        "HardSwish",
+        "MaxPool2d",
+        "AvgPool2d",
+        "AdaptiveAvgPool2d",
+        "GlobalAvgPool2d",
+        "MaxPool1d",
+        "AvgPool1d",
+        "TokenMeanPool",
+        "Dropout",
+        "Dropout2d",
+        "AlphaDropout",
+        "Flatten",
+        "Reshape",
+        "Transpose",
+        "Permute",
+        "Squeeze",
+        "Unsqueeze",
+        "View",
+        "Add",
+        "Subtract",
+        "Multiply",
+        "Divide",
+        "Concat",
+        "Split",
+        "Chunk",
+        "Stack",
+        "MatMul",
+        "BatchMatMul",
+        "SelfAttention",
+        "MultiHeadAttention",
+        "CrossAttention",
+        "UpsampleNearest",
+        "UpsampleBilinear",
+        "UpsampleBicubic",
+        "PixelShuffle",
+        "LSTM",
+        "GRU",
+        "RNN",
+        "ZeroPad2d",
+        "ReflectionPad2d",
+        "ReplicationPad2d",
+        "Identity",
+        "Constant",
+        "Lambda"
+      ]
+    },
+    "runtime": {
+      "backends": {
+        "cpu": {
+          "available": true,
+          "compiled": true,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CPU",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "cuda": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "CUDA",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "opencl": {
+          "available": false,
+          "compiled": true
+        },
+        "rocm": {
+          "available": false,
+          "compiled": false,
+          "config": {
+            "attention_enabled": false,
+            "attention_min_ops": 262144,
+            "backend": "ROCM",
+            "conv_enabled": false,
+            "conv_min_ops": 262144,
+            "device_index": 0,
+            "disabled": false,
+            "linear_enabled": false,
+            "linear_min_ops": 1048576,
+            "norm_enabled": false,
+            "norm_min_elements": 4096,
+            "verbose": false
+          }
+        },
+        "vulkan": {
+          "available": true,
+          "compiled": true
+        }
+      },
+      "cpu_features": {
+        "avx2": true,
+        "bmi2": true,
+        "f16c": true,
+        "fma": true
+      },
+      "environment_overrides": {},
+      "framework_logs_suppressed": false
+    },
+    "snapshot_timestamp": 1783546795,
+    "snapshot_version": "1.0.0"
+  },
+  "git": {
+    "branch": "unknown",
+    "commit": "unknown"
+  },
+  "layers": [
+    {
+      "index": 0,
+      "inputs": [
+        "__input__"
+      ],
+      "name": "mobilenet/raw_in",
+      "output": "mobilenet/in",
+      "params_count": 0,
+      "tensors": [],
+      "type": "Identity"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 3,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 1,
+        "kernel_w": 1,
+        "out_channels": 32,
+        "pad_h": 0,
+        "pad_w": 0,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 1,
+      "inputs": [
+        "mobilenet/in"
+      ],
+      "name": "mobilenet/stem",
+      "output": "mobilenet/stem_y",
+      "params_count": 96,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "mobilenet/stem.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            3,
+            1,
+            1
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 96,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 2,
+      "inputs": [
+        "mobilenet/stem_y"
+      ],
+      "name": "mobilenet/stem_relu",
+      "output": "mobilenet/stem_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": true,
+        "in_channels": 32,
+        "input_height": 64,
+        "input_width": 64,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 32,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 3,
+      "inputs": [
+        "mobilenet/stem_act"
+      ],
+      "name": "mobilenet/b1/dw",
+      "output": "mobilenet/b1/dw_y",
+      "params_count": 320,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "mobilenet/b1/dw.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            32,
+            1,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 288,
+          "truncated": true
+        }
+      ],
+      "type": "DepthwiseConv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 4,
+      "inputs": [
+        "mobilenet/b1/dw_y"
+      ],
+      "name": "mobilenet/b1/dw_relu",
+      "output": "mobilenet/b1/dw_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 32,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 1,
+        "kernel_w": 1,
+        "out_channels": 64,
+        "pad_h": 0,
+        "pad_w": 0,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 5,
+      "inputs": [
+        "mobilenet/b1/dw_act"
+      ],
+      "name": "mobilenet/b1/pw",
+      "output": "mobilenet/b1/pw_y",
+      "params_count": 2048,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "mobilenet/b1/pw.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            32,
+            1,
+            1
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2048,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 6,
+      "inputs": [
+        "mobilenet/b1/pw_y"
+      ],
+      "name": "mobilenet/b1/pw_relu",
+      "output": "mobilenet/b1/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": true,
+        "in_channels": 64,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 7,
+      "inputs": [
+        "mobilenet/b1/out"
+      ],
+      "name": "mobilenet/b2/dw",
+      "output": "mobilenet/b2/dw_y",
+      "params_count": 640,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "mobilenet/b2/dw.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            1,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 576,
+          "truncated": true
+        }
+      ],
+      "type": "DepthwiseConv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 8,
+      "inputs": [
+        "mobilenet/b2/dw_y"
+      ],
+      "name": "mobilenet/b2/dw_relu",
+      "output": "mobilenet/b2/dw_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 1,
+        "kernel_w": 1,
+        "out_channels": 64,
+        "pad_h": 0,
+        "pad_w": 0,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 9,
+      "inputs": [
+        "mobilenet/b2/dw_act"
+      ],
+      "name": "mobilenet/b2/pw",
+      "output": "mobilenet/b2/pw_y",
+      "params_count": 4096,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "mobilenet/b2/pw.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            64,
+            1,
+            1
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 4096,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 10,
+      "inputs": [
+        "mobilenet/b2/pw_y"
+      ],
+      "name": "mobilenet/b2/pw_relu",
+      "output": "mobilenet/b2/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": true,
+        "in_channels": 64,
+        "input_height": 32,
+        "input_width": 32,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 64,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 11,
+      "inputs": [
+        "mobilenet/b2/out"
+      ],
+      "name": "mobilenet/b3/dw",
+      "output": "mobilenet/b3/dw_y",
+      "params_count": 640,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "mobilenet/b3/dw.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            64,
+            1,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 576,
+          "truncated": true
+        }
+      ],
+      "type": "DepthwiseConv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 12,
+      "inputs": [
+        "mobilenet/b3/dw_y"
+      ],
+      "name": "mobilenet/b3/dw_relu",
+      "output": "mobilenet/b3/dw_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 64,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 1,
+        "kernel_w": 1,
+        "out_channels": 128,
+        "pad_h": 0,
+        "pad_w": 0,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 13,
+      "inputs": [
+        "mobilenet/b3/dw_act"
+      ],
+      "name": "mobilenet/b3/pw",
+      "output": "mobilenet/b3/pw_y",
+      "params_count": 8192,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "mobilenet/b3/pw.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            64,
+            1,
+            1
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 8192,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 14,
+      "inputs": [
+        "mobilenet/b3/pw_y"
+      ],
+      "name": "mobilenet/b3/pw_relu",
+      "output": "mobilenet/b3/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": true,
+        "in_channels": 128,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 128,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 15,
+      "inputs": [
+        "mobilenet/b3/out"
+      ],
+      "name": "mobilenet/b4/dw",
+      "output": "mobilenet/b4/dw_y",
+      "params_count": 1280,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "mobilenet/b4/dw.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            1,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1152,
+          "truncated": true
+        }
+      ],
+      "type": "DepthwiseConv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 16,
+      "inputs": [
+        "mobilenet/b4/dw_y"
+      ],
+      "name": "mobilenet/b4/dw_relu",
+      "output": "mobilenet/b4/dw_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 128,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 1,
+        "kernel_w": 1,
+        "out_channels": 128,
+        "pad_h": 0,
+        "pad_w": 0,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 17,
+      "inputs": [
+        "mobilenet/b4/dw_act"
+      ],
+      "name": "mobilenet/b4/pw",
+      "output": "mobilenet/b4/pw_y",
+      "params_count": 16384,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "mobilenet/b4/pw.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            128,
+            1,
+            1
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 16384,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 18,
+      "inputs": [
+        "mobilenet/b4/pw_y"
+      ],
+      "name": "mobilenet/b4/pw_relu",
+      "output": "mobilenet/b4/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": true,
+        "in_channels": 128,
+        "input_height": 16,
+        "input_width": 16,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 128,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 2,
+        "stride_w": 2
+      },
+      "index": 19,
+      "inputs": [
+        "mobilenet/b4/out"
+      ],
+      "name": "mobilenet/b5/dw",
+      "output": "mobilenet/b5/dw_y",
+      "params_count": 1280,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "mobilenet/b5/dw.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            128,
+            1,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 1152,
+          "truncated": true
+        }
+      ],
+      "type": "DepthwiseConv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 20,
+      "inputs": [
+        "mobilenet/b5/dw_y"
+      ],
+      "name": "mobilenet/b5/dw_relu",
+      "output": "mobilenet/b5/dw_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 128,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 1,
+        "kernel_w": 1,
+        "out_channels": 256,
+        "pad_h": 0,
+        "pad_w": 0,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 21,
+      "inputs": [
+        "mobilenet/b5/dw_act"
+      ],
+      "name": "mobilenet/b5/pw",
+      "output": "mobilenet/b5/pw_y",
+      "params_count": 32768,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "mobilenet/b5/pw.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            128,
+            1,
+            1
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 32768,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 22,
+      "inputs": [
+        "mobilenet/b5/pw_y"
+      ],
+      "name": "mobilenet/b5/pw_relu",
+      "output": "mobilenet/b5/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": true,
+        "in_channels": 256,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 3,
+        "kernel_w": 3,
+        "out_channels": 256,
+        "pad_h": 1,
+        "pad_w": 1,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 23,
+      "inputs": [
+        "mobilenet/b5/out"
+      ],
+      "name": "mobilenet/b6/dw",
+      "output": "mobilenet/b6/dw_y",
+      "params_count": 2560,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "mobilenet/b6/dw.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            1,
+            3,
+            3
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 2304,
+          "truncated": true
+        }
+      ],
+      "type": "DepthwiseConv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 24,
+      "inputs": [
+        "mobilenet/b6/dw_y"
+      ],
+      "name": "mobilenet/b6/dw_relu",
+      "output": "mobilenet/b6/dw_act",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "dilation": 1,
+        "groups": 1,
+        "has_bias": false,
+        "in_channels": 256,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_h": 1,
+        "kernel_w": 1,
+        "out_channels": 256,
+        "pad_h": 0,
+        "pad_w": 0,
+        "stride_h": 1,
+        "stride_w": 1
+      },
+      "index": 25,
+      "inputs": [
+        "mobilenet/b6/dw_act"
+      ],
+      "name": "mobilenet/b6/pw",
+      "output": "mobilenet/b6/pw_y",
+      "params_count": 65536,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "mobilenet/b6/pw.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            256,
+            256,
+            1,
+            1
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 65536,
+          "truncated": true
+        }
+      ],
+      "type": "Conv2d",
+      "weight_checksum": "0"
+    },
+    {
+      "index": 26,
+      "inputs": [
+        "mobilenet/b6/pw_y"
+      ],
+      "name": "mobilenet/b6/pw_relu",
+      "output": "mobilenet/b6/out",
+      "params_count": 0,
+      "tensors": [],
+      "type": "ReLU"
+    },
+    {
+      "config": {
+        "in_channels": 256,
+        "input_height": 8,
+        "input_width": 8,
+        "kernel_size": 0,
+        "padding": 0,
+        "stride": 1
+      },
+      "index": 27,
+      "inputs": [
+        "mobilenet/b6/out"
+      ],
+      "name": "mobilenet/gap",
+      "output": "mobilenet/gap_y",
+      "params_count": 0,
+      "tensors": [],
+      "type": "GlobalAvgPool2d"
+    },
+    {
+      "config": {
+        "has_bias": false,
+        "in_features": 256,
+        "out_features": 1000
+      },
+      "index": 28,
+      "inputs": [
+        "mobilenet/gap_y"
+      ],
+      "name": "mobilenet/head",
+      "output": "x",
+      "params_count": 257000,
+      "tensors": [
+        {
+          "dtype": "F32",
+          "name": "mobilenet/head.weight",
+          "sample_size": 20,
+          "sample_values": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "shape": [
+            1000,
+            256
+          ],
+          "stats": {
+            "l2_norm": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "min": 0.0,
+            "std": 0.0
+          },
+          "total_elements": 256000,
+          "truncated": true
+        }
+      ],
+      "type": "Linear",
+      "weight_checksum": "0"
+    }
+  ],
+  "model_config": {
+    "base_channels": 32,
+    "dtype": "float32",
+    "image_c": 3,
+    "image_h": 64,
+    "image_w": 64,
+    "num_classes": 1000,
+    "type": "mobilenet"
+  },
+  "model_name": "MobileNetModel",
+  "num_layers": 29,
+  "timestamp": 1783546795,
+  "tokenizer": {
+    "has_vocab": true,
+    "vocab_size": 47
+  },
+  "total_params": 392840,
+  "default_params": {
+    "base_channels": 32,
+    "image_c": 3,
+    "image_h": 64,
+    "image_w": 64,
+    "num_classes": 1000
+  }
+}

@@ -3,6 +3,7 @@
 -- Système de pipeline pour piloter tous les modèles depuis Lua
 -- ============================================================================
 
+---@class PipelineAPI
 local Pipeline = {}
 Pipeline.__index = Pipeline
 
@@ -997,6 +998,7 @@ end
 -- Pipeline Manager - Gestion de plusieurs pipelines
 -- ============================================================================
 
+---@class PipelineManagerAPI
 local PipelineManager = {}
 PipelineManager.__index = PipelineManager
 

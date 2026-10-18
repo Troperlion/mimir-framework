@@ -1,21 +1,12 @@
-# Internals : GPU Runtimes — CUDA & ROCm (C++)
-
-## Pour qui
-
-Développeur avancé qui modifie le moteur C/C++.
-
-## Objectif
+# Runtimes GPU : CUDA et ROCm
 
 Comprendre le fonctionnement interne exact des composants runtime.
 
-## Avant de commencer
+**Public concerné :** Développeur avancé qui modifie le moteur C/C++.
 
-Connaître les bases C++ et la structure du dépôt.
-
-## Résultat attendu
-
-Tu peux modifier le code interne en limitant les régressions.
-
+> **Prérequis**
+>
+> Connaître les bases C++ et la structure du dépôt.
 
 Cette page documente l'implémentation interne des backends GPU de Mímir : architecture, fast-paths, conventions de code.
 
@@ -29,6 +20,18 @@ Sources de vérité :
 Guide utilisateur associé : [docs/05-Advanced/05-GPU-Acceleration.md](../05-Advanced/05-GPU-Acceleration.md).
 
 ---
+
+## Sur cette page
+
+- [1) Interface commune (AbstractRuntime)](#1-interface-commune-abstractruntime)
+- [2) RuntimeConfig — paramètres et parsing](#2-runtimeconfig-paramètres-et-parsing)
+- [3) CudaRuntime — implémentation](#3-cudaruntime-implémentation)
+- [4) Fast-paths détaillés](#4-fast-paths-détaillés)
+- [5) ROCm Runtime — différences avec CUDA](#5-rocm-runtime-différences-avec-cuda)
+- [6) Vulkan Runtime — kernels compute réels (SPIR-V)](#6-vulkan-runtime-kernels-compute-réels-spir-v)
+- [7) Invariants et gotchas](#7-invariants-et-gotchas)
+- [8) Ajouter un nouveau fast-path GPU](#8-ajouter-un-nouveau-fast-path-gpu)
+- [Étapes suivantes](#étapes-suivantes)
 
 ## 1) Interface commune (`AbstractRuntime`)
 
@@ -54,23 +57,17 @@ public:
 };
 ```
 
-### Patron de dispatch (Model.cpp)
+### Patron de dispatch (Model.cpp + RuntimeRouter)
 
 ```cpp
-// Dans Model::forward pour chaque layer :
-if (cuda_runtime_ && cuda_runtime_->isInitialized()) {
-    if (cuda_runtime_->forwardLayer(inputs, outputs, layer, training))
-        continue; // fast-path OK, on passe au layer suivant
-}
-if (rocm_runtime_ && rocm_runtime_->isInitialized()) {
-    if (rocm_runtime_->forwardLayer(inputs, outputs, layer, training))
-        continue;
-}
-// Fallback CPU
-cpu_forward_layer(inputs, outputs, layer, training);
+// Le forward route via RuntimeRouter.
+// Le router essaie chaque backend initialisé dans l'ordre,
+// et appelle forwardLayer(...).
+// Chaque runtime sélectionne les LayerType supportés via
+// switch (layer.type_enum) et retourne false sinon.
 ```
 
-`forwardLayer` retourne `true` si le fast-path a réussi, `false` pour fallback.
+Le dispatch `forwardLayer(...)` est utilisé dans le forward principal pour Linear, Convolution, Normes, Attention, et autres ops supportées par les backends.
 
 ---
 
@@ -174,6 +171,8 @@ bool CudaRuntime::initialize(const RuntimeConfig& cfg) {
 
 ## 4) Fast-paths détaillés
 
+> **Important :** la section ci-dessous décrit l'implémentation de `CudaRuntime::forwardLayer` / `RocmRuntime::forwardLayer`, qui est effectivement sollicitée par le dispatch principal selon le type de layer et les flags runtime.
+
 ### 4.1 Pattern commun
 
 Chaque fast-path dans `CudaRuntime::forwardLayer` suit ce squelette :
@@ -220,56 +219,37 @@ while(false); // break → fallback CPU
 return false;
 ```
 
-### 4.2 Conv2d : im2col détail
+### 4.2 Convolutions et normalisations natives
 
-```
-input[B, C_in, H, W]  →  col[B, C_in·kH·kW, H_out·W_out]
-                          (im2col, CPU, avec stride/padding/dilation)
+`CudaNativeOps.cuh` contient les kernels Conv2d et les normalisations
+LayerNorm/RMSNorm/GroupNorm/InstanceNorm. `CudaTrainingOps.cuh` couvre les
+variantes BatchNorm et les opérations stochastiques. Les convolutions étendues
+(Conv1d, DepthwiseConv2d, ConvTranspose2d) et leurs gradients utilisent également
+des kernels device. Les calculs de réduction et de convolution des chemins
+natifs restent sur GPU ; les tenseurs sont transférés pour le staging.
 
-output[B, C_out, H_out·W_out]
-  = W[C_out, C_in·kH·kW]  ×  col[C_in·kH·kW, H_out·W_out]
-    (cublasSgemm, device)
-```
+### 4.3 Attention, récurrence et NMS
 
-Im2col implémenté avec des boucles C++ standard. Pas de CUDA pour im2col (coût faible, évite les kernels supplémentaires).
+`CudaAttentionOps.cuh` fournit les projections, scores, masque causal,
+softmax et gradients d'attention sur le device. `CudaRecurrentOps.cuh` couvre
+RNN, GRU et LSTM selon les formes admises par le contrat CPU.
 
-### 4.3 LayerNorm / RMSNorm : hybride
-
-**Pourquoi hybride ?** La normalisation implique une réduction (mean/variance) qui est efficace sur CPU avec peu de code. Seule la partie affine (multiplication + addition par vecteur) est déportée sur GPU car c'est un SGEMM/AXPY.
-
-```
-x_hat = (x - mean) / sqrt(var + eps)    ← sur host (O(N))
-y     = gamma ⊙ x_hat + beta            ← sur device (cublasSdgmm + cublasSaxpy)
-```
-
-`cublasSdgmm(LEFT, N, M, x_hat, N, gamma, 1, y, N)` = mise à l'échelle par `gamma`.
-
-### 4.4 Attention : boucle par tête
-
-```
-Pour chaque tête h (0..num_heads-1) :
-  Q_h, K_h, V_h = split(QKV_projected)      ← sur host
-
-  scores[h] = Q_h × K_h^T / sqrt(d_head)    ← SGEMM OP_T sur device
-  if causal: masque supérieur                 ← sur host
-  scores[h] = softmax(scores[h])              ← sur host
-
-  ctx[h] = scores[h] × V_h                   ← SGEMM sur device
-
-concat(ctx_0..ctx_h)                          ← sur host
-output = concat × W_out                       ← SGEMM sur device
-```
-
-**Note** : le calcul de softmax reste sur host pour simplifier (pas de kernel softmax GPU custom). Cela implique un aller-retour host↔device pour les scores, ce qui est un overhead mesurable sur de longues séquences.
+`CudaDetectionOps.cuh` effectue la sélection NMS sur GPU et fournit le backward
+stop-gradient : un gradient nul de la taille de chaque entrée. Le dispatcher
+CPU utilise le même contrat. Le backward `Lambda` reste indisponible en CUDA.
+La présence de ces kernels ne prouve pas leur exécution sur GPU NVIDIA :
+les validations locales récentes portent sur CPU, OpenCL et Vulkan.
 
 ---
 
 ## 5) ROCm Runtime — différences avec CUDA
 
-L'implémentation ROCm est un miroir de CUDA, avec substitution d'API :
+Les chemins historiques ROCm utilisent les équivalents HIP/rocBLAS des API
+CUDA. Les extensions natives CUDA récentes ne sont pas automatiquement
+portées dans `RocmRuntime` :
 
 | CUDA | ROCm |
-|---|---|
+| --- | --- |
 | `cudaMalloc` | `hipMalloc` |
 | `cudaFree` | `hipFree` |
 | `cudaMemcpy` | `hipMemcpy` |
@@ -284,38 +264,171 @@ L'implémentation ROCm est un miroir de CUDA, avec substitution d'API :
 | `CUBLAS_OP_T` | `rocblas_operation_transpose` |
 | `CUBLAS_SIDE_LEFT` | `rocblas_side_left` |
 
-Les fast-paths activés, seuils, et logique de fallback sont strictement identiques.
+Les flags et seuils sont propres à chaque backend. Consulter les capacités
+déclarées et les traces pour distinguer calcul natif et repli CPU.
 
 ---
 
-## 6) Invariants et gotchas
+## 6) Vulkan Runtime — kernels compute réels (SPIR-V)
 
-**Aucun état persistent entre les couches**
+Vulkan est branché via `VulkanRuntime` + `VulkanCompute::ComputeEngine` et dispatché par `RuntimeRouter`.
+
+Quelques chemins spécialisés historiques de `VulkanCompute::ComputeEngine` :
+
+- `Linear`
+- `MatMul`
+- `BatchMatMul`
+- `Add`
+- `Multiply`
+- `ReLU`
+
+Shaders associés (compilés au build):
+
+- `shaders/linear_forward.comp`
+- `shaders/add_forward.comp`
+- `shaders/mul_forward.comp`
+- `shaders/relu_forward.comp`
+
+Pipeline technique:
+
+1. CMake compile les `.comp` en `.spv` via `glslangValidator`.
+2. Les `.spv` sont copiés dans `bin/shaders`.
+3. `VulkanCompute.hpp` charge les SPIR-V, crée pipeline/layout/descriptor pool.
+4. `VulkanRuntime::forwardLayer` route les layers compatibles vers ces kernels.
+5. Les autres opérations et le backward passent par `PortableRuntime`, décrit ci-dessous.
+6. En cas d'indisponibilité shader/device, le runtime retourne `false` et le routeur propose l'opération au backend suivant.
+
+---
+
+## 7) Invariants et gotchas
+
+### Aucun état persistent entre les couches
 
 Les `DeviceBuf` sont alloués/libérés à chaque appel de fast-path. Il n'y a pas de pool de buffers GPU. C'est délibéré : simplicité d'implémentation. L'overhead d'allocation est limité car `cudaMalloc` est relativement rapide pour des buffers de même taille (le driver CUDA met en cache).
 
-**`training=true` désactive Conv2d**
+**`training=true` et dispatch réel**
 
-Le backward de Conv2d n'est pas implémenté côté GPU. Si le fast-path Conv2d était utilisé en training, le gradient serait incorrect. Le check `if (training) break;` est donc critique.
+Le dispatch runtime est disponible en entraînement comme en inférence pour les fast-paths activés (`Linear`, `MatMul/BatchMatMul`, `Conv2d`, normes, attentions) côté CUDA/ROCm.
 
-**Pas de mixed precision**
+Le backward n'est pas déporté vers ces runtimes dans ces fast-paths : l'accélération concerne la passe forward des layers.
+
+### Pas de mixed precision
 
 Tous les fast-paths travaillent en `float32`. Les types `F16`/`BF16` du modèle ne sont pas utilisés ici (la conversion est faite ailleurs, si applicable).
 
-**Masque causal sur host**
+### Masque causal sur host
 
-Le masque causal de l'attention (upper triangle → -∞) est appliqué sur le CPU après download des scores. Pour de très longues séquences (>1K tokens), cela représente un overhead notable. À optimiser si besoin.
+Les kernels d'attention de référence appliquent le masque causal sur le device.
+Le coût du staging et des kernels séquentiels doit être mesuré pour les longues
+séquences ; la couverture native ne constitue pas une garantie de performance.
 
-**Ordre des builds**
+### Ordre des builds
 
-CUDA et ROCm sont mutuellement exclusifs (liés par `#ifdef`). On ne peut pas compiler les deux ensemble dans le même binaire.
+CUDA et ROCm sont deux options CMake indépendantes (`ENABLE_CUDA` et
+`ENABLE_ROCM`). Les deux backends peuvent donc être présents dans le même
+binaire si leurs bibliothèques sont détectées. Au runtime, le routeur essaie
+ROCm avant CUDA, puis Vulkan, OpenCL et CPU ; une opération refusée par un
+backend est proposée au suivant.
 
 ---
 
-## 7) Ajouter un nouveau fast-path GPU
+## 8) Ajouter un nouveau fast-path GPU
+
+Les layers du modèle passent par `RuntimeRouter` en forward et backward. Ajouter le calcul dans le runtime, déclarer sa capacité réelle et tester le runtime sélectionné ; aucun nouveau switch mathématique ne doit être ajouté dans `Model.cpp`.
 
 1. Ajouter les flags dans `RuntimeConfig` (`src/runtimes/AbstractRuntime.hpp`)
 2. Ajouter le parsing `fromEnv` correspondant
 3. Implémenter le `case` dans `CudaRuntime::forwardLayer`
 4. Implémenter le `case` miroir dans `RocmRuntime::forwardLayer`
 5. Mettre à jour le tableau de synthèse dans `docs/04-Architecture-Internals/03-Hardware-Backends.md`
+
+## Étapes suivantes
+
+- [Page précédente : Internals : CLI (binaire `mimir`) et points d’entrée](20-CLI-EntryPoints.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Internals : Execution Planner (C++)](22-Planning.md)
+
+## OpenCL et Vulkan : kernels de référence partagés
+
+Les backends Vulkan et OpenCL conservent leurs chemins spécialisés et utilisent
+`PortableRuntime` pour les autres opérations et les passes arrière. Leur
+couverture par type correspond au dispatcher CPU exécutable : **72 types en
+forward et 73 en backward**, dont NMS avec stop-gradient. `Lambda` est refusé
+en forward par le dispatcher CPU lui-même ; son backward identité est supporté
+sur CPU, Vulkan et OpenCL. CUDA possède les mêmes familles de kernels mais
+n'implémente pas le backward `Lambda`.
+
+Les familles couvertes comprennent convolutions, normalisations, attention,
+projections/embeddings, pooling, transformations de tenseurs, récurrence,
+upsampling, dropout et reparamétrisation. Les configurations, formes de tenseurs
+et limites du device restent vérifiées ; cette couverture par type ne garantit
+pas que toute forme soit acceptée.
+
+Les nouveaux kernels de référence OpenCL/Vulkan exécutent leur calcul sur le
+device avec une invocation qui traite le travail logique séquentiellement.
+Ils privilégient la conformité numérique ; leur couverture ne garantit pas des
+performances supérieures au CPU. Le staging des tenseurs et l'accumulation des
+gradients de paramètres retournés restent sur l'hôte. Les calculs forward et
+backward ne sont pas remplacés par un appel arithmétique CPU caché.
+
+### Sources et génération
+
+- `src/runtimes/portable/PortableRuntime.cpp` valide et orchestre les opérations.
+- `PortableStaging.hpp` prépare les buffers et les arguments des kernels.
+- `PortableDevice.cpp` soumet les calculs à OpenCL compute ou Vulkan compute.
+- `reference.cl` et `reference.comp` contiennent les kernels générés.
+- `PortableShaderData.hpp` embarque le source OpenCL et le SPIR-V Vulkan.
+
+Le générateur réutilise les algorithmes GPU existants alignés sur le contrat
+CPU. Pour régénérer les fichiers, il faut Python 3, `glslangValidator` et
+`spirv-val` :
+
+```bash
+python3 scripts/dev/generate_portable_reference.py
+```
+
+Cette génération a été exécutée lors de l'implémentation. Les builds ordinaires
+utilisent les sources/SPIR-V embarqués ; les kernels de référence ne dépendent
+pas d'un toolkit CUDA.
+
+### Validation
+
+Recette CMake/CTest pour un build avec tests (adapter le dossier de build ;
+les validations matérielles locales sont précisées ci-dessous) :
+
+```bash
+cmake -S . -B build-gpu-tests -DENABLE_OPENCL=ON -DENABLE_VULKAN=ON -DMIMIR_ENABLE_TESTS=ON -DBUILD_TESTING=ON
+cmake --build build-gpu-tests --target PortableNativeOps RuntimeTest.NMS GpuBackwardParity -j2
+ctest --test-dir build-gpu-tests --output-on-failure -R '^RuntimeTest\.(NMS|(OPENCL|VULKAN)(NativeOps|BackwardParity))$'
+```
+
+Le 11 octobre 2026, les exécutables de tests ont été compilés et lancés
+directement contre la bibliothèque locale : 165 cas numériques et quatre
+configurations NMS par backend passent avec OpenCL/Rusticl sur le GPU AMD
+Radeon Graphics et Vulkan/RADV RENOIR sur ce même GPU. Les régressions de
+gradients historiques et le test CPU NMS passent également. Vulkan/Lavapipe
+a aussi passé les comparaisons numériques pendant l'implémentation.
+
+Les tests NMS incluent les classes optionnelles, les entrées vides, les formes
+invalides, le stop-gradient et la sélection du runtime. Le backward CPU est
+la référence des comparaisons GPU. CUDA dispose du kernel NMS forward/backward
+et des tests correspondants ; son exécution sur GPU NVIDIA reste à valider.
+Ces résultats prouvent la conformité et le routage, sans mesure de performance.
+
+Voir aussi [le contrat NMS](../03-API-Reference/01-Layers.md#contrat-de-nms)
+et [les sources portables](../../src/runtimes/portable/README.md).
+
+
+### Benchmarks Colab et validation du 18 octobre 2026
+
+Les 165 cas de parité native par backend ont été revérifiés sur AMD Radeon
+Graphics avec Vulkan/RADV et OpenCL/Rusticl. Le contrôle des budgets portables
+passe aussi. Le profil Colab `portable` valide sept cas par runtime, avec
+sélection explicite de `VULKAN` ou `OPENCL`, sans repli CPU attribué au GPU.
+Cette validation locale ne prouve pas la disponibilité du pilote NVIDIA dans Colab.
+
+Le microbenchmark peut mesurer plusieurs runtimes Mímir dans le même run, chacun
+dans son processus et sous son identité. Le profil portable partage les mêmes
+formes entre tous les concurrents ; les budgets de sécurité restent actifs.
+Voir [Benchmarks Colab](../05-Advanced/07-Colab-Benchmarks.md) pour les profils,
+la provenance, le RSS et le dépannage des anciennes cellules.

@@ -1,5 +1,9 @@
 # Exemple de sortie - analyze_model.lua
 
+Cette page montre la forme d'un rapport produit par
+`scripts/tools/analyze_model.lua`. Il s'agit d'un exemple, pas d'une référence
+normative : les valeurs dépendent du checkpoint analysé et de sa configuration.
+
 Commande :
 
 ```bash
@@ -234,3 +238,9 @@ Top tensors (par taille)
 
 ✓ Analyse terminée
 ```
+
+## Étapes suivantes
+
+- Consultez les [scripts et outils Lua](../02-User-Guide/10-Examples.md).
+- Consultez les [checkpoints](../02-User-Guide/08-Checkpoints.md).
+- Revenez à l'[index de la documentation](../00-INDEX.md).

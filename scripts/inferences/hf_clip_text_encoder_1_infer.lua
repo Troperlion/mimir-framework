@@ -1,7 +1,7 @@
 #!/usr/bin/env lua
 ---@diagnostic disable: undefined-field, need-check-nil
 
-local Args = dofile("scripts/modules/args.lua")
+local Args = dofile(ROOTWORK.."/scripts/modules/args.lua")
 
 local function logf(fmt, ...)
   local msg = string.format(fmt, ...)
@@ -44,10 +44,10 @@ local function dump_head(vec, n)
 end
 
 local opts = Args.parse(arg)
-local checkpoint = Args.get_str(opts, "checkpoint", Args.get_str(opts, "ckpt", "../ponyxl.safetensors"))
+local checkpoint = Args.get_str(opts, "checkpoint", Args.get_str(opts, "ckpt", "../model.safetensors"))
 local tokenizer_path = Args.get_str(opts, "tokenizer", "checkpoint/base_tokenizer/tokenizer.json")
 local prompt = Args.get_str(opts, "prompt", "a pony in snowy forest")
-local mapping_json = Args.get_str(opts, "mapping-json", "tools/ponyxl_text_encoder_1_mapping_12blocks.json")
+local mapping_json = Args.get_str(opts, "mapping-json", "tools/text_encoder_1_mapping.json")
 local seq_len = Args.get_int(opts, "seq-len", 77)
 local memory_gb = Args.get_num(opts, "memory-gb", 12.0)
 

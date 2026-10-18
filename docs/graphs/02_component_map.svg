@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1750" height="1050" viewBox="0 0 1750 1050" role="img" aria-labelledby="title desc">
+<title id="title">Carte des composants internes</title><desc id="desc">Diagramme vectoriel éditable généré depuis les dumps du framework.</desc>
+<defs>
+<marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#475569"/></marker>
+<marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 z" fill="#2563eb"/></marker>
+<style><![CDATA[text{font-family:Inter,Segoe UI,Arial,sans-serif}.title{font-size:34px;font-weight:800;fill:#0f172a}.subtitle{font-size:16px;fill:#475569}.label{font-size:17px;font-weight:700;fill:#0f172a}.small{font-size:13px;fill:#475569}.tiny{font-size:11px;fill:#64748b}.box{stroke:#94a3b8;stroke-width:1.4;rx:14}.edge{stroke:#475569;stroke-width:2.2;fill:none;marker-end:url(#arrow)}.edgeB{stroke:#2563eb;stroke-width:2.4;fill:none;marker-end:url(#arrowBlue)}.dash{stroke-dasharray:7 7}.note{font-size:12px;fill:#475569}]]></style>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="60" y="62" class="title" text-anchor="start">Carte des composants internes</text>
+<text x="60" y="92" class="subtitle" text-anchor="start">Composants logiciels principaux du framework et responsabilités.</text>
+<line x1="60" y1="112" x2="1690" y2="112" stroke="#e2e8f0" stroke-width="2"/>
+<rect x="630" y="405" width="340" height="130" rx="14" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="800.0" y="430" class="label" text-anchor="middle">Cœur C++</text>
+<text x="800.0" y="507" class="small" text-anchor="middle">runtime de graphe • couches • tenseurs</text>
+<rect x="200" y="170" width="250" height="88" rx="14" fill="#dbeafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="325.0" y="195" class="label" text-anchor="middle">CLI</text>
+<text x="325.0" y="230" class="small" text-anchor="middle">commandes utilisateur</text>
+<path d="M325,258 L800,470" class="edge dash"/>
+<rect x="630" y="160" width="250" height="88" rx="14" fill="#ede9fe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="755.0" y="185" class="label" text-anchor="middle">Lua Engine</text>
+<text x="755.0" y="220" class="small" text-anchor="middle">scripts recherche/debug</text>
+<path d="M755,248 L800,470" class="edge dash"/>
+<rect x="1030" y="160" width="250" height="88" rx="14" fill="#ede9fe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1155.0" y="185" class="label" text-anchor="middle">JSON Config</text>
+<text x="1155.0" y="220" class="small" text-anchor="middle">runs reproductibles</text>
+<path d="M1155,248 L800,470" class="edge dash"/>
+<rect x="1330" y="360" width="250" height="88" rx="14" fill="#d1fae5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1455.0" y="385" class="label" text-anchor="middle">Registry</text>
+<text x="1455.0" y="420" class="small" text-anchor="middle">architectures supportées</text>
+<path d="M1455,448 L800,470" class="edge dash"/>
+<rect x="1130" y="660" width="250" height="88" rx="14" fill="#cffafe" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="1255.0" y="685" class="label" text-anchor="middle">Model Builder</text>
+<text x="1255.0" y="720" class="small" text-anchor="middle">instanciation modèle</text>
+<path d="M1255,748 L800,470" class="edge dash"/>
+<rect x="700" y="760" width="250" height="88" rx="14" fill="#ffedd5" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="825.0" y="785" class="label" text-anchor="middle">Graph Runtime</text>
+<text x="825.0" y="820" class="small" text-anchor="middle">exécution forward/backward</text>
+<path d="M825,848 L800,470" class="edge dash"/>
+<rect x="300" y="640" width="250" height="88" rx="14" fill="#fef3c7" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="425.0" y="665" class="label" text-anchor="middle">Memory Manager</text>
+<text x="425.0" y="700" class="small" text-anchor="middle">allocation • guard</text>
+<path d="M425,728 L800,470" class="edge dash"/>
+<rect x="180" y="370" width="250" height="88" rx="14" fill="#fee2e2" stroke="#94a3b8" stroke-width="1.6"/>
+<text x="305.0" y="395" class="label" text-anchor="middle">Checkpoint IO</text>
+<text x="305.0" y="430" class="small" text-anchor="middle">JSON • safetensors • folders</text>
+<path d="M305,458 L800,470" class="edge dash"/>
+<text x="1690" y="1026" class="tiny" text-anchor="end">Mímir Framework — SVG vectoriel éditable</text>
+</svg>

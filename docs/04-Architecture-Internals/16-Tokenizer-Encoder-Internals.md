@@ -1,20 +1,12 @@
-# Internals : Tokenizer / ConditioningEncoder (C++)
-
-## Pour qui
-
-Développeur avancé qui modifie le moteur C/C++.
-
-## Objectif
+# Internals du tokenizer et de l’encodeur
 
 Comprendre le fonctionnement interne exact des composants runtime.
 
-## Avant de commencer
+**Public concerné :** Développeur avancé qui modifie le moteur C/C++.
 
-Connaître les bases C++ et la structure du dépôt.
-
-## Résultat attendu
-
-Tu peux modifier le code interne en limitant les régressions.
+> **Prérequis**
+>
+> Connaître les bases C++ et la structure du dépôt.
 
 
 Cette page documente les composants NLP côté C++ : le `Tokenizer`, le `ConditioningEncoder`, et comment ils s’intègrent au `Model` (conventions `mag/mod`, ids int vs floats).
@@ -24,7 +16,7 @@ Source de vérité :
 - Tokenizer : `src/Tokenizer.hpp`, `src/Tokenizer.cpp`
 - ConditioningEncoder : `src/Encoder.hpp`, `src/Encoder.cpp`
 - Runtime forward tokens : `src/Model.cpp` (`forwardPassView(const std::vector<int>&)`)
-- Bindings Lua : `src/scriptings/Lua/luaScripting/LuaScripting.cpp/.hpp`
+- Bindings Lua : `src/scriptings/Lua/luaScripting/LuaScripting.cpp` et `src/scriptings/Lua/luaScripting/LuaScripting.hpp`
 
 ## 1) Tokenizer : responsabilités
 
@@ -75,5 +67,18 @@ Le Tokenizer expose une sérialisation JSON (voir `to_json/from_json`). Lors d�
 
 ## 5) Tests utiles
 
-- Tokenizer : `scripts/tests/test_tokenizer.lua`
-- Pipelines plus larges : `scripts/tests/test_lua_api.lua`
+- Tokenizer : `FrameworkTest.TokenizerBasics`,
+  `FrameworkTest.TokenizerBPE` et `FrameworkTest.TokenizerJsonControlChars`.
+- API Lua : `LuaTest.ApiBasics`, `LuaTest.CreateFromConfig` et
+  `LuaTest.CreateFromConfigErrors`.
+
+```bash
+ctest --test-dir build --output-on-failure \
+  -R 'FrameworkTest.Tokenizer|LuaTest'
+```
+
+## Étapes suivantes
+
+- [Page précédente : Internals : sérialisation (SafeTensors / RawFolder / DebugJson)](15-Serialization-Internals.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Internals : bindings Lua (`LuaScripting` / `LuaContext`)](17-Lua-Bindings-Internals.md)

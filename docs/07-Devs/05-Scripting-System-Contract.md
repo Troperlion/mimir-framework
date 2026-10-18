@@ -1,23 +1,23 @@
-# Contrat API Scripting Inter-Langages
-
-## Pour qui
-
-Développeur framework (C/C++/runtime/scripting).
-
-## Objectif
+# Contrat de scripting entre langages
 
 Implémenter ou modifier des briques techniques sans casser le contrat global.
 
-## Avant de commencer
+**Public concerné :** Développeur framework (C/C++/runtime/scripting).
 
-Comprendre le registre d'architectures et les conventions I/O.
-
-## Résultat attendu
-
-Tu peux livrer des évolutions compatibles avec la base existante.
+> **Prérequis**
+>
+> Comprendre le registre d'architectures et les conventions I/O.
 
 
 Ce chapitre formalise le contrat API systeme que tous les bridges de scripting doivent respecter.
+
+## Etat des bindings
+
+- Lua est le bridge de reference et reste le seul contrat complet et stable aujourd'hui.
+- JS expose désormais la surface des callbacks natifs de référence par des appels synchrones Node.js vers C++ ; voir [le contrat JS et ses limites](../03-API-Reference/21-JavaScript-API.md).
+- Les bindings C# et Rust restent incomplets.
+- La parite progresse par morceaux: certaines APIs sont disponibles, d'autres renvoient encore une erreur explicite ou une sortie partielle.
+- Toute documentation ou demo pour un bridge non-Lua doit le signaler clairement.
 
 ## 1. Pourquoi un contrat commun
 
@@ -81,6 +81,7 @@ Cela assure la compatibilite des workflows.
 3. Exposer les memes noms systeme (`kGlobal*`, `kAlias*`).
 4. Garantir le meme contrat d'erreur.
 5. Ajouter un smoke test equivalent au bridge Lua.
+6. Tant que le bridge n'a pas la parite fonctionnelle, le documenter comme experimental / incomplet.
 
 ## 7. Demo metier - script portable entre bridges
 
@@ -119,6 +120,8 @@ Exemple de commande (bridge Lua actuel) :
 
 Si un bridge ne passe pas cette matrice, il n'est pas pret pour un workflow metier stable.
 
+La matrice de contrat JS est couverte par `BridgeTest.API`, avec configuration également injectable par `--conf`. Les autres bridges restent à valider au cas par cas. Les limites de transport JS sont documentées dans sa référence API.
+
 ## 9. Regle d'evolution API
 
 Pour toute evolution du contrat :
@@ -127,3 +130,19 @@ Pour toute evolution du contrat :
 2. Documenter la transition dans la doc dev.
 3. Fournir un test de compat backward.
 4. Eviter tout renommage silencieux des globals/aliases.
+
+## 10. Regle filesystem cross-plateforme
+
+Les scripts metier doivent utiliser `scripts/modules/fs.lua` pour les acces filesystem:
+
+- `FS.mkdir_p`, `FS.join`, `FS.dirname`, `FS.list_dir`, `FS.file_exists`, `FS.is_dir`.
+
+Ne pas introduire de shell Linux-specifique pour le filesystem (`mkdir -p`, `ls`, `find`, `test -d`, `stat`) dans les scripts applicatifs.
+
+Exception: les appels shell qui pilotent des processus externes (ex: ouvrir un navigateur, lancer un binaire tiers) peuvent rester en `os.execute`/`io.popen` si necessaire.
+
+## Étapes suivantes
+
+- [Page précédente : Runtime - Modifier Et Ajouter Un Backend](04-Runtime-Development.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Visualizer: Tips Et Nouvelles Features](06-Visualizer-Tips-And-Features.md)

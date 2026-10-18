@@ -1,25 +1,30 @@
-# Internals : `Helpers.hpp` (helpers C++)
-
-## Pour qui
-
-Développeur avancé qui modifie le moteur C/C++.
-
-## Objectif
+# Helpers C++
 
 Comprendre le fonctionnement interne exact des composants runtime.
 
-## Avant de commencer
+**Public concerné :** Développeur avancé qui modifie le moteur C/C++.
 
-Connaître les bases C++ et la structure du dépôt.
-
-## Résultat attendu
-
-Tu peux modifier le code interne en limitant les régressions.
+> **Prérequis**
+>
+> Connaître les bases C++ et la structure du dépôt.
 
 
 Cette page documente le contenu de `src/Helpers.hpp`.
 
 Objectif: donner une carte précise des helpers “transverses” (IO, hashing, dataset, image utils) et de leurs propriétés (déterminisme, perfs, limites).
+
+## Sur cette page
+
+- [Rôle du header](#rôle-du-header)
+- [IO: fichiers et buffers](#io-fichiers-et-buffers)
+- [Image utils](#image-utils)
+- [Modalités / hashing / MagicToken](#modalités-hashing-magictoken)
+- [Nettoyage texte](#nettoyage-texte)
+- [Dataset: structures et lazy-loading](#dataset-structures-et-lazy-loading)
+- [Dataset: indexation](#dataset-indexation)
+- [Dataset: cache d’index](#dataset-cache-dindex)
+- [Correspondance Lua](#correspondance-lua)
+- [Étapes suivantes](#étapes-suivantes)
 
 ## Rôle du header
 
@@ -78,7 +83,7 @@ Extensions dans `detectModalities`:
 
 - texte: `txt json csv md xml`
 - audio: `wav flac mp3 ogg m4a aac`
-- image: `png jpg jpeg bmp tiff webp`
+- image: `png jpg jpeg gif bmp tiff webp ppm pgm`
 - vidéo: `mp4 mkv avi mov webm flv ts`
 
 Note: `detectModalities()` est un détecteur “grossier” par extension. Le loader `loadDataset()` a sa propre liste d’extensions (voir plus bas).
@@ -135,8 +140,8 @@ Important: ce gestionnaire est indépendant de `Mimir.Allocator`/`MemoryGuard` (
 
 Représente un item dataset:
 
-- chemins: `text_file`, `image_file`, `audio_file`, `video_file`
-- data lazy: `text`, `img`, `audio_bytes`, `video_bytes` (tous `std::optional`)
+- chemins: `text_file`, `image_file`, `mask_file`, `audio_file`, `video_file`
+- data lazy: `text`, `img`, `animation_frames`, `animation_frame_delays_ms`, `mask`, `audio_bytes`, `video_bytes`
 - méta: `w/h` (taille cible), `img_c` (0 inconnu, 1 grayscale, 3 RGB)
 - LRU: `last_access_time` + `touch()`
 - RAM: `estimated_ram_usage`
@@ -144,8 +149,11 @@ Représente un item dataset:
 Loaders:
 
 - `loadText()`: lit le fichier, `sanitize_utf8`, tracke la RAM.
-- `loadImage(target_w, target_h)`: decode via `stbi_load` (RGB), resize nearest, convertit en **grayscale** (1 canal), tracke la RAM.
-- `loadImageRGB(target_w, target_h)`: decode + resize nearest, stocke **RGB** (3 canaux) et met `img_c=3`.
+- `loadImage(target_w, target_h)`: alias du chargement RGB, conservé pour compatibilité.
+- `loadImageRGB(target_w, target_h)`: décode et redimensionne en RGB bicubique. BMP passe par STB; WebP statique/animé passe par FFmpeg quand ce backend est compilé.
+- GIF animé: toutes les frames compositées sont redimensionnées et stockées dans `animation_frames`; les délais sont dans `animation_frame_delays_ms` et la répétition dans `animation_loop_count` (`0` signifie infini). `img` reste la première frame pour compatibilité.
+- `loadMask(target_w, target_h)`: charge le masque lié en mono avec un resize nearest-neighbor qui préserve les classes.
+- `makeMaskLossWeights(channels)`: produit des poids HWC normalisés utilisés par la loss VAE pour renforcer la région annotée tout en conservant le contexte.
 - `loadAudio() / loadVideo()`: charge les bytes bruts via `ifstream` binaire.
 
 Libération:
@@ -174,9 +182,18 @@ Indexation en deux phases:
      - classification par regex d’extension
      - filtrage par `min_modalities`
 
+Les masques ne deviennent pas des items autonomes. Ils sont liés à leur image standard via les suffixes
+`_mask`, `-mask`, `.mask`, `_segmentation`, `-segmentation`, ou via des dossiers frères
+`masks/` / `segmentations/` correspondant à `images/`. Un masque est une annotation et ne compte donc
+pas comme une modalité supplémentaire.
+
 Extensions dans `loadDataset`:
 
-- image: `png jpg jpeg bmp tiff webp`
+- image: `png jpg jpeg gif bmp tiff webp ppm pgm`
+
+`Mimir.Dataset.get(index, true)` expose en plus `is_animated`, `frame_count`, `loop_count`,
+`frame_delays_ms` et `animation_frames` pour les images animées.
+
 - texte: `txt md json csv`
 - audio: `wav flac mp3 ogg m4a aac`
 - vidéo: `mp4 mkv avi mov webm flv ts`
@@ -209,3 +226,9 @@ Modes:
 Le binding Lua `Mimir.Dataset.load(dir)` utilise le loader `loadDataset(dir)` (pas `loadDatasetCached`).
 
 Pour l’API user, voir `docs/02-User-Guide/03-Data.md`.
+
+## Étapes suivantes
+
+- [Page précédente : Internals : classe `Model` (C++)](10-Model-Class.md)
+- [Index de la documentation](../00-INDEX.md)
+- [Page suivante : Internals : stockage `tensor` + allocation dynamique (C++)](12-Tensor-Storage.md)
