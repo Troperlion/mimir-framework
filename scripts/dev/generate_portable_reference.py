@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Regenerate native OpenCL/Vulkan reference kernels from shared GPU algorithms."""
 from pathlib import Path
+from embedded_cpp_string import embedded_cpp_string
 import re
 ROOT=Path(__file__).resolve().parents[2];
 import os
@@ -436,4 +437,4 @@ with tempfile.TemporaryDirectory(prefix="mimir-portable-") as temporary:
     from pathlib import Path
     import struct
     b=spirv_path.read_bytes();words=struct.unpack('<'+str(len(b)//4)+'I',b)
-    s='#pragma once\n#include <cstdint>\nnamespace PortableStaging {\n#ifdef ENABLE_OPENCL\ninline constexpr const char* referenceOpenCL=R"MIMIRCL('+Path('src/runtimes/portable/reference.cl').read_text()+')MIMIRCL";\n#endif\n#ifdef ENABLE_VULKAN\ninline constexpr std::uint32_t referenceSpirv[]={\n'+''.join(','.join(str(x)+'u' for x in words[i:i+16])+',\n' for i in range(0,len(words),16))+'};\n#endif\n}\n';write_if_changed(Path('src/runtimes/portable/PortableShaderData.hpp'),s)
+    s='#pragma once\n#include <cstdint>\n#include <string>\nnamespace PortableStaging {\n#ifdef ENABLE_OPENCL\n'+embedded_cpp_string('referenceOpenCL',Path('src/runtimes/portable/reference.cl').read_text())+'#endif\n#ifdef ENABLE_VULKAN\ninline constexpr std::uint32_t referenceSpirv[]={\n'+''.join(','.join(str(x)+'u' for x in words[i:i+16])+',\n' for i in range(0,len(words),16))+'};\n#endif\n}\n';write_if_changed(Path('src/runtimes/portable/PortableShaderData.hpp'),s)

@@ -101,12 +101,12 @@ checkpoints, builds et le hub local non suivi ne font pas partie de la release.
 
 | Profil ou contrôle | Résultat |
 | --- | --- |
-| Linux Release, C++/Lua et bridges JS/C#/Rust | Compilation réussie ; 107 tests CTest, aucun échec, 4 ignorés. |
-| Windows x86-64 MinGW/vcpkg | Compilation réussie ; `mimir.exe` et 94 exécutables de tests produits. Exécution Windows non réalisée localement. |
+| Linux Release, C++/Lua et bridges JS/C#/Rust | Compilation réussie ; 108 tests CTest, aucun échec, 4 ignorés. |
+| Windows x86-64 MinGW/vcpkg | Compilation réussie ; `mimir.exe` et 95 exécutables de tests produits. Exécution Windows non réalisée localement. |
 | Linux Vulkan/OpenCL | Compilation réussie ; 114 tests CTest, aucun échec, 7 ignorés. |
 | Qt 6 | `mimir`, hôte desktop et cibles de diagnostics compilés ; 3 tests ciblés réussis. Pas de validation interactive du bureau. |
 | CLI `config.sh` | 3 tests réussis, syntaxe Bash et options de configuration contrôlées. |
-| Notebooks Colab | 27 tests Python, aucun échec, 3 ignorés ; archive embarquée de 544 fichiers synchronisée. |
+| Notebooks Colab | 27 tests Python, aucun échec, 3 ignorés ; archive embarquée de 541 fichiers synchronisée. |
 | Documentation et API | 100 pages actives et 623 liens locaux vérifiés ; 106 fonctions et 13 modules Lua synchronisés. |
 | GitHub workflows | YAML et actionlint valides ; génération du wiki exécutée hors ligne sans push. |
 
@@ -124,3 +124,23 @@ dépendances étaient déjà installées et sudo nécessitait une authentificati
 Les workflows Linux utilisent `./config.sh` avec l’installation des dépendances
 activée. L’installation apt a également été vérifiée par les tests du script,
 sans mutation système dans les tests.
+
+
+### Régression MSVC du texte OpenCL embarqué
+
+Le premier job Windows natif de la release a détecté que le préprocesseur MSVC
+interprétait des directives contenues dans une chaîne brute OpenCL d’une section
+conditionnelle désactivée. Le générateur émet désormais des fragments ordinaires
+de 2 Kio, reconstruits dans un stockage stable ; les kernels ne changent pas.
+`RuntimeTest.EmbeddedShaderSource` compile ce stockage même sans SDK OpenCL et
+compare tous ses octets au fichier `reference.cl`. Les échappements octaux
+conservent également les caractères UTF-8 des commentaires et restent indépendants
+de la page de codes du compilateur Windows.
+
+
+Le contrôle du premier job Linux a également détecté cinq sorties de compilation
+FPGA présentes dans l’ancienne archive Colab mais absentes du dépôt Git. Les
+snapshots embarqués ne contiennent plus ces sorties locales (`.bit`, `.svf` et
+netlists générées) ; les sources FPGA versionnées restent disponibles. Le test
+vérifie chaque fichier de l’archive contre le checkout, ce qui permet aussi de
+régénérer le snapshot depuis un clone propre.

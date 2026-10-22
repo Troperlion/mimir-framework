@@ -13,6 +13,11 @@ import tarfile
 
 ROOT=Path(__file__).resolve().parents[2]
 NOTEBOOKS=['Colab-test.ipynb','Colab-bench-multi-framework.ipynb']
+GENERATED_FPGA_ARTIFACTS={
+    'fpga/icesugar-pro/mimir_runtime/'+name for name in (
+        'mimir_runtime.bit','mimir_runtime.config','mimir_runtime.json',
+        'mimir_runtime.svf','mimir_runtime_io_v1_3.bit')
+}
 
 
 def main():
@@ -21,7 +26,7 @@ def main():
     values={n.targets[0].id:ast.literal_eval(n.value) for n in ast.parse(source).body if isinstance(n,ast.Assign) and isinstance(n.targets[0],ast.Name) and isinstance(n.value,ast.Constant)}
     with tarfile.open(fileobj=io.BytesIO(gzip.decompress(base64.b64decode(values['SOURCE_PAYLOAD'])))) as archive:
         manifest=json.load(archive.extractfile('colab-source-manifest.json'))
-    paths=set(manifest['files'])|{'VERSION','config.sh','scripts/tests/test_config_cli.py','scripts/dev/sync_colab_sources.py'}
+    paths=(set(manifest['files'])-GENERATED_FPGA_ARTIFACTS)|{'VERSION','config.sh','scripts/tests/test_config_cli.py','scripts/dev/sync_colab_sources.py','scripts/dev/embedded_cpp_string.py','Tests/test_embedded_shader_source.cpp'}
     contents={name:(ROOT/name).read_bytes() for name in sorted(paths)}
     manifest['files']={name:hashlib.sha256(data).hexdigest() for name,data in contents.items()}
     manifest['commit']=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()

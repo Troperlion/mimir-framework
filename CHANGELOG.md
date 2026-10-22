@@ -54,6 +54,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Le bridge JavaScript POSIX reste désactivé sur Windows, tandis que les bridges
   C#/Rust utilisent les en-têtes de processus adaptés à cette plateforme.
 
+- Les sources OpenCL embarquées sont encodées par fragments C++ courts, sans
+  chaînes brutes ni directives imbriquées visibles au préprocesseur MSVC. Un test
+  indépendant du SDK GPU vérifie leur identité octet par octet.
+
 ### Validation et publication
 
 - Documentation des nouvelles options de calibration et de la procédure de

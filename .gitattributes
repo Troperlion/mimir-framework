@@ -11,6 +11,9 @@
 *.h text diff=cpp
 *.c text diff=c
 
+# Embedded shader source bytes must match on Windows and Unix checkouts.
+*.cl text eol=lf
+
 # Scripts
 *.lua text
 *.sh text eol=lf

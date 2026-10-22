@@ -343,3 +343,10 @@ if(MIMIR_TEST_OPENCL_INCLUDE AND MIMIR_TEST_OPENCL_LIBRARY)
     add_test(NAME RuntimeTest.OptimizerCompactOpenCL COMMAND RuntimeTest.OptimizerCompact opencl)
     set_tests_properties(RuntimeTest.OptimizerCompactOpenCL PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 180)
 endif()
+
+# Compile the embedded source even on CPU-only/MSVC runners, without OpenCL SDK.
+add_executable(RuntimeTest.EmbeddedShaderSource test_embedded_shader_source.cpp)
+target_include_directories(RuntimeTest.EmbeddedShaderSource PRIVATE ../src)
+target_compile_definitions(RuntimeTest.EmbeddedShaderSource PRIVATE ENABLE_OPENCL)
+add_test(NAME RuntimeTest.EmbeddedShaderSource COMMAND RuntimeTest.EmbeddedShaderSource)
+set_tests_properties(RuntimeTest.EmbeddedShaderSource PROPERTIES TIMEOUT 15 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
