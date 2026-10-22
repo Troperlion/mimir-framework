@@ -22,6 +22,50 @@ json read_header(const fs::path& path) {
     input.read(data.data(), size);
     return json::parse(data);
 }
+// Rewrite only optimizer metadata, retaining all tensor payloads. This builds
+// legacy fixtures without invoking today's optimizer-state filtering on save.
+json optimizer_json(const fs::path& path, CheckpointFormat format) {
+    if (format == CheckpointFormat::RawFolder) return read_json_file(path / "model/training.json");
+    const auto header = read_header(path);
+    const auto offsets = header.at("optimizer/json").at("data_offsets");
+    std::ifstream input(path, std::ios::binary);
+    uint64_t header_size=0;input.read(reinterpret_cast<char*>(&header_size),8);
+    const size_t begin=offsets[0].get<size_t>(),end=offsets[1].get<size_t>();
+    input.seekg(8+header_size+begin);
+    std::string data(end-begin,' ');input.read(data.data(),data.size());
+    return json::parse(data);
+}
+void rewrite_optimizer_json(const fs::path& path, CheckpointFormat format, const json& metadata) {
+    if (format == CheckpointFormat::RawFolder) {
+        std::ofstream(path / "model/training.json") << metadata;
+        return;
+    }
+    auto header=read_header(path);
+    std::ifstream input(path,std::ios::binary);
+    uint64_t header_size=0;input.read(reinterpret_cast<char*>(&header_size),8);
+    input.seekg(8+header_size);
+    std::vector<char> payload((std::istreambuf_iterator<char>(input)),{});
+    input.close();
+    std::vector<char> replacement;
+    for (auto& entry:header.items()) {
+        if (entry.key()=="__metadata__") continue;
+        auto& tensor=entry.value();
+        const size_t begin=tensor["data_offsets"][0].get<size_t>();
+        const size_t end=tensor["data_offsets"][1].get<size_t>();
+        const size_t new_begin=replacement.size();
+        if (entry.key()=="optimizer/json") {
+            const auto text=metadata.dump();
+            replacement.insert(replacement.end(),text.begin(),text.end());
+            tensor["shape"]={text.size()};
+        } else replacement.insert(replacement.end(),payload.begin()+begin,payload.begin()+end);
+        tensor["data_offsets"]={new_begin,replacement.size()};
+    }
+    auto text=header.dump();text.resize((text.size()+7)/8*8,' ');
+    const uint64_t size=text.size();
+    std::ofstream output(path,std::ios::binary|std::ios::trunc);
+    output.write(reinterpret_cast<const char*>(&size),8);output.write(text.data(),text.size());
+    output.write(replacement.data(),replacement.size());
+}
 void build(Model& model, bool reverse = false) {
     model.setHasEncoder(false);
     model.setHasTokenizer(false);
@@ -79,6 +123,8 @@ int main() {
                 TASSERT_TRUE(!fs::exists(path / "dataset"));
                 const auto training = read_json_file(path / "model/training.json");
                 TASSERT_TRUE(training["step"] == 2);
+                TASSERT_TRUE(training["state_layout"] == "canonical_m_v_v1");
+                TASSERT_TRUE(training["state_dtype"] == "F32");
                 TASSERT_TRUE(training["loop"]["next_item"] == 3);
                 TASSERT_TRUE(training["state_sizes"].contains("m") == optimizer.usesFirstMoment());
                 TASSERT_TRUE(training["state_sizes"].contains("v") == optimizer.usesSecondMoment());
@@ -111,6 +157,9 @@ int main() {
             const auto info = read_json_file(debug);
             TASSERT_TRUE(!info.contains("encoder") && !info.contains("tokenizer"));
             TASSERT_TRUE(info["optimizer"]["step"] == 3);
+            TASSERT_TRUE(info["optimizer"]["type_id"] == type);
+            TASSERT_TRUE(info["optimizer"]["state_layout"] == "canonical_m_v_v1");
+            TASSERT_TRUE(info["optimizer"]["active_moments"] == optimizer_metadata(original)["active_moments"]);
             TASSERT_TRUE(info["optimizer"].contains("m") == optimizer.usesFirstMoment());
             TASSERT_TRUE(info["optimizer"].contains("v") == optimizer.usesSecondMoment());
         }
@@ -174,6 +223,72 @@ int main() {
         model.restoreOptimizerState(legacy);
         TASSERT_TRUE(legacy.mv_by_param_ptr.size() == 4);
         TASSERT_TRUE(legacy.m.empty() && legacy.v.empty());
+    }
+    // Legacy dense checkpoints carried both m and v for every optimizer, with
+    // no runtime layout metadata. They must resume through the current compact
+    // implementation and re-save only the states the optimizer actually uses.
+    for (int kind=0;kind<=8;++kind) for (auto format:{CheckpointFormat::RawFolder,CheckpointFormat::SafeTensors})
+        for (bool schema2:{false,true}) {
+            Model source;build(source);
+            Optimizer dense;
+            dense.type=OptimizerType::ADAM;dense.step=7;
+            dense.m.assign(12,.2f);dense.v.assign(12,.4f);
+            source.setSerializedOptimizer(dense);
+            const auto path=root/(std::string("legacy-")+std::to_string(kind)+(schema2?"-v2":"-v1")+
+                (format==CheckpointFormat::RawFolder?"-raw":".safetensors"));
+            SaveOptions save;save.format=format;save.save_optimizer=true;save.include_git_info=false;
+            require(save_checkpoint(source,path.string(),save,&error),error);
+            auto metadata=optimizer_json(path,format);
+            for (const char* key:{"state_layout","state_dtype","active_moments","parameter_layout"}) metadata.erase(key);
+            if (!schema2) {metadata.erase("schema_version");metadata.erase("state_sizes");}
+            metadata["type"]=schema2?json(optimizerTypeName(static_cast<OptimizerType>(kind))):json(kind);
+            metadata["name"]=optimizerTypeName(static_cast<OptimizerType>(kind));
+            metadata["adafactor_beta1"]=schema2?.7f:0.f;
+            rewrite_optimizer_json(path,format,metadata);
+            Model expected;build(expected);
+            Optimizer legacy=optimizer_from_metadata(metadata);
+            legacy.m=dense.m;legacy.v=dense.v;
+            expected.setSerializedOptimizer(legacy);
+            Model resumed;build(resumed);
+            LoadOptions load;load.format=format;load.load_optimizer=true;
+            require(load_checkpoint(resumed,path.string(),load,&error),error);
+            TASSERT_TRUE(resumed.getSerializedOptimizer()->step==7);
+            TASSERT_TRUE(static_cast<int>(resumed.getSerializedOptimizer()->type)==kind);
+            step(expected,-.75f);step(resumed,-.75f);
+            for (const auto& layer:expected.getLayers()) {
+                const auto* actual=resumed.getLayerByName(layer.name);
+                for (size_t i=0;i<layer.getWeightsSize();++i)
+                    TASSERT_NEAR(layer.getWeights()[i],actual->getWeights()[i],1e-7f);
+            }
+            const auto upgraded=root/("upgraded-"+std::to_string(kind)+(format==CheckpointFormat::RawFolder?"-raw":".safetensors"));
+            require(save_checkpoint(resumed,upgraded.string(),save,&error),error);
+            const auto upgraded_metadata=optimizer_json(upgraded,format);
+            const auto* optimizer=resumed.getSerializedOptimizer();
+            TASSERT_TRUE(upgraded_metadata["state_sizes"].contains("m")==optimizer->usesFirstMoment());
+            TASSERT_TRUE(upgraded_metadata["state_sizes"].contains("v")==optimizer->usesSecondMoment());
+            TASSERT_TRUE(upgraded_metadata["state_layout"]=="canonical_m_v_v1");
+            Model reloaded;build(reloaded);
+            require(load_checkpoint(reloaded,upgraded.string(),load,&error),error);
+            step(resumed,.5f);step(reloaded,.5f);
+            for (const auto& layer:resumed.getLayers()) {
+                const auto* actual=reloaded.getLayerByName(layer.name);
+                for (size_t i=0;i<layer.getWeightsSize();++i)
+                    TASSERT_NEAR(layer.getWeights()[i],actual->getWeights()[i],1e-7f);
+            }
+        }
+    // Unknown device layouts and missing active state are never silently reset.
+    {
+        Model model;build(model);
+        Optimizer optimizer;optimizer.type=OptimizerType::ADAM;
+        auto metadata=optimizer_metadata(optimizer);
+        metadata["state_layout"]="compact_device_scratch";
+        bool rejected=false;
+        try {validate_optimizer_state(model,optimizer,metadata);} catch(const std::runtime_error&) {rejected=true;}
+        TASSERT_TRUE(rejected);
+        metadata=optimizer_metadata(optimizer);metadata["active_moments"]={"v"};
+        rejected=false;
+        try {validate_optimizer_state(model,optimizer,metadata);} catch(const std::runtime_error&) {rejected=true;}
+        TASSERT_TRUE(rejected);
     }
     fs::remove_all(root);
     return 0;

@@ -1002,6 +1002,7 @@ json DebugJsonDump::build_json_enhanced(const Model& model, const DebugJsonOptio
             const auto snapshot = model.optimizerSnapshot(*live);
             const Optimizer* opt = &snapshot;
             opt_state = optimizer_metadata(*opt);
+            opt_state["type_id"] = static_cast<int>(opt->type);
             opt_state["type"] = optimizerTypeName(opt->type);
 
             // State vectors (debug-only): stats + small sample

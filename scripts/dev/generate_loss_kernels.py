@@ -197,10 +197,10 @@ cubody=body.replace('fma(','fmaf(').replace('abs(','fabsf(').replace('exp(','exp
 cubody=re.sub(r'(?<![\w.])(\d+\.\d*(?:e[-+]?\d+)?|\d+e[-+]?\d+)(?![\w.])',r'\1f',cubody)
 cuda='#define LOSS_BITS(x) __float_as_int(x)\n#define LOSS_FLOAT(x) __int_as_float(x)\n#define LOSS_ADD(a,b) __fadd_rn(a,b)\n#define LOSS_SUB(a,b) __fsub_rn(a,b)\n#define LOSS_MUL(a,b) __fmul_rn(a,b)\n'+'''#define F(k) __int_as_float(args[9+(k)])
 #define BARRIER __syncthreads()
-extern "C" __global__ void mimir_reconstruction(float* memory,const int* args) {
+extern "C" __global__ void mimir_reconstruction(float* memory,const int* args,int pass) {
 int i=blockIdx.x*blockDim.x+threadIdx.x,local=threadIdx.x,group=blockIdx.x;
 __shared__ float sums[768];
-'''+cubody+'\n}\n#undef F\n#undef BARRIER\n#undef LOSS_BITS\n#undef LOSS_FLOAT\n#undef LOSS_ADD\n#undef LOSS_SUB\n#undef LOSS_MUL\n#undef LOSS_TWO\n#undef LOSS_ACC\n#undef LOSS_STORE\n#undef LOSS_PRODUCT\n'
+'''+cubody.replace(',pass=args[0]', '')+'\n}\n#undef F\n#undef BARRIER\n#undef LOSS_BITS\n#undef LOSS_FLOAT\n#undef LOSS_ADD\n#undef LOSS_SUB\n#undef LOSS_MUL\n#undef LOSS_TWO\n#undef LOSS_ACC\n#undef LOSS_STORE\n#undef LOSS_PRODUCT\n'
 out.mkdir(exist_ok=True)
 (out/'reconstruction.cl').write_text(cl);(out/'reconstruction.comp').write_text(glsl);(out/'LossCudaKernel.cuh').write_text('#pragma once\n'+cuda)
 with tempfile.TemporaryDirectory() as d:

@@ -97,6 +97,7 @@ mimir_add_test(FrameworkTest.PlannerLifetimes        test_planner_lifetimes.cpp)
 mimir_add_test(FrameworkTest.PlannerFusionAndScratch test_planner_fusion_and_scratch.cpp)
 mimir_add_test(FrameworkTest.RuntimeCapabilities    test_runtime_capabilities.cpp)
 mimir_add_test(FrameworkTest.ExecutionPlan          test_execution_plan.cpp)
+mimir_add_test(FrameworkTest.ExecutionCalibration test_execution_calibration.cpp)
 mimir_add_test(FrameworkTest.PlannerEquivalence     test_planner_equivalence.cpp)
 mimir_add_test(ModelTest.VAEValidationFeedback     test_vae_validation_feedback.cpp)
 
@@ -115,11 +116,16 @@ mimir_add_test(ModelTest.VAEConvLatentContext test_vae_conv_latent.cpp)
 mimir_add_test(ModelTest.LumenDiffusionStructure test_lumen_diffusion_structure.cpp)
 mimir_add_test(VizTest.TextPayload             test_viz_text_payload.cpp)
 mimir_add_test(MetricsTest.AsyncHistory test_async_monitor_history.cpp)
+mimir_add_test(MetricsTest.GradientDiagnostics test_gradient_diagnostics.cpp)
 mimir_add_test(MetricsTest.HtopCsv             test_htop_metrics_csv.cpp)
 if(NOT MIMIR_VIZ_BACKEND STREQUAL "NONE")
     mimir_add_test(VizTest.MetricsCsv          test_viz_metrics_csv.cpp)
 endif()
 mimir_add_test(ModelTest.VGG16FeatEncNorm test_vgg16_feat_enc_norm.cpp)
+add_executable(VizTest.AnnotationFeatureBounds test_annotation_feature_bounds.cpp)
+target_include_directories(VizTest.AnnotationFeatureBounds PRIVATE ../src ../src/include)
+add_test(NAME VizTest.AnnotationFeatureBounds COMMAND VizTest.AnnotationFeatureBounds)
+set_tests_properties(VizTest.AnnotationFeatureBounds PROPERTIES TIMEOUT 15)
 mimir_add_test(ModelTest.MedicalDetector test_medical_detector_model.cpp)
 
 # Le runtime FPGA n'est pas encore composé dans le routeur global. Ces tests
@@ -210,7 +216,9 @@ set_tests_properties(ModelTest.VisionBBox PROPERTIES TIMEOUT 120 ENVIRONMENT "OM
 
 # Exercise the shared vector icon offscreen even in a headless framework build.
 find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
+# pkg-config describes the build host; never leak Linux Cairo include paths
+# into a Windows cross compiler. These offscreen tests use native Cairo only.
+if(PkgConfig_FOUND AND NOT CMAKE_CROSSCOMPILING)
     pkg_check_modules(BBOX_BADGE_CAIRO QUIET IMPORTED_TARGET cairo)
     if(BBOX_BADGE_CAIRO_FOUND)
         add_executable(VizTest.ModelGraphLanes test_model_graph_lanes.cpp ../src/viz/SoftwareGraphics.cpp)
@@ -311,3 +319,27 @@ mimir_add_test(RuntimeTest.RouteRefresh test_route_refresh.cpp)
 mimir_add_test(RuntimeTest.BatchMatMulForward test_batch_matmul_forward.cpp)
 mimir_add_test(RuntimeTest.FlatJoin test_flat_join.cpp)
 mimir_add_test(RuntimeTest.AttentionTiled test_attention_tiled.cpp)
+mimir_add_test(RuntimeTest.OptimizerSelection test_optimizer_selection.cpp)
+
+# Opt-in latency benchmark: includes the complete public training/inference path.
+add_executable(mimir_bench_whole_model EXCLUDE_FROM_ALL
+    ../scripts/benchmarks/benchmark_whole_model.cpp test_log_stub.cpp)
+target_compile_features(mimir_bench_whole_model PRIVATE cxx_std_17)
+target_link_libraries(mimir_bench_whole_model PRIVATE mimir_core)
+add_executable(mimir_bench_vgg16_whole_model EXCLUDE_FROM_ALL
+    ../scripts/benchmarks/benchmark_vgg16_whole_model.cpp test_log_stub.cpp)
+target_link_libraries(mimir_bench_vgg16_whole_model PRIVATE mimir_core)
+
+mimir_add_test(RuntimeTest.OptimizerCompact test_optimizer_compact.cpp)
+# Optional OpenCL numerical reference, including software devices. This test
+# proves kernel parity, not physical GPU execution or throughput.
+find_path(MIMIR_TEST_OPENCL_INCLUDE CL/cl.h)
+find_library(MIMIR_TEST_OPENCL_LIBRARY OpenCL)
+if(MIMIR_TEST_OPENCL_INCLUDE AND MIMIR_TEST_OPENCL_LIBRARY)
+    target_sources(RuntimeTest.OptimizerCompact PRIVATE optimizer_opencl_reference.cpp)
+    target_compile_definitions(RuntimeTest.OptimizerCompact PRIVATE MIMIR_TEST_OPENCL)
+    target_include_directories(RuntimeTest.OptimizerCompact PRIVATE ${MIMIR_TEST_OPENCL_INCLUDE})
+    target_link_libraries(RuntimeTest.OptimizerCompact PRIVATE ${MIMIR_TEST_OPENCL_LIBRARY})
+    add_test(NAME RuntimeTest.OptimizerCompactOpenCL COMMAND RuntimeTest.OptimizerCompact opencl)
+    set_tests_properties(RuntimeTest.OptimizerCompactOpenCL PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 180)
+endif()

@@ -230,35 +230,108 @@ void optimizerHostStep(const RuntimeOptimizerRequest& r) {
         }
 
 }
-std::vector<int> optimizerParameters(const RuntimeOptimizerRequest& r) {
+OptimizerDeviceLayout optimizerDeviceLayout(const RuntimeOptimizerRequest& r) {
+    OptimizerDeviceLayout layout;
+    const auto& optimizer = *r.optimizer;
+    size_t offset = r.count;
+    if (optimizer.usesFirstMoment()) {
+        layout.first_moment = offset;
+        layout.moment_flags |= 1;
+        offset += r.count;
+    }
+    if (optimizer.usesSecondMoment()) {
+        layout.second_moment = offset;
+        layout.moment_flags |= 2;
+        offset += r.count;
+    }
+    layout.result_count = offset;
+    layout.gradients = offset;
+    offset += r.count;
+    if (optimizer.type == OptimizerType::ADAFACTOR || optimizer.type == OptimizerType::LAMB) {
+        layout.updates = offset;
+        offset += r.count;
+        layout.reductions = offset;
+        offset += 2*((r.count+255)/256)+2;
+    }
+    layout.total_count = offset;
+    return layout;
+}
+std::vector<int> optimizerParameters(const RuntimeOptimizerRequest& r, bool compact) {
     const auto& o=*r.optimizer;
+    auto finish = [&](std::vector<int> parameters) {
+        if (compact) {
+            const auto layout = optimizerDeviceLayout(r);
+            parameters.insert(parameters.end(), {
+                int(layout.result_count), int(layout.first_moment), int(layout.second_moment),
+                int(layout.gradients), int(layout.updates), int(layout.reductions), int(layout.moment_flags)});
+        }
+        return parameters;
+    };
+    if (o.type == OptimizerType::SGD) {
+        // Preserve the shared parameter ABI; SGD only consumes F(0).
+        std::vector<int> parameters;
+        parameters.reserve(compact ? 26 : 19);
+        parameters.resize(19, 0);
+        parameters[1] = static_cast<int>(r.count);
+        std::memcpy(&parameters[3], &r.learning_rate, sizeof(float));
+        return finish(std::move(parameters));
+    }
     auto clamp=[](float v,float lo,float hi){return std::clamp(v,lo,hi);};
     const float b1=(o.type==OptimizerType::ADAM || o.type==OptimizerType::ADAMW)?o.beta1:clamp(o.beta1,0.f,1.f);
     const float b2=(o.type==OptimizerType::RADAM)?clamp(o.beta2,0.f,1.f-1e-7f):
         (o.type==OptimizerType::ADAM || o.type==OptimizerType::ADAMW)?o.beta2:clamp(o.beta2,0.f,1.f);
-    float bc1=1.f-std::pow(b1,float(o.step)),bc2=1.f-std::pow(b2,float(o.step));
+    const bool bias_corrected = o.type == OptimizerType::ADAM || o.type == OptimizerType::ADAMW ||
+        o.type == OptimizerType::RADAM || o.type == OptimizerType::NADAM || o.type == OptimizerType::LAMB;
+    const float power1 = bias_corrected ? std::pow(b1,float(o.step)) : 0.f;
+    const float power2 = bias_corrected ? std::pow(b2,float(o.step)) : 0.f;
+    float bc1=1.f-power1,bc2=1.f-power2;
     if(o.type==OptimizerType::ADAM || o.type==OptimizerType::ADAMW){if(bc1<=0)bc1=1e-8f;if(bc2<=0)bc2=1e-8f;}
     else {bc1=std::max(1e-8f,bc1);bc2=std::max(1e-8f,bc2);}
     float rho=0,rect=1;
-    if(o.type==OptimizerType::RADAM){const float power=std::pow(b2,float(o.step));const float inf=2.f/(1.f-b2)-1.f;
+    if(o.type==OptimizerType::RADAM){const float power=power2;const float inf=2.f/(1.f-b2)-1.f;
         rho=inf-2.f*float(o.step)*power/std::max(1e-8f,1.f-power);
         if(rho>5.f)rect=std::sqrt(((rho-4)*(rho-2)*inf)/((inf-4)*(inf-2)*rho));}
     const float values[]={r.learning_rate,b1,b2,o.eps,o.weight_decay,bc1,bc2,
-        clamp(1.f-std::pow(float(o.step),o.adafactor_decay_rate),0.f,1.f),o.adafactor_beta1,
+        (o.type==OptimizerType::ADAFACTOR ? clamp(1.f-std::pow(float(o.step),o.adafactor_decay_rate),0.f,1.f) : 0.f),o.adafactor_beta1,
         std::max(1e-6f,o.adafactor_clip_threshold),o.adafactor_eps2,
-        o.adafactor_relative_step?std::min(1e-2f,1.f/std::sqrt(float(o.step))):r.learning_rate,
+        o.type==OptimizerType::ADAFACTOR && o.adafactor_relative_step?std::min(1e-2f,1.f/std::sqrt(float(o.step))):r.learning_rate,
         o.adafactor_scale_parameter?1.f:0.f,rect,rho,clamp(o.rmsprop_alpha,0.f,1.f)};
-    std::vector<int> p{0,int(r.count),int(o.type)};
-    for(float value:values){int bits;std::memcpy(&bits,&value,4);p.push_back(bits);}return p;
+    std::vector<int> p;
+    p.reserve(compact ? 26 : 19);
+    p.insert(p.end(), {0,int(r.count),int(o.type)});
+    for(float value:values){int bits;std::memcpy(&bits,&value,4);p.push_back(bits);}return finish(std::move(p));
 }
-std::vector<float> optimizerPack(const RuntimeOptimizerRequest& r) {
+std::vector<float> optimizerPack(const RuntimeOptimizerRequest& r, bool compact) {
+    if (compact) {
+        const auto layout = optimizerDeviceLayout(r);
+        std::vector<float> memory;
+        memory.reserve(layout.total_count);
+        memory.insert(memory.end(), r.weights, r.weights+r.count);
+        if (layout.moment_flags & 1) memory.insert(memory.end(), r.first_moment, r.first_moment+r.count);
+        if (layout.moment_flags & 2) memory.insert(memory.end(), r.second_moment, r.second_moment+r.count);
+        memory.insert(memory.end(), r.gradients, r.gradients+r.count);
+        memory.resize(layout.total_count, 0.f);
+        return memory;
+    }
     std::vector<float> memory(5*r.count+2*((r.count+255)/256)+2,0.f);
     std::copy_n(r.weights,r.count,memory.data());std::copy_n(r.gradients,r.count,memory.data()+r.count);
     if(r.first_moment)std::copy_n(r.first_moment,r.count,memory.data()+2*r.count);
     if(r.second_moment)std::copy_n(r.second_moment,r.count,memory.data()+3*r.count);
     return memory;
 }
-bool optimizerCommit(const RuntimeOptimizerRequest& r,const std::vector<float>& memory) {
+bool optimizerCommit(const RuntimeOptimizerRequest& r,const std::vector<float>& memory, bool compact) {
+    if (compact) {
+        const auto layout = optimizerDeviceLayout(r);
+        if (memory.size() != layout.total_count) return false;
+        std::copy_n(memory.data(), r.count, r.weights);
+        if (layout.moment_flags & 1) std::copy_n(memory.data()+layout.first_moment, r.count, r.first_moment);
+        if (layout.moment_flags & 2) std::copy_n(memory.data()+layout.second_moment, r.count, r.second_moment);
+        return true;
+    }
+    if (r.optimizer->type == OptimizerType::SGD && memory.size() == 2*r.count) {
+        std::copy_n(memory.data(), r.count, r.weights);
+        return true;
+    }
     if(memory.size()!=5*r.count+2*((r.count+255)/256)+2)return false;
     std::copy_n(memory.data(),r.count,r.weights);
     if(r.first_moment)std::copy_n(memory.data()+2*r.count,r.count,r.first_moment);

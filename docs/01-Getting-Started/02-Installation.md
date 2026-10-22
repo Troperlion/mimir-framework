@@ -50,7 +50,7 @@ Pour compiler Mímir, il faut CMake, C++17 et quelques dépendances. Cette page 
 
 | Dépendance | Rôle | Utilité | Installer si |
 | --- | --- | --- | --- |
-| **CUDA Toolkit** | GPU NVIDIA (cuBLAS) | Inférence NVIDIA 100x+ rapide | Vous avez GPU NVIDIA + `-DENABLE_CUDA=ON` |
+| **CUDA Toolkit** | GPU NVIDIA (cuBLAS) | Runtime NVIDIA cuBLAS | Vous avez GPU NVIDIA + `-DENABLE_CUDA=ON` |
 | **ROCm** | GPU AMD (rocBLAS) | Inférence AMD rapide | Vous avez GPU AMD + `-DENABLE_ROCM=ON` |
 
 ---
@@ -110,11 +110,32 @@ cd ~/path/to/tensor-2
 cmake --build build -j$(nproc)
 ```
 
-Variables utiles du script:
+Le script installe les dépendances nécessaires aux fonctionnalités choisies,
+puis configure CMake. En mode interactif, sélectionnez les fonctionnalités et
+le backend Viz dans les menus. Pour un profil reproductible sans menu :
 
-- `WORKROOT=/path/to/tensor-2` pour pointer explicitement la racine projet
-- `BUILD_TYPE=Debug` pour preparer un build debug
-- `ENABLE_VULKAN=0`, `ENABLE_OPENCL=0`, `ENABLE_SFML=0`, `ENABLE_LZ4=0` pour desactiver des dependances optionnelles
+```bash
+./config.sh --gui NONE --non-interactive --build-dir build_ci_linux \
+  --generator Ninja --enable MIMIR_ENABLE_TESTS \
+  --disable ENABLE_VULKAN --disable ENABLE_OPENCL
+cmake --build build_ci_linux --parallel 2
+ctest --test-dir build_ci_linux --output-on-failure --timeout 120
+```
+
+Options utiles :
+
+- `--gui SFML|QT|GTK|WEB|NONE` : interface graphique à compiler.
+- `--enable FEATURE` / `--disable FEATURE` : choix explicite des options CMake.
+- `--build-type Debug` : build de débogage (Release par défaut).
+- `--build-dir CHEMIN` et `--generator Ninja` : arbre et générateur du build.
+- `--cmake-arg ARG` : argument CMake supplémentaire, notamment pour la compilation croisée.
+- `--skip-system-deps` : omet apt/sudo uniquement si les dépendances sont déjà installées.
+- `WORKROOT=/chemin/vers/mimir` : racine source explicite ; `MIMIR_VIZ_BACKEND`
+  propose le choix Viz initial. Les fonctionnalités se sélectionnent avec les
+  options `--enable` et `--disable`, pas avec `ENABLE_VULKAN=0` dans l’environnement.
+
+Consultez `./config.sh --help` et la [validation de version](../06-Contributing/08-Release-Validation.md)
+pour les profils Linux et Windows croisés utilisés par les workflows.
 
 **Installation des dépendances:**
 

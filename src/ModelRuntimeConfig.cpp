@@ -9,6 +9,31 @@ void Model::publishRuntimeConfiguration(Optimizer* optimizer) {
     using Owner = LiveModelConfig::Owner;
     using Entry = LiveModelConfig::Entry;
     if (!modelConfig.is_object()) modelConfig = json::object();
+    bool has_reparameterize = false;
+    for (const auto& layer : layers) has_reparameterize |= layer.type_enum == LayerType::Reparameterize;
+    const Layer* dropout = nullptr;
+    const Layer* nms = nullptr;
+    for (const auto& layer : layers) {
+        if (layer.type_enum == LayerType::Dropout || layer.type_enum == LayerType::Dropout2d ||
+            layer.type_enum == LayerType::AlphaDropout) dropout = &layer;
+        if (layer.type_enum == LayerType::NMS) nms = &layer;
+    }
+    const auto skips = skipConnectionControl();
+    // Public config/layer/optimizer objects remain editable between steps. Compare
+    // their effective controls before rebuilding labels, JSON rows and UI maps.
+    std::vector<double> controls = {
+        double(skips->available.load()), double(skips->enabled.load()),
+        double(has_reparameterize), dropout ? double(dropout->dropout_p) : -1.0,
+        nms ? double(nms->nms_iou_threshold) : -1.0,
+        nms ? double(nms->nms_score_threshold) : -1.0,
+        nms ? double(nms->nms_max_detections) : -1.0,
+        nms ? double(nms->nms_class_agnostic) : -1.0,
+        double(optimizer != nullptr)};
+    if (optimizer) controls.insert(controls.end(), {
+        optimizer->beta1, optimizer->beta2, optimizer->eps,
+        optimizer->weight_decay, optimizer->rmsprop_alpha});
+    if (runtime_config_published_ && runtime_config_published_model_ == modelConfig &&
+        runtime_config_published_controls_ == controls) return;
     std::map<std::string, Entry> fields;
     std::function<void(const json&, const std::string&)> inspect = [&](const json& object, const std::string& prefix) {
         for (const auto& item : object.items()) {
@@ -36,17 +61,7 @@ void Model::publishRuntimeConfiguration(Optimizer* optimizer) {
         live(key, value, Owner::Model, 0, 1, "Direct; true / false");
     };
     number("grad_clip_norm", modelConfig.value("clip_norm", 0.0), 0, 1e6);
-    const auto skips = skipConnectionControl();
     if (skips->available.load()) boolean("skip_connections_enabled", skips->enabled.load());
-    bool has_reparameterize = false;
-    for (const auto& layer : layers) has_reparameterize |= layer.type_enum == LayerType::Reparameterize;
-    const Layer* dropout = nullptr;
-    const Layer* nms = nullptr;
-    for (const auto& layer : layers) {
-        if (layer.type_enum == LayerType::Dropout || layer.type_enum == LayerType::Dropout2d ||
-            layer.type_enum == LayerType::AlphaDropout) dropout = &layer;
-        if (layer.type_enum == LayerType::NMS) nms = &layer;
-    }
     if (dropout) number("dropout", dropout->dropout_p, 0, 0.999999);
     if (nms) {
         number("nms_iou_threshold", nms->nms_iou_threshold, 0, 1);
@@ -94,6 +109,9 @@ void Model::publishRuntimeConfiguration(Optimizer* optimizer) {
     std::vector<Entry> entries;
     for (auto& item : fields) entries.push_back(std::move(item.second));
     runtime_config_->publish(std::move(entries));
+    runtime_config_published_model_ = modelConfig;
+    runtime_config_published_controls_ = std::move(controls);
+    runtime_config_published_ = true;
 }
 
 void Model::applyRuntimeConfiguration() {

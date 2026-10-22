@@ -65,6 +65,19 @@ int main(int argc, char** argv) {
     opt.initial_lr=0.1f; opt.weight_decay=0;
     model.publishRuntimeConfiguration(&opt);
     auto config=model.runtimeConfiguration();
+    // Repeated publication may reuse unchanged metadata, but direct edits to
+    // public model/optimizer state must be visible on the very next publication.
+    model.publishRuntimeConfiguration(&opt);
+    model.modelConfig["training"]["epochs"] = 12;
+    opt.beta1 = 0.8f;
+    model.publishRuntimeConfiguration(&opt);
+    bool saw_epochs = false, saw_beta = false;
+    for (const auto& entry : config->snapshot()) {
+        if (entry.key == "training/epochs") saw_epochs = entry.value == 12;
+        if (entry.key == "beta1") saw_beta = std::abs(entry.value.get<float>() - 0.8f) < 1e-6f;
+    }
+    TASSERT_TRUE(saw_epochs && saw_beta);
+
     TASSERT_TRUE(config->modelGraph()!=nullptr);
     config->requestModelGraph(true);
     model.forwardPass(std::vector<float>{3},true);

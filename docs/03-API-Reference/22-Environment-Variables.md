@@ -134,6 +134,11 @@ Notes Vulkan SPIR-V:
 | `MIMIR_ENABLE_FUSION` | bool | `1` | Active les chemins de fusion lorsqu'un plan est utilisé. |
 | `MIMIR_ENABLE_FUSION_TRAIN` | bool | `0` | Autorise la fusion `Conv2d+ReLU` en mode `training=true` (opt-in). Les fusions génériques restent inférence-only. |
 | `MIMIR_PLANNER_DUMP` | bool | `0` | Émet un dump de stats planner au premier forward. |
+| `MIMIR_PLANNER_MODE` | texte | `cost` | `legacy`, `static` ou `cost`. Le mode cost peut utiliser les mesures de l’aller-retour hôte. |
+| `MIMIR_PLANNER_COST_MODEL` | bool | `1` | Autorise le modèle de coût et la calibration ; `0` les désactive. |
+| `MIMIR_PLANNER_BUFFER_REUSE` | bool | `1` en mode cost | Autorise la réutilisation des buffers selon les durées de vie du plan. |
+| `MIMIR_PLANNER_AUTOTUNE` | bool | `1` | Calibre les opérations rejouables lorsqu’au moins deux runtimes natifs sont disponibles. `0` désactive les essais. |
+| `MIMIR_PLANNER_CALIBRATION_MAX_BYTES` | octets | `67108864` | Budget estimé maximal des copies temporaires de calibration, aussi soumis au MemoryGuard. |
 
 ## 4.1) Verbose runtime et cartographie planner
 

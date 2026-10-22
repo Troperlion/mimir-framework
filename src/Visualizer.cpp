@@ -4001,8 +4001,9 @@ void Visualizer::renderZoomOverlay() {
         vizgfx::Text value_text(font);
         value_text.setCharacterSize(12);
         value_text.setFillColor(vizgfx::Color(220, 224, 232));
-        value_text.setPosition(vizgfx::Vector2f(text_x + key_column_w, text_y - 1.0f));
-        const size_t key_chars = static_cast<size_t>(key_column_w / 7.2f);
+        const float value_offset = std::max(key_column_w, key_text.getLocalBounds().size.x + 12.f);
+        value_text.setPosition(vizgfx::Vector2f(text_x + value_offset, text_y - 1.0f));
+        const size_t key_chars = static_cast<size_t>(value_offset / 7.2f);
         const size_t value_chars = max_chars > key_chars ? max_chars - key_chars : max_chars;
         const std::string shown = clamp_text_end(value, value_chars);
         value_text.setString(vizgfx::String::fromUtf8(shown.begin(), shown.end()));
@@ -4082,6 +4083,14 @@ void Visualizer::renderZoomOverlay() {
     draw_value("lr", format_decimal(current_lr, 10));
     draw_value("time / grad", format_decimal(current_timestep, 6) + " / " +
         format_decimal(current_grad_norm, 6));
+    const auto& gd = current_gradient_diagnostics_;
+    const bool finite_gradients = gd.samples > gd.nonfinite;
+    draw_value("clip_rate", gd.samples ? format_decimal(gd.clip_rate, 2) + " %" : "n/a");
+    draw_value("grad_norm median / p95", finite_gradients
+        ? format_decimal(gd.grad_norm_median, 6) + " / " + format_decimal(gd.grad_norm_p95, 6) : "n/a");
+    draw_value("grad_norm unclipped_max", finite_gradients
+        ? format_decimal(gd.grad_norm_unclipped_max, 6) : "n/a");
+    draw_value("pre-clip window", std::to_string(gd.samples) + " / 256 updates; nonfinite=" + std::to_string(gd.nonfinite));
     draw_value("perf", std::to_string(current_batch_time_ms) + " ms / " +
         std::to_string(current_memory_mb) + " MB RSS / " +
         std::to_string(current_allocator_memory_mb) + " MB allocator");
@@ -4655,6 +4664,8 @@ void Visualizer::updateMetrics(int epoch, int batch, float loss, float lr, float
     current_bps = bps;
     current_params = params;
     current_grad_norm = grad_norm;
+    if (auto config = std::atomic_load(&runtime_config_))
+        current_gradient_diagnostics_ = config->gradient_diagnostics.snapshot();
     current_grad_max = grad_max;
     current_opt_type = opt_type;
     current_opt_step = opt_step;
@@ -6377,7 +6388,7 @@ void Visualizer::renderMetrics() {
             vizgfx::Text val(font);
             val.setCharacterSize(12);
             val.setFillColor(vizgfx::Color(228, 231, 238));
-            val.setPosition(vizgfx::Vector2f(static_cast<float>(metrics_x + 112),
+            val.setPosition(vizgfx::Vector2f(static_cast<float>(metrics_x) + std::max(112.f, key.getLocalBounds().size.x + 20.f),
                                          static_cast<float>(metrics_y + y_offset)));
             val.setString(value);
             window->draw(val);
@@ -6662,8 +6673,6 @@ void Visualizer::renderMetrics() {
             extra_y += 2 * line_height + 24;
         }
         drawSection(extra_y - 22, "RUNTIME / OPTIMIZER", vizgfx::Color(180, 145, 235));
-        int after_validation_y = extra_y + 8 * line_height;
-        metrics_content_height = command_height+28.f+static_cast<float>(after_validation_y + 20);
         {
             const std::string recon_name = canonical_recon_loss_name(current_recon_loss_type);
             std::string s = "t=" + format_decimal(current_timestep, 8) +
@@ -6678,12 +6687,24 @@ void Visualizer::renderMetrics() {
             extra_y += line_height;
         }
         drawTableRow(extra_y + line_height, "GRAD", "norm=" + format_decimal(current_grad_norm, 8) + "  max=" + format_decimal(current_grad_max, 8), vizgfx::Color(235, 155, 80));
-        drawTableRow(extra_y + 2 * line_height, "PERF", std::to_string(current_batch_time_ms) + "ms  bps=" + format_decimal(current_bps, 8), vizgfx::Color(90, 205, 155));
-        drawTableRow(extra_y + 3 * line_height, "MEM", std::to_string(current_memory_mb) + "MB RSS  alloc=" + std::to_string(current_allocator_memory_mb) + "MB  params=" + std::to_string(current_params), vizgfx::Color(105, 165, 235));
-        drawTableRow(extra_y + 4 * line_height, "OPT", std::string(optimizerTypeName(static_cast<OptimizerType>(current_opt_type))) + "  step=" + std::to_string(current_opt_step) + "  wd=" + format_decimal(current_opt_weight_decay, 10), vizgfx::Color(215, 180, 80));
+        const auto& gd = current_gradient_diagnostics_;
+        const bool finite_gradients = gd.samples > gd.nonfinite;
+        drawTableRow(extra_y + 2 * line_height, "clip_rate",
+            (gd.samples ? format_decimal(gd.clip_rate, 2) + " %" : "n/a") +
+            "  n=" + std::to_string(gd.samples) + "/256 updates (pre-clip)" +
+            (gd.nonfinite ? "  nonfinite=" + std::to_string(gd.nonfinite) : ""), vizgfx::Color(235, 155, 80));
+        drawTableRow(extra_y + 3 * line_height, "grad_norm median / p95", finite_gradients
+            ? format_decimal(gd.grad_norm_median, 8) + " / " + format_decimal(gd.grad_norm_p95, 8) : "n/a", vizgfx::Color(235, 155, 80));
+        drawTableRow(extra_y + 4 * line_height, "grad_norm unclipped_max", finite_gradients
+            ? format_decimal(gd.grad_norm_unclipped_max, 8) : "n/a", vizgfx::Color(235, 155, 80));
+        drawTableRow(extra_y + 5 * line_height, "PERF", std::to_string(current_batch_time_ms) + "ms  bps=" + format_decimal(current_bps, 8), vizgfx::Color(90, 205, 155));
+        drawTableRow(extra_y + 6 * line_height, "MEM", std::to_string(current_memory_mb) + "MB RSS  alloc=" + std::to_string(current_allocator_memory_mb) + "MB  params=" + std::to_string(current_params), vizgfx::Color(105, 165, 235));
+        drawTableRow(extra_y + 7 * line_height, "OPT", std::string(optimizerTypeName(static_cast<OptimizerType>(current_opt_type))) + "  step=" + std::to_string(current_opt_step) + "  wd=" + format_decimal(current_opt_weight_decay, 10), vizgfx::Color(215, 180, 80));
+        int after_validation_y = extra_y + 11 * line_height;
+        metrics_content_height = command_height+28.f+static_cast<float>(after_validation_y + 20);
 
         {
-            const int validation_header_y = extra_y + 5 * line_height;
+            const int validation_header_y = extra_y + 8 * line_height;
             const int validation_status_y = validation_header_y + 22;
             const int validation_result_y = validation_status_y + line_height;
             std::string s;

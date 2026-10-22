@@ -2,6 +2,7 @@
 #include "Model.hpp"
 #include "runtimes/RuntimeRouter.hpp"
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <cmath>
@@ -99,12 +100,17 @@ int main(int argc,char** argv){
     // Route diagnostics are deliberately outside the timed training/evaluation.
     std::ostringstream audit;
     auto* old_cerr=std::cerr.rdbuf(audit.rdbuf());
+    const char* trace=std::getenv("MIMIR_RUNTIME_TRACE");
+    const bool had_trace=trace!=nullptr;
+    const std::string previous_trace=trace?trace:"";
+    auto restore_trace=[&]{if(had_trace)setenv("MIMIR_RUNTIME_TRACE",previous_trace.c_str(),1);else unsetenv("MIMIR_RUNTIME_TRACE");};
     try {
+        setenv("MIMIR_RUNTIME_TRACE","1",1);
         Model::setFrameworkLogsSuppressed(false);
         train();model.forwardPass(x,false);
-        Model::setFrameworkLogsSuppressed(true);std::cerr.rdbuf(old_cerr);
+        Model::setFrameworkLogsSuppressed(true);std::cerr.rdbuf(old_cerr);restore_trace();
     } catch(...) {
-        Model::setFrameworkLogsSuppressed(true);std::cerr.rdbuf(old_cerr);throw;
+        Model::setFrameworkLogsSuppressed(true);std::cerr.rdbuf(old_cerr);restore_trace();throw;
     }
     report["runtime_audit"]=audit.str();
     std::ofstream(std::string(argv[3])+".runtime-audit.log")<<audit.str();

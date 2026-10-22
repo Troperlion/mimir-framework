@@ -8,6 +8,11 @@ on:
             - ".github/workflows/wiki.yml"
     workflow_dispatch:
 
+# Both branches publish into the same wiki repository. Serialize their pushes.
+concurrency:
+    group: mimir-wiki-${{ github.repository }}
+    cancel-in-progress: false
+
 jobs:
   publish-wiki:
     runs-on: ubuntu-latest

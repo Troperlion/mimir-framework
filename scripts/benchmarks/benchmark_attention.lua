@@ -33,6 +33,8 @@ end
 
 -- 1) VAEConv attention 2D: tokens = H*W, embed_dim = C
 -- Choix petit pour rester rapide.
+-- En inférence, forward expose la reconstruction seule ; mu/logvar restent
+-- des tenseurs internes et ne sont empaquetés qu'en entraînement.
 bench("vae_conv", {
   image_w = 32,
   image_h = 32,
@@ -46,7 +48,7 @@ bench("vae_conv", {
   attention = true,
   attn_heads = 4,
   attn_max_tokens = 256,
-}, rand_floats(32 * 32 * 3), 32*32*3 + 2*8*8*4)
+}, rand_floats(32 * 32 * 3), 32*32*3)
 
 -- 2) Transformer sur tokens entiers: tokens=seq_len, d_model=embed_dim
 -- Garde config petite pour éviter O(seq^2).

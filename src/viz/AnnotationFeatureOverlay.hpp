@@ -5,6 +5,7 @@
 #include <cctype>
 #include <sstream>
 #include <unordered_map>
+#include <limits>
 
 namespace AnnotationFeatureOverlay {
 using json=nlohmann::json;
@@ -16,11 +17,16 @@ inline bool spatialOutput(const std::string& label){
     return s.find("resdiff_abs")!=std::string::npos || s.find("recon")!=std::string::npos || s.find("/dec/")!=std::string::npos || s.find("unpatchify")!=std::string::npos || s.find("/out/")!=std::string::npos || s.find("/output/")!=std::string::npos || s.find("[st]")!=std::string::npos;
 }
 inline void rgb(std::vector<uint8_t>& pixels,int w,int h,int channels){
+    // RGB buffers need the same validation as grayscale/RGBA: callers paint
+    // w*h pixels after this conversion, including buffers received from taps.
+    if(w<=0 || h<=0 || (channels!=1 && channels!=3 && channels!=4) ||
+       size_t(w)>std::numeric_limits<size_t>::max()/size_t(h)) {pixels.clear();return;}
+    const size_t area=size_t(w)*size_t(h);
+    if(area>std::numeric_limits<size_t>::max()/size_t(std::max(3,channels)) ||
+       pixels.size()!=area*size_t(channels)){pixels.clear();return;}
     if(channels==3)return;
-    if(channels!=1 && channels!=4){pixels.clear();return;}
-    if(pixels.size()!=size_t(w)*h*channels){pixels.clear();return;}
-    std::vector<uint8_t> out(size_t(w)*h*3);
-    for(size_t p=0;p<size_t(w)*h;++p)for(int c=0;c<3;++c)out[p*3+c]=pixels[p*channels+(channels==1?0:c)];
+    std::vector<uint8_t> out(area*3);
+    for(size_t p=0;p<area;++p)for(int c=0;c<3;++c)out[p*3+c]=pixels[p*channels+(channels==1?0:c)];
     pixels=std::move(out);
 }
 inline void line(std::vector<uint8_t>& pixels,int w,int h,double ax,double ay,double bx,double by,Color color){

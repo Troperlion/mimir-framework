@@ -261,3 +261,28 @@ Erreurs fréquentes :
 - [Page précédente : Internals : GPU Runtimes — CUDA & ROCm (C++)](21-GPU-Runtimes.md)
 - [Index de la documentation](../00-INDEX.md)
 - [Revenir à la documentation](../00-INDEX.md)
+
+
+## Calibration des runtimes en 3.6.0
+
+`src/Planning/ExecutionCalibration.cpp` classe les runtimes natifs éligibles
+pour une opération forward ou backward rejouable. Le probe utilise une copie
+jetable du layer : les gradients et poids du modèle ne sont pas mis à jour par
+les essais. Une passe de préparation précède cinq mesures ; leur médiane inclut
+l’exécution et les transferts nécessaires au retour hôte. Une comparaison
+numérique élimine les candidats non conformes à la référence disponible.
+
+La calibration exige au moins deux candidats natifs. Les opérations aléatoires
+ou à état non explicitement rejouable gardent leur route normale. Le budget
+estimé est limité à 64 Mio par défaut et respecte le MemoryGuard ; dépasser ce
+budget conserve la route existante. Les clés de cache tiennent compte des
+formes, paramètres, modes, runtimes et configurations. La route est réévaluée
+après 1 024 utilisations et invalidée après un échec de dispatch.
+
+Le plan distingue `cost_basis=measured_host_roundtrip` d’un coût estimé. Il ne
+faut pas interpréter une estimation comme une mesure GPU. Le mode cost est le
+défaut ; `MIMIR_PLANNER_AUTOTUNE=0` désactive la calibration et
+`MIMIR_PLANNER_MODE=legacy` permet de comparer le parcours historique.
+
+Voir les [variables de configuration](../03-API-Reference/22-Environment-Variables.md)
+et la [validation de version](../06-Contributing/08-Release-Validation.md).

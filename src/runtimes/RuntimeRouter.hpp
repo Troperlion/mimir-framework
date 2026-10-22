@@ -78,8 +78,8 @@ public:
         const RuntimeForwardContext& context = {}
     ) const;
 
-    // Execute the planner choice first, then lower native routes without
-    // retrying the failed preferred runtime.
+    // Cost mode refines the planner hint using measured host roundtrip.
+    // Static/legacy execute the hint first, followed by native fallback routes.
     bool dispatchForwardLayerPlanned(
         AbstractRuntime* preferred,
         const std::vector<const std::vector<float>*>& inputs,
@@ -117,6 +117,7 @@ private:
     mutable std::unordered_map<const Layer*, std::vector<AbstractRuntime*>> forward_layer_routes_;
     mutable std::unordered_map<const Layer*, std::vector<AbstractRuntime*>> backward_layer_routes_;
     mutable bool runtimes_activated_ = false;
+    uint64_t optimizer_routing_generation_ = 0;
     std::function<bool()> activate_rocm_;
     std::function<bool()> activate_cuda_;
     std::function<bool()> activate_vulkan_;

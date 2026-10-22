@@ -300,6 +300,22 @@ struct VisualizerEventTestAccess {
         v.setMetricsHistory({},3);
         TASSERT_TRUE(v.full_loss_history.size()==3 && v.loss_history.size()==3);
         TASSERT_NEAR(v.loss_min_,0.125f,1e-6f);
+        auto gradient_config = std::make_shared<LiveModelConfig>();
+        v.setRuntimeConfiguration(gradient_config);
+        TASSERT_TRUE(gradient_config->gradient_diagnostics.requested());
+        gradient_config->gradient_diagnostics.record(1, false);
+        gradient_config->gradient_diagnostics.record(9, true);
+        v.updateMetrics(1, 2, .1f, .001f);
+        TASSERT_TRUE(v.current_gradient_diagnostics_.samples == 2);
+        TASSERT_NEAR(v.current_gradient_diagnostics_.clip_rate, 50, 1e-6f);
+        TASSERT_NEAR(v.current_gradient_diagnostics_.grad_norm_median, 5, 1e-6f);
+        TASSERT_NEAR(v.current_gradient_diagnostics_.grad_norm_p95, 9, 1e-6f);
+        TASSERT_NEAR(v.current_gradient_diagnostics_.grad_norm_unclipped_max, 9, 1e-6f);
+        v.renderMetrics();
+        if (const char* capture=std::getenv("MIMIR_VIZ_TEST_CAPTURE")) {
+            v.window->clear(vizgfx::Color(12,14,18));redraw();v.window->display();
+            TASSERT_TRUE(v.window->captureImage().saveToFile(std::string(capture) + ".gradients.png"));
+        }
         v.setLayerBlockImages({});TASSERT_TRUE(!v.has_projection_image && !v.has_understanding_image);
         // Input preview selection must choose the image subsequently enlarged by Z.
         v.setDatasetImage(std::vector<uint8_t>(8*4*3,128),8,4,3,"input");

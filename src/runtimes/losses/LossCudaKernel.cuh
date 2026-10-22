@@ -6,7 +6,7 @@
 #define LOSS_MUL(a,b) __fmul_rn(a,b)
 #define F(k) __int_as_float(args[9+(k)])
 #define BARRIER __syncthreads()
-extern "C" __global__ void mimir_reconstruction(float* memory,const int* args) {
+extern "C" __global__ void mimir_reconstruction(float* memory,const int* args,int pass) {
 int i=blockIdx.x*blockDim.x+threadIdx.x,local=threadIdx.x,group=blockIdx.x;
 __shared__ float sums[768];
 
@@ -15,7 +15,7 @@ __shared__ float sums[768];
 #define LOSS_ACC(a,b,hi,mid,lo) {float va=(a),vb=(b),pr,pe;LOSS_PRODUCT(va,vb,pr,pe);float ss,ee,mm,me,m2,e2,hh,mi,tail;LOSS_TWO(hi,pr,ss,ee);LOSS_TWO(mid,pe,mm,me);LOSS_TWO(ee,mm,m2,e2);float ll=LOSS_ADD(LOSS_ADD(lo,me),e2);LOSS_TWO(ss,m2,hh,mi);LOSS_TWO(mi,ll,mm,tail);LOSS_TWO(hh,mm,hi,mi);LOSS_TWO(mi,tail,mid,lo);if(hi!=0.0f){int exponent=((LOSS_BITS(hi)>>23)&255)-127;if((LOSS_BITS(hi)&8388607)==0 && ((hi>0.0f && mid<0.0f)||(hi<0.0f && mid>0.0f)))--exponent;int biased=exponent+75;float step=LOSS_FLOAT(biased>0?(biased<<23):(biased>=-22?(1<<((biased+22)&31)):0));if(step>0.0f){float base=trunc(mid/step),res=LOSS_SUB(mid,LOSS_MUL(base,step)),z=LOSS_ADD(res/step,lo/step),fl=floor(z),fraction=LOSS_SUB(z,fl);bool odd=(int(base)&1)!=(int(fl)&1);float rounded=fl+(fraction>0.5f || (fraction==0.5f && odd)?1.0f:0.0f);mid=LOSS_MUL(base,step);lo=LOSS_MUL(rounded,step);}}}
 #define LOSS_STORE(hi,mid,lo,a,result) {float loss_scale_p,loss_scale_e;LOSS_PRODUCT(hi,a,loss_scale_p,loss_scale_e);result=LOSS_ADD(loss_scale_p,LOSS_ADD(loss_scale_e,LOSS_ADD(LOSS_MUL(mid,a),LOSS_MUL(lo,a))));}
 
-int n=args[3],w=args[4],h=args[5],c=args[6],op=args[2],pass=args[0];
+int n=args[3],w=args[4],h=args[5],c=args[6],op=args[2];
 int ch=i%c,hw=w*h,ow=w/2>0?w/2:1,oh=h/2>0?h/2:1;
 if(pass==90 || pass==91) {
  int count=op==1?c:(op==5?h:n),groups=(count+255)/256;

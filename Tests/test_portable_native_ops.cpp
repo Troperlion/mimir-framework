@@ -1,12 +1,16 @@
+#include "test_utils.hpp"
 #include "Model.hpp"
 #include "runtimes/opencl/OpenCLRuntime.hpp"
 #include "runtimes/vulkan/VulkanRuntime.hpp"
 #include "runtimes/cpu/CpuRuntime.hpp"
 #include "runtimes/RuntimeRouter.hpp"
+#include "runtimes/portable/PortableStaging.hpp"
 #include <memory>
 #include <string>
 #include "runtimes/cpu/RuntimeLayerDispatch.hpp"
 #include <cmath>
+#include <chrono>
+#include <climits>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -70,6 +74,8 @@ static void parity_inputs(AbstractRuntime& runtime, Layer& layer, const std::vec
 static void parity(AbstractRuntime& runtime,Layer& layer,const std::vector<float>& x){parity_inputs(runtime,layer,{&x});}
 int main(int argc,char** argv) {
     try {
+        // Coverage must force native GPU routing; measured placement has its own test.
+        setTestEnvironment("MIMIR_PLANNER_MODE","static");
         const std::string backend=argc>1?argv[1]:"VULKAN";
         std::unique_ptr<AbstractRuntime> selected;
         if(backend=="OPENCL") {
@@ -112,9 +118,49 @@ int main(int argc,char** argv) {
             l.weights.assign(129,.1f); l.grad_weights.assign(129,.125f); l.grad_bias.assign(1,.25f);
             std::vector<float> x(254*128,.2f), dy(254,.3f);
             std::vector<std::vector<float>> gradients;
-            require(!runtime.backwardLayer({&x},{&dy},gradients,l,true),"oversized staging must be refused");
-            compare(l.grad_weights,std::vector<float>(129,.125f));
-            compare(l.grad_bias,std::vector<float>(1,.25f));
+            auto& device=PortableStaging::contexts[backend+":0"].device;
+            // The runtime creates its staging device lazily on first dispatch.
+            require(runtime.backwardLayer({&x},{&dy},gradients,l,true),"parallel Linear backward accepts larger staging");
+            require(bool(device),"staging device exists");
+            auto before=device->batchStatistics();
+            Layer probe=l;std::vector<std::vector<float>> scratch;
+            require(runtime.backwardLayer({&x},{&dy},scratch,probe,true),"batched Linear backward");
+            auto after=device->batchStatistics();
+            require(after.submissions-before.submissions==1 && after.kernels-before.kernels==3,"three Linear gradients share one GPU submission");
+            require(after.downloaded_bytes-before.downloaded_bytes<after.uploaded_bytes-before.uploaded_bytes,"unchanged Linear inputs are not downloaded");
+            std::cout<<"GPU_BATCH_OK backend="<<backend<<" kernels="<<after.kernels-before.kernels
+                <<" submissions="<<after.submissions-before.submissions
+                <<" uploaded_bytes="<<after.uploaded_bytes-before.uploaded_bytes
+                <<" downloaded_bytes="<<after.downloaded_bytes-before.downloaded_bytes<<'\n';
+            compare(gradients[0],std::vector<float>(x.size(),.03f));
+            std::vector<float> expected(129,.125f+254*.06f);expected.back()=.125f+254*.3f;compare(l.grad_weights,expected);
+            compare(l.grad_bias,std::vector<float>(1,.25f+254*.3f));
+        }
+        {
+            std::vector<float> x(8*128*128);
+            for(size_t i=0;i<x.size();++i)x[i]=std::sin(float(i%997)*.037f);
+            Layer norm;norm.type_enum=LayerType::GroupNorm;norm.in_channels=8;
+            norm.input_height=norm.input_width=128;norm.num_groups=4;
+            norm.affine=true;norm.use_bias=true;norm.weights.assign(16,.3f);
+            parity(runtime,norm,x);
+            norm.type_enum=LayerType::InstanceNorm2d;parity(runtime,norm,x);
+            Layer softmax;softmax.type_enum=LayerType::Softmax;softmax.shape={128,1024};softmax.axis=1;
+            parity(runtime,softmax,x);
+            softmax.type_enum=LayerType::LogSoftmax;parity(runtime,softmax,x);
+            Layer pool;pool.type_enum=LayerType::MaxPool2d;pool.in_channels=8;
+            pool.input_height=pool.input_width=128;pool.kernel_size=3;pool.stride=2;pool.padding=1;
+            parity(runtime,pool,x);
+            pool.type_enum=LayerType::AvgPool2d;parity(runtime,pool,x);
+            pool.type_enum=LayerType::GlobalAvgPool2d;parity(runtime,pool,x);
+            Layer conv;conv.type_enum=LayerType::Conv2d;conv.in_channels=8;conv.out_channels=4;
+            conv.input_height=conv.input_width=128;conv.kernel_size=3;conv.stride=1;conv.padding=1;
+            conv.use_bias=true;conv.weights.resize(4*8*9+4);
+            for(size_t i=0;i<conv.weights.size();++i)conv.weights[i]=float(int(i%13)-6)*.002f;
+            parity(runtime,conv,x);
+            Layer constant;constant.type_enum=LayerType::Constant;constant.trainable_parameter=true;
+            constant.embed_dim=256;constant.seq_len=512;constant.shape={-1,256};constant.weights.assign(128*256,.3f);
+            parity_inputs(runtime,constant,{});
+            std::cout<<"LARGE_GENERALIZED_KERNELS_OK elements="<<x.size()<<'\n';
         }
         {
             std::vector<float> large(3 * 1024 * 1024);
@@ -122,7 +168,20 @@ int main(int argc,char** argv) {
             Layer norm; norm.type_enum=LayerType::LayerNorm;
             require(runtimeCapabilityIsNative(runtime.queryForwardOperationCapability(relu,{&large},true)),"large parallel activation must remain available");
             require(!runtimeCapabilityIsNative(runtime.queryForwardOperationCapability(norm,{&large},true)),"large serial normalization must be refused");
-            require(!runtimeCapabilityIsNative(runtime.queryBackwardOperationCapability(relu,{&large},{&large},true)),"large serial backward must be refused");
+            require(runtimeCapabilityIsNative(runtime.queryBackwardOperationCapability(relu,{&large},{&large},true)),"large parallel backward available");
+            large.front()=2.f;large.back()=-2.f;
+            std::vector<std::vector<float>> dx;
+            require(runtime.backwardLayer({&large},{&large},dx,relu,true),"large parallel activation backward");
+            require(dx[0].size()==large.size() && dx[0].front()==2.f && dx[0].back()==0.f,"large activation gradient");
+            const auto norm_start=std::chrono::steady_clock::now();
+            norm.in_features=1024;norm.affine=false;norm.use_bias=false;
+            require(runtimeCapabilityIsNative(runtime.queryForwardOperationCapability(norm,{&large},true)),"large row normalization available");
+            require(runtime.forwardLayer({&large},dx,norm,true),"large parallel normalization forward");
+            require(runtime.backwardLayer({&large},{&large},dx,norm,true),"large parallel normalization backward");
+            std::vector<std::vector<float>> expected;
+            require(RuntimeLayerDispatch::cpu_backward_layer({&large},{&large},expected,norm,true),"large CPU norm reference");
+            compare(dx[0],expected[0]);
+            std::cout<<"LARGE_NORM_FORWARD_BACKWARD_OK elements="<<large.size()<<" elapsed_with_cpu_check_ms="<<std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-norm_start).count()<<'\n';
             CpuRuntime cpu; require(cpu.initialize(cfg),"CPU fallback initializes");
             auto& router=RuntimeRouter::instance();
             router.setActivators({}, {}, {}, {}, {});
@@ -132,12 +191,23 @@ int main(int argc,char** argv) {
             std::vector<std::vector<float>> output;
             AbstractRuntime* selected=nullptr;
             require(router.dispatchForwardLayer({&large},output,identity,true,&selected),"large reference operation routes to fallback");
-            require(selected==&cpu && output.size()==1,"large reference operation must select CPU");
+            require(selected==&runtime && output.size()==1,"large copy must select native GPU");
             compare(output[0],large);
             require(router.dispatchBackwardLayer({&large},{&large},output,identity,true,&selected),"large backward routes to fallback");
-            require(selected==&cpu && output.size()==1,"large backward must select CPU");
+            require(selected==&runtime && output.size()==1,"large copy backward must select native GPU");
             compare(output[0],large);
             router.setRuntimes(nullptr,nullptr,nullptr,nullptr,nullptr);
+        }
+        {
+            Layer linear;linear.type_enum=LayerType::Linear;linear.in_features=128;linear.out_features=linear.out_channels=128;linear.seq_len=512;linear.use_bias=true;
+            linear.weights.resize(128*128+128);
+            for(size_t i=0;i<linear.weights.size();++i)linear.weights[i]=float(int(i%13)-6)*.002f;
+            std::vector<float> x(512*128);
+            for(size_t i=0;i<x.size();++i)x[i]=float(int(i%17)-8)*.03f;
+            parity(runtime,linear,x);
+            Layer norm;norm.type_enum=LayerType::LayerNorm;norm.in_features=128;norm.affine=true;norm.use_bias=true;norm.weights.assign(256,.3f);
+            parity(runtime,norm,x);
+            norm.type_enum=LayerType::RMSNorm;parity(runtime,norm,x);
         }
         {
             Layer layer;layer.type_enum=LayerType::Lambda;
@@ -232,6 +302,29 @@ int main(int argc,char** argv) {
         for(bool trainable:{false,true}){
             Layer l;l.type_enum=LayerType::Constant;l.weights={1,3,-2};l.trainable_parameter=trainable;std::vector<float>x{0};parity(runtime,l,x);
         }
+        // Actual Constant graph nodes have no input tensor. Exercise prefix,
+        // interpolation, one-row tables and the exact adjoint without CPU routes.
+        for(bool trainable:{false,true})for(int base_rows:{1,3})for(int rows:{1,2,3,7}){
+            Layer l;l.type_enum=LayerType::Constant;l.trainable_parameter=trainable;
+            l.embed_dim=3;l.seq_len=rows;l.shape={-1,3};l.weights.resize(base_rows*3);
+            for(size_t i=0;i<l.weights.size();++i)l.weights[i]=std::sin(float(i)*.7f);
+            parity_inputs(runtime,l,{});
+            auto& router=RuntimeRouter::instance();router.setActivators({}, {}, {}, {}, {});
+            router.setRuntimes(nullptr,nullptr,backend=="VULKAN"?&runtime:nullptr,backend=="OPENCL"?&runtime:nullptr,nullptr);
+            std::vector<std::vector<float>> output;
+            AbstractRuntime* selected=nullptr;
+            require(router.dispatchForwardLayer({},output,l,true,&selected) && selected==&runtime,"input-free Constant GPU route");
+            std::vector<float> gradient(output.at(0).size(),.25f);
+            require(router.dispatchBackwardLayer({},{&gradient},output,l,true,&selected) && selected==&runtime,"input-free Constant backward GPU route");
+            require(output.empty(),"Constant must not invent input gradients");
+            router.setRuntimes(nullptr,nullptr,nullptr,nullptr,nullptr);
+        }
+        {
+            Layer l;l.type_enum=LayerType::Constant;l.weights={1,3,-2};l.trainable_parameter=true;
+            parity_inputs(runtime,l,{});
+            l.shape={-1,3};l.embed_dim=3;l.seq_len=INT_MAX;
+            require(!runtimeCapabilityIsNative(runtime.queryForwardOperationCapability(l,{},true)),"oversized Constant refused before allocation");
+        }
         for(auto type:{LayerType::MaxPool1d,LayerType::AvgPool1d,LayerType::MaxPool2d,LayerType::AvgPool2d,LayerType::GlobalAvgPool2d,LayerType::AdaptiveAvgPool2d,LayerType::TokenMeanPool}){
             Layer l;l.type_enum=type;l.in_channels=2;l.input_height=3;l.input_width=5;l.seq_len=5;l.embed_dim=6;
             l.kernel_h=3;l.kernel_w=3;l.stride_h=l.stride_w=1;l.pad_h=l.pad_w=1;
@@ -248,6 +341,35 @@ int main(int argc,char** argv) {
             Layer l;l.type_enum=type;l.in_features=513;l.affine=affine;l.use_bias=bias;l.eps=1e-5f;l.weights.resize(1026);
             for(int i=0;i<1026;++i)l.weights[i]=.3f+.01f*(i%11);
             std::vector<float>x(1539);for(int i=0;i<1539;++i)x[i]=std::sin(i*.3f);parity(runtime,l,x);
+        }
+        // Forward RMSNorm dimension hints and missing affine weights are legal
+        // CPU configurations; backward keeps the CPU's established width rule.
+        for(int hint=0;hint<4;++hint)for(bool affine:{false,true}){
+            Layer l;l.type_enum=LayerType::RMSNorm;l.affine=affine;l.use_bias=true;l.eps=1e-5f;
+            if(hint==0)l.embed_dim=3;
+            if(hint==1)l.shape={2,3};
+            if(hint==2)l.target_shape={2,3};
+            if(hint==3){l.embed_dim=3;l.shape={2,2};l.target_shape={2,1};}
+            if(affine)l.weights={.8f,1.2f,.9f,.6f,1.1f,1.4f};
+            parity(runtime,l,std::vector<float>{-2,1,3,.5f,-1,2});
+        }
+        for(auto type:{LayerType::LayerNorm,LayerType::RMSNorm}){
+            Layer l;l.type_enum=type;l.affine=true;l.in_features=3;l.eps=1e-5f;
+            const std::vector<float> x{-2,1,3,.5f,-1,2};
+            if(type==LayerType::LayerNorm) {
+                require(!runtimeCapabilityIsNative(runtime.queryForwardOperationCapability(l,{&x},true)),"LayerNorm requires full affine parameters, like CPU");
+                l.weights={.8f,1.2f};
+                require(!runtimeCapabilityIsNative(runtime.queryForwardOperationCapability(l,{&x},true)),"partial LayerNorm affine rejected, like CPU");
+                continue;
+            }
+            parity(runtime,l,x); // RMSNorm defaults gamma to 1 without weights
+            l.weights={.8f,1.2f};
+            std::vector<std::vector<float>> gpu,cpu;
+            require(runtimeCapabilityIsNative(runtime.queryForwardOperationCapability(l,{&x},true)),"partial affine forward native");
+            require(runtime.forwardLayer({&x},gpu,l,true),"partial affine GPU execution");
+            require(RuntimeLayerDispatch::cpu_forward_layer({&x},cpu,l,true),"partial affine CPU reference");
+            compare(gpu.at(0),cpu.at(0));
+            require(!runtimeCapabilityIsNative(runtime.queryBackwardOperationCapability(l,{&x},{&x},true)),"unsafe partial affine backward rejected");
         }
         for(auto type:{LayerType::Embedding,LayerType::EmbeddingBag}){
             Layer l;l.type_enum=type;l.vocab_size=6;l.embed_dim=4;l.padding_idx=0;l.weights.resize(24);

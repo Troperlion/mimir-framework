@@ -10,6 +10,7 @@
 
 #include "test_utils.hpp"
 #include "Model.hpp"
+#include "runtimes/cpu/SIMD_Ops.hpp"
 
 #define CHECK(cond) do { if (!(cond)) { std::cerr << "FATAL: " #cond "\n"; std::abort(); } } while(0)
 
@@ -90,6 +91,23 @@ static void check_linear_workspace(Runtime& runtime) {
 }
 
 int main() {
+    // Odd matrix dimensions exercise the SIMD tails and adaptive OpenMP teams.
+    {
+        constexpr size_t m=256,n=67,k=129;
+        std::vector<float> a(m*k),b(k*n),bt(n*k),c(m*n),ct(m*n);
+        for(size_t i=0;i<a.size();++i)a[i]=std::sin(float(i%137)*.13f)*.1f;
+        for(size_t i=0;i<b.size();++i)b[i]=std::cos(float(i%173)*.17f)*.1f;
+        for(size_t i=0;i<k;++i)for(size_t j=0;j<n;++j)bt[j*k+i]=b[i*n+j];
+        SIMD::matmul_avx2(c.data(),a.data(),b.data(),m,n,k);
+        SIMD::matmul_transpose_avx2(ct.data(),a.data(),bt.data(),m,n,k);
+        for(size_t i=0;i<m;++i)for(size_t j=0;j<n;++j){
+            double expected=0;for(size_t r=0;r<k;++r)expected+=double(a[i*k+r])*b[r*n+j];
+            TASSERT_NEAR(c[i*n+j],float(expected),1e-5f);
+            TASSERT_NEAR(ct[i*n+j],float(expected),1e-5f);
+        }
+        HardwareOpt::matmul_add_fma_saturated(c.data(),a.data(),b.data(),m,n,k);
+        for(size_t i=0;i<c.size();++i)TASSERT_NEAR(c[i],2.f*ct[i],1e-5f);
+    }
     // =========================================================================
     // 1. W = [[1,2],[3,4]], x = [1,0], sans biais
     //    y[0] = 1·1 + 2·0 = 1

@@ -622,6 +622,7 @@ public:
     }
 
     void bindRuntimeConfiguration(std::shared_ptr<LiveModelConfig> config) {
+        if (config) config->gradient_diagnostics.request();
         std::atomic_store(&runtime_config_, config);
         if (auto viz = getViz()) viz->setRuntimeConfiguration(config);
         if (htop_) htop_->setRuntimeConfiguration(config);

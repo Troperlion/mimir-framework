@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <cstdlib>
+#include <cmath>
 
 using json = nlohmann::json;
 
@@ -68,6 +70,46 @@ int main() {
         rejected = true;
     }
     TASSERT_TRUE(rejected);
+
+    // Repeated real forward/backward/update exercises scratch lifetimes, planner
+    // recalibration and optimizer state, rather than just architecture creation.
+    const int steps = std::getenv("MIMIR_VGG_STRESS_STEPS")
+        ? std::max(1, std::atoi(std::getenv("MIMIR_VGG_STRESS_STEPS"))) : 3;
+    const int side = std::getenv("MIMIR_VGG_STRESS_SIDE")
+        ? std::clamp(std::atoi(std::getenv("MIMIR_VGG_STRESS_SIDE")), 32, 512) : 32;
+    for (const char* norm : {"lineargroup", "groupnorm"}) {
+        json cfg = base;
+        cfg["enc_norm"] = norm;
+        cfg["image_w"] = side;
+        cfg["image_h"] = side;
+        if (const char* channels = std::getenv("MIMIR_VGG_STRESS_CHANNELS"))
+            cfg["base_channels"] = std::clamp(std::atoi(channels), 4, 64);
+        auto model = ModelArchitectures::create("vgg16_feat", cfg);
+        model->allocateParams();
+        model->initializeWeights("xavier", 42);
+        Optimizer optimizer;
+        optimizer.type = OptimizerType::ADAMW;
+        if (const char* kind = std::getenv("MIMIR_VGG_STRESS_OPTIMIZER"))
+            optimizer.type = static_cast<OptimizerType>(std::clamp(std::atoi(kind), 0, 8));
+        std::vector<float> input(side * side * 3);
+        for (int step = 0; step < steps; ++step) {
+            for (size_t i = 0; i < input.size(); ++i)
+                input[i] = std::sin(float(i + step) * .031f);
+            model->zeroGradients();
+            const auto& prediction = model->forwardPassView(input, true);
+            TASSERT_TRUE(!prediction.empty());
+            std::vector<float> gradient(prediction.size());
+            for (size_t i = 0; i < prediction.size(); ++i) {
+                TASSERT_TRUE(std::isfinite(prediction[i]));
+                gradient[i] = 2.f * (prediction[i] - .1f) / float(prediction.size());
+            }
+            model->backwardPass(gradient);
+            model->optimizerStep(optimizer, 1e-5f);
+            for (const auto& layer : model->getLayers())
+                for (size_t i = 0; i < layer.getWeightsSize(); ++i)
+                    TASSERT_TRUE(std::isfinite(layer.getWeights()[i]));
+        }
+    }
 
     return 0;
 }

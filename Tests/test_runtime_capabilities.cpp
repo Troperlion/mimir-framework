@@ -88,6 +88,8 @@ private:
 };
 
 int main() {
+    // This fixture tests priority/fallback policy; calibration has separate timed tests.
+    setTestEnvironment("MIMIR_PLANNER_AUTOTUNE", "0");
     Model primary_model;
     TASSERT_TRUE(primary_model.hasCpuCompute());
     {

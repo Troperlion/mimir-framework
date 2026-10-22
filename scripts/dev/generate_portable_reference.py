@@ -6,6 +6,9 @@ ROOT=Path(__file__).resolve().parents[2];
 import os
 os.chdir(ROOT); OUT=ROOT/'src/runtimes/portable'; OUT.mkdir(exist_ok=True)
 
+def write_if_changed(path,content):
+ if not path.exists() or path.read_text()!=content:path.write_text(content)
+
 def balanced(s,pos,left='{',right='}'):
  d=1;i=pos+1
  while d:
@@ -28,10 +31,25 @@ sources={}
 for name in ['Native','Training','Attention','Recurrent','Detection']:
  sources[name]=Path(f'src/runtimes/cuda/Cuda{name}Ops.cuh').read_text()
 sources['Runtime']=Path('src/runtimes/cuda/CudaRuntime.cpp').read_text()
-sources['Extra']='''__global__ void portable_copy(const float* source,float* dest,int n){for(int i=0;i<n;++i)dest[i]=source[i];}
+sources['Extra']='''__global__ void portable_copy(const float* source,float* dest,int n){int i=blockIdx.x*blockDim.x+threadIdx.x;if(i<n)dest[i]=source[i];}
 __global__ void portable_gemm(const float* a,const float* b,float* c,int m,int n,int k,int lda,int ldb,int ldc,bool ta,bool tb,float alpha,float beta){
- for(int j=0;j<n;++j)for(int i=0;i<m;++i){float sum=0;for(int f=0;f<k;++f)sum+=a[ta?f+i*lda:i+f*lda]*b[tb?j+f*ldb:f+j*ldb];c[i+j*ldc]=alpha*sum+beta*c[i+j*ldc];}}
-__global__ void portable_ger(const float* x,const float* y,float* a,int m,int n,int sx,int sy,int lda,float alpha){for(int j=0;j<n;++j)for(int i=0;i<m;++i)a[i+j*lda]+=alpha*x[i*sx]*y[j*sy];}'''
+ int index=blockIdx.x*blockDim.x+threadIdx.x;int i=index%m,j=index/m;if(j<n){float sum=0;for(int f=0;f<k;++f)sum+=a[ta?f+i*lda:i+f*lda]*b[tb?j+f*ldb:f+j*ldb];c[i+j*ldc]=alpha*sum+beta*c[i+j*ldc];}}
+__global__ void portable_ger(const float* x,const float* y,float* a,int m,int n,int sx,int sy,int lda,float alpha){int index=blockIdx.x*blockDim.x+threadIdx.x;int i=index%m,j=index/m;if(j<n)a[i+j*lda]+=alpha*x[i*sx]*y[j*sy];}'''
+
+# Positional tables keep their checkpoint shape. Coordinates come from the
+# shared host geometry; tensor interpolation and the adjoint run on device.
+sources['Extra'] += r'''
+__global__ void portable_sequence_constant_forward(const float* source,const float* rows,float* result,int width,int base_rows,int count) {
+ int i=blockIdx.x*blockDim.x+threadIdx.x;if(i>=count)return;
+ int row=i/width,c=i%width,a=int(rows[2*row]),b=a+1<base_rows?a+1:base_rows-1;
+ float t=rows[2*row+1];result[i]=(1.0f-t)*source[a*width+c]+t*source[b*width+c];
+}
+__global__ void portable_sequence_constant_backward(const float* source,const float* rows,float* result,int width,int base_rows,int count) {
+ int i=blockIdx.x*blockDim.x+threadIdx.x;if(i>=count)return;
+ int row=i/width,c=i%width,a=int(rows[2*row]),b=a+1<base_rows?a+1:base_rows-1;
+ float t=rows[2*row+1];atomicAdd(result+a*width+c,(1.0f-t)*source[i]);atomicAdd(result+b*width+c,t*source[i]);
+}
+'''
 
 # Scalar GPU geometries have no dynamic containers.
 gs=Path('src/runtimes/cuda/CudaOperationGeometry.hpp').read_text(); geometries={}
@@ -51,7 +69,8 @@ for family,s in sources.items():
   allfunc.append((family,f))
 
 # GPU source uses a single float arena; pointer arguments become validated offsets.
-# Reference launches are serial on device, making gradient scatters deterministic.
+# Kernels with disjoint outputs use a parallel grid; gradient scatters remain
+# serialized so they do not require unsupported floating-point atomics.
 seqvars=set(); seqscalar=set()
 for f in [x[1] for x in allfunc if x[0]=='Recurrent']:
  for n in re.findall(r'SequenceVector(?:\s*&)?\s+(\w+)',f[6]):seqvars.add(n)
@@ -70,8 +89,21 @@ void sequence_swap(inout SequenceVector a,inout SequenceVector b){SequenceVector
 void sequence_copy(int first,int last,int output){while(first!=last){memory[output++]=memory[first++];}}
 float sequence_dot(int w,int x,int n){float s=0;for(int i=0;i<n;++i)s+=memory[w+i]*memory[x+i];return s;}
 float reduce_sum(float value,int scratch){return value;}
+float parallel_sum(float value){
+ normScratch[int(gl_LocalInvocationID.x)]=value;barrier();
+ for(int stride=128;stride>0;stride/=2){if(int(gl_LocalInvocationID.x)<stride)normScratch[int(gl_LocalInvocationID.x)]+=normScratch[int(gl_LocalInvocationID.x)+stride];barrier();}
+ float result=normScratch[0];barrier();return result;
+}
 float reduce_max(float value,int scratch){return value;}
-void atomicAdd(int at,float value){memory[at]+=value;}
+float parallel_max(float value){
+ normScratch[int(gl_LocalInvocationID.x)]=value;barrier();
+ for(int stride=128;stride>0;stride/=2){if(int(gl_LocalInvocationID.x)<stride)normScratch[int(gl_LocalInvocationID.x)]=max(normScratch[int(gl_LocalInvocationID.x)],normScratch[int(gl_LocalInvocationID.x)+stride]);barrier();}
+ float result=normScratch[0];barrier();return result;
+}
+void atomicAdd(int at,float value){
+ uint old=atomicCompSwap(integer_memory[at],0u,0u);
+ for(;;){uint expected=old;old=atomicCompSwap(integer_memory[at],expected,floatBitsToUint(uintBitsToFloat(expected)+value));if(old==expected)return;}
+}
 bool truth(bool v){return v;}
 bool truth(int v){return v!=0;}
 bool truth(float v){return v!=0.0;}
@@ -207,9 +239,70 @@ for family,f in allfunc:
  shader+=sig+transform(f[6],args,f[4])+'\n'
  if f[2]=='global':kernels.append((f[4],args))
 
+# Pooling windows cooperate within a workgroup; argmax ties retain CPU order.
+start=shader.index('void pool_kernel(');end=balanced(shader,shader.index('{',start))
+shader=shader[:start]+r'''
+void pool_kernel(int x,int dy,int y,int dx,GPool g,int count){
+ int o=blockIdx_x;if(o>=count)return;
+ int c=o/(g.oh*g.ow),oy=(o/g.ow)%g.oh,ox=o%g.ow;
+ float value=g.maximum?-uintBitsToFloat(0x7f800000u):0.;int valid=0,best=-1;
+ for(int k=threadIdx_x;k<g.kh*g.kw;k+=blockDim_x){
+  int iy=oy*g.sh+k/g.kw-g.ph,ix=ox*g.sw+k%g.kw-g.pw;
+  if(iy<0 || iy>=g.h || ix<0 || ix>=g.w)continue;
+  int i=g.token?iy*g.c+c:(c*g.h+iy)*g.w+ix;
+  ++valid;if(g.maximum){if(memory[x+i]>value){value=memory[x+i];best=i;}}else value+=memory[x+i];
+ }
+ float reduced=g.maximum?parallel_max(value):parallel_sum(value);
+ float valid_count=parallel_sum(float(valid));
+ float winner=g.maximum?-parallel_max(-(best>=0 && value==reduced?float(best):1e30)):0.;
+ if(dy==0){if(threadIdx_x==0)memory[y+o]=g.maximum?reduced:(valid_count>0.?reduced/valid_count:0.);return;}
+ if(g.maximum){if(threadIdx_x==0 && winner<1e30)atomicAdd(dx+int(winner),memory[dy+o]);return;}
+ if(valid_count==0.)return;
+ float gradient=memory[dy+o]/valid_count;
+ for(int k=threadIdx_x;k<g.kh*g.kw;k+=blockDim_x){
+  int iy=oy*g.sh+k/g.kw-g.ph,ix=ox*g.sw+k%g.kw-g.pw;
+  if(iy>=0 && iy<g.h && ix>=0 && ix<g.w)atomicAdd(dx+(g.token?iy*g.c+c:(c*g.h+iy)*g.w+ix),gradient);
+ }
+}
+'''+shader[end:]
+
+# Reductions have one workgroup per independent row/channel. Scatter writes
+# use portable integer CAS atomics instead of racing non-atomic float stores.
+team_kernels={'norm_forward','norm_backward','channel_gradient','softmax_kernel',
+              'row_norm_kernel','pool_kernel','batch_norm_kernel','attention_probabilities','attention_score_grad'}
+for name in team_kernels:
+ row_start=shader.index('void '+name+'(')
+ row_end=balanced(shader,shader.index('{',row_start))
+ row=shader[row_start:row_end]
+ row=re.sub(r'(\b\w+\s*)\+=\s*1\b',r'\1+=blockDim_x',row)
+ row=re.sub(r'reduce_sum\((\w+),\s*scratch\)',r'parallel_sum(\1)',row)
+ row=re.sub(r'reduce_max\((\w+),\s*scratch\)',r'parallel_max(\1)',row)
+ shader=shader[:row_start]+row+shader[row_end:]
+
+# A 16 x 16 tile reuses matrix operands in workgroup memory. Each thread
+# owns one result and all threads participate in both tile barriers.
+shader+=r'''
+void tiled_gemm(int a,int b,int c,int m,int n,int k,int lda,int ldb,int ldc,bool ta,bool tb,float alpha,float beta){
+ int local=int(gl_LocalInvocationID.x),group=int(gl_WorkGroupID.x+gl_WorkGroupID.y*gl_NumWorkGroups.x);
+ int tiles=(m+15)/16,r=local%16,d=local/16,row=(group%tiles)*16+r,col=(group/tiles)*16+d;
+ float sum=0;
+ for(int base=0;base<k;base+=16){
+  int fa=base+d,fb=base+r;
+  normScratch[local]=row<m && fa<k?memory[a+(ta?fa+row*lda:row+fa*lda)]:0.;
+  normScratch[256+local]=col<n && fb<k?memory[b+(tb?col+fb*ldb:fb+col*ldb)]:0.;
+  barrier();
+  for(int f=0;f<16;++f)sum+=normScratch[r+f*16]*normScratch[256+f+d*16];
+  barrier();
+ }
+ if(row<m && col<n)memory[c+row+col*ldc]=alpha*sum+(beta==0.?0.:beta*memory[c+row+col*ldc]);
+}
+'''
+
 # A single command entry dispatches one reference kernel over its logical grid.
-entry='void reference_main(){\n blockDim_x=arguments[1];gridDim_x=arguments[2];\n for(int gid=0;gid<blockDim_x*gridDim_x;++gid){blockIdx_x=gid/blockDim_x;threadIdx_x=gid%blockDim_x;switch(arguments[0]){\n'
+entry='int group_id(){return int(gl_WorkGroupID.x+gl_WorkGroupID.y*gl_NumWorkGroups.x); }\nint invocation_id(){return int(gl_GlobalInvocationID.x+gl_WorkGroupID.y*gl_NumWorkGroups.x*256u); }\nvoid reference_main(){\n blockDim_x=arguments[1];gridDim_x=arguments[2];\n int selected=specializedOperation>=0?specializedOperation:arguments[0];NORM_ENTRY\n int id=selected;bool parallel=(id>=0 && id<=42 && id!=31 && id!=32);int count=blockDim_x*gridDim_x;if(id==38)count=arguments[5];if(id==39 || id==40)count=arguments[6]*arguments[7];int first=parallel?invocation_id():0;if(!parallel && invocation_id()!=0)return;for(int gid=first;gid<count;gid+=parallel?count:1){blockIdx_x=gid/blockDim_x;threadIdx_x=gid%blockDim_x;if(id>=38 && id<=40){blockIdx_x=gid;threadIdx_x=0;blockDim_x=1;}switch(selected){\n'
 pack=''
+norm_entry=''
+gemm_entry=''
 for i,(name,args) in enumerate(kernels):
  decode=[];call=[];idx=3
  for t,n,a in args:
@@ -224,15 +317,18 @@ for i,(name,args) in enumerate(kernels):
    if t=='float':val=f'intBitsToFloat({val})'
    if t=='bool':val+='!=0'
    call.append(val)
+ if name in team_kernels:norm_entry+='if(selected=='+str(i)+'){blockDim_x=256;blockIdx_x=group_id();threadIdx_x=int(gl_LocalInvocationID.x);'+''.join(decode)+name+'('+','.join(call)+');return;}'
+ if name=='portable_gemm':gemm_entry='if(selected=='+str(i)+'){tiled_gemm('+','.join(call)+');return;}'
  entry+=f'case {i}: {{'+''.join(decode)+name+'('+','.join(call)+');break;}\n'
 entry+='default:break;}}}\n'
-shader+=entry
-for reserved in ['in','out','input','output','common','filter','half','sample','partition','active','packed']:
+shader+=entry.replace('NORM_ENTRY',norm_entry+gemm_entry)
+for reserved in ['local','in','out','input','output','common','filter','half','sample','partition','active','packed']:
  shader=re.sub(r'\b'+reserved+r'\b',reserved+'_value',shader)
-(OUT/'reference.comp').write_text('#version 450\nlayout(local_size_x=1)in;\nlayout(set=0,binding=0,std430)buffer Data{float memory[];};\nlayout(set=0,binding=1,std430)readonly buffer Params{int arguments[];};\n'+shader+'\nvoid main(){reference_main();}\n')
-# Host wrappers are generated from the existing GPU implementation, not the CPU.
+write_if_changed(OUT/'reference.comp','#version 450\nlayout(local_size_x=256)in;\nshared float normScratch[512];\nlayout(constant_id=0)const int specializedOperation=-1;\nlayout(set=0,binding=0,std430)coherent buffer Data{float memory[];};\nlayout(set=0,binding=0,std430)coherent buffer DataBits{uint integer_memory[];};\nlayout(set=0,binding=1,std430)readonly buffer Params{int arguments[];};\n'+shader+'\nvoid main(){reference_main();}\n')
+# GPU host wrappers are generated from CUDA; PortableRuntime orchestration is
+# maintained independently to preserve backend-specific dispatch and validation.
 for family,s in sources.items():
- if family=='Extra':continue
+ if family in ('Extra','Runtime'):continue
  if family=='Recurrent':
   start=s.index('struct SequenceArena');end=s.index('inline bool recurrent(');s=s[:start]+s[end:]
  else:
@@ -248,69 +344,29 @@ for family,s in sources.items():
  s=s.replace('runtimes/cuda/PortableNativeOps.cuh','runtimes/portable/PortableNativeOps.hpp').replace('"PortableNativeOps.cuh"','"PortableNativeOps.hpp"')
  s=s.replace('runtimes/cuda/PortableRuntime.hpp','runtimes/portable/PortableRuntime.hpp')
  s=re.sub(r'(\w+)<<<(.*?)>>>\((.*?)\);',lambda m:'launch("'+m[1]+'", '+m[2]+', '+m[3]+');',s,flags=re.S)
- if family=='Runtime':
-  # Bind the current backend executor for each device operation.
-  for method in ['initialize','linearForward','forwardLayer','forwardLayerWithContext','backwardLayer']:
-   pos=s.index('PortableRuntime::'+method+'(');start=s.index('{',pos)
-   s=s[:start+1]+'\n    DeviceScope device_scope(backend_,config_.device_index);'+s[start+1:]
-  s=s.replace('#include "runtimes/portable/PortableRuntime.hpp"','#include "runtimes/portable/PortableRuntime.hpp"\n#include "PortableStaging.hpp"\n#define ENABLE_PORTABLE_REFERENCE 1')
-  s='\n'.join(x for x in s.splitlines() if not x.startswith('#include'))+'\n' if False else s
-  s=s.replace('DeviceScope device_scope(backend_,config_.device_index);\n    config_ = cfg;', 'DeviceScope device_scope(backend_,cfg.device_index);\n    config_ = cfg;')
-  # No CPU arithmetic branch is compiled or retained in the portable runtime.
-  clean=[];stack=[];keep=True
-  for line in s.splitlines():
-   if line.startswith('#ifdef ENABLE_PORTABLE_REFERENCE') or line.startswith('#ifndef ENABLE_PORTABLE_REFERENCE'):
-    stack.append((keep,not line.startswith('#ifndef')));keep=keep and stack[-1][1];continue
-   if line.startswith('#else') and stack:
-    parent,cond=stack[-1];keep=parent and not cond;continue
-   if line.startswith('#endif') and stack:
-    keep=stack.pop()[0];continue
-   if keep:clean.append(line)
-  s='\n'.join(clean)+'\n'
-  # Match the CPU Lambda backward identity contract. CPU Lambda forward itself returns false.
-  start=s.index('PortableRuntime::supportsBackwardLayerType(');end=s.index('RuntimeCapabilityLevel PortableRuntime::queryForwardCapability',start)
-  section=s[start:end].replace('        case LayerType::Lambda:\n','');s=s[:start]+section+s[end:]
-  pos=s.index('PortableRuntime::queryBackwardOperationCapability(');at=s.index('{',pos)
-  s=s[:at+1]+'''\n    if(layer.type_enum==LayerType::Lambda) {
-        return !config_.disabled && inputs.size()>=1 && inputs[0] && grad_outputs.size()==1 && grad_outputs[0] && inputs[0]->size()==grad_outputs[0]->size()?RuntimeCapabilityLevel::Native:RuntimeCapabilityLevel::Unsupported;
-    }
-'''+s[at+1:]
-  pos=s.index('PortableRuntime::backwardLayer(');at=s.index('    if(PortableNativeOps::recurrentType',pos) if '    if(PortableNativeOps::recurrentType' in s[pos:] else s.index('    if(CudaOperationGeometry::recurrentType',pos)
-  s=s[:at]+'''    if(layer.type_enum==LayerType::Lambda) {
-        if(!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training)))return false;
-        Layer identity=layer;identity.type_enum=LayerType::Identity;
-        CudaOperationGeometry::Movement shape;if(!shape.valid(identity,grad_outputs))return false;
-        return PortableNativeOps::movement(grad_outputs,grad_inputs,identity,shape);
-    }
-'''+s[at:]
-  s=s.replace('if (!supportsBackwardLayerType(type)) return RuntimeCapabilityLevel::Unsupported;', 'if (!supportsBackwardLayerType(type)) return RuntimeCapabilityLevel::Unsupported;\n    if(type==LayerType::Lambda)return RuntimeCapabilityLevel::Native;')
-  s=s.replace('default: return AbstractRuntime::queryBackwardOperationCapability(layer,inputs,grad_outputs,training);', 'default: {\n            if(!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training)) || grad_outputs.size()!=1)return RuntimeCapabilityLevel::Unsupported;\n            size_t expected=inputs[0]->size();\n            if(layer.type_enum==LayerType::Linear)expected=inputs[0]->size()/static_cast<size_t>(layer.in_features)*static_cast<size_t>(layer.out_features);\n            if(layer.type_enum==LayerType::MatMul || layer.type_enum==LayerType::BatchMatMul)expected=static_cast<size_t>(layer.in_features)*layer.embed_dim*(layer.type_enum==LayerType::BatchMatMul?layer.seq_len:1);\n            return grad_outputs[0]->size()==expected?queryBackwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;\n        }')
-  s=s.replace('                for (int b = 0; b < batch; ++b) {\n                    const float* row = go.data() + static_cast<size_t>(b) * static_cast<size_t>(out_f);\n                    for (int o = 0; o < out_f; ++o) layer.grad_bias[static_cast<size_t>(o)] += row[o];\n                }','                Impl::DeviceBuf d_ones,d_bias;\n                std::vector<float> ones(batch,1.f), bias_gradient(out_f);\n                if(!d_ones.alloc(batch*sizeof(float)) || !d_bias.alloc(out_f*sizeof(float)) || !d_ones.copyFromHost(ones.data(),batch*sizeof(float)))return false;\n                if(cublasSgemm(impl_->handle,CUBLAS_OP_N,CUBLAS_OP_N,out_f,1,batch,&alpha,reinterpret_cast<const float*>(d_go.ptr),out_f,reinterpret_cast<const float*>(d_ones.ptr),batch,&beta,reinterpret_cast<float*>(d_bias.ptr),out_f)!=CUBLAS_STATUS_SUCCESS)return false;\n                if(!d_bias.copyToHost(bias_gradient.data(),out_f*sizeof(float)))return false;\n                for(int o=0;o<out_f;++o){layer.grad_bias[o]+=bias_gradient[o];layer.grad_weights[w_elems+o]+=bias_gradient[o];}')
-  # staging functions live in a namespace to coexist with real CUDA builds.
-  lines=s.splitlines();end=max(j for j,x in enumerate(lines) if x.startswith('#include'))+1
-  lines.insert(end,'using namespace PortableStaging;');s='\n'.join(lines)+'\n'
-  # Keep geometry validation reusable by parallel fast paths without the serial budget.
-  pos=s.index('RuntimeCapabilityLevel PortableRuntime::queryForwardOperationCapability(')
-  end=s.index('    if(layer.type_enum==LayerType::NMS){',pos)
-  s=s[:pos]+"RuntimeCapabilityLevel PortableRuntime::queryForwardOperationCapability(\n    const Layer& layer, const std::vector<const std::vector<float>*>& inputs, bool training) const {\n    if (!referenceInputsFit(layer.getWeightsSize(), inputs)) return RuntimeCapabilityLevel::Unsupported;\n    return queryForwardGeometryCapability(layer, inputs, training);\n}\n\nRuntimeCapabilityLevel PortableRuntime::queryForwardGeometryCapability(\n    const Layer& layer, const std::vector<const std::vector<float>*>& inputs, bool training) const {\n"+s[end:]
-  s=s.replace('const std::vector<const std::vector<float>*>& grad_outputs, bool training) const {', 'const std::vector<const std::vector<float>*>& grad_outputs, bool training) const {\n    if (!referenceInputsFit(layer.getWeightsSize(), inputs) || !referenceInputsFit(0, grad_outputs)) return RuntimeCapabilityLevel::Unsupported;')
-  for method,guard in [('forwardLayer','!referenceInputsFit(layer.getWeightsSize(), inputs)'),('backwardLayer','!referenceInputsFit(layer.getWeightsSize(), inputs) || !referenceInputsFit(0, grad_outputs)')]:
-   pos=s.index('PortableRuntime::'+method+'(');start=s.index('{',pos)
-   s=s[:start+1]+'\n    if ('+guard+') return false;'+s[start+1:]
-  # Allocate bias workspaces before any gradient update: budget rejection must be atomic.
-  s=s.replace('            Impl::DeviceBuf d_x, d_go, d_w, d_gx, d_gw;', '            Impl::DeviceBuf d_x, d_go, d_w, d_gx, d_gw;\n            Impl::DeviceBuf d_ones, d_bias;\n            if (layer.use_bias && (!d_ones.alloc(batch*sizeof(float)) || !d_bias.alloc(out_f*sizeof(float)))) return false;')
-  s=s.replace('                Impl::DeviceBuf d_ones,d_bias;\n', '')
-  s=s.replace('if(!d_ones.alloc(batch*sizeof(float)) || !d_bias.alloc(out_f*sizeof(float)) || !d_ones.copyFromHost(ones.data(),batch*sizeof(float)))return false;', 'if(!d_ones.copyFromHost(ones.data(),batch*sizeof(float)))return false;')
-  (OUT/'PortableRuntime.cpp').write_text(s)
- else:
-  s=s.replace('namespace PortableNativeOps {','namespace PortableNativeOps {\nusing namespace PortableStaging;')
-  if family=='Native':
-   s=s.replace('    out.clear();off=0;for(auto n:g.sizes)', '    launch("portable_copy",1,1,b.ptr,b.ptr,total);if(!finished())return false;\n    out.clear();off=0;for(auto n:g.sizes)')
-  (OUT/f'Portable{family}Ops.hpp').write_text(s)
+ s=s.replace('namespace PortableNativeOps {','namespace PortableNativeOps {\nusing namespace PortableStaging;')
+ if family=='Native':
+  s=s.replace('    out.clear();off=0;for(auto n:g.sizes)', '    launch("portable_copy",1,1,b.ptr,b.ptr,total);if(!finished())return false;\n    out.clear();off=0;for(auto n:g.sizes)')
+  s=s.replace('#include "PortableStaging.hpp"', '#include "PortableStaging.hpp"\n#include "PortableLayerGeometry.hpp"')
+  s=s.replace('const int width=l.in_features>0?l.in_features:x.size();', 'const int width=PortableLayerGeometry::rowNormWidth(l,x.size(),dy!=nullptr);')
+  s=s.replace('const float* w=l.affine?l.getWeights():nullptr;const bool bias=w && l.use_bias && l.getWeightsSize()>=2ULL*width;', 'size_t weight_count=l.getWeightsSize();\n    const float* w=l.affine?l.getWeights():nullptr;\n    std::vector<float> padded;\n    if(!dy && w && weight_count<static_cast<size_t>(width)){padded.assign(width,1.f);std::copy_n(w,weight_count,padded.data());w=padded.data();weight_count=padded.size();}\n    const bool bias=w && l.use_bias && weight_count>=2ULL*width;')
+  # Only row_norm uses the padded parameter count; other helpers keep their ABI.
+  start=s.index('inline bool row_norm(');end=s.index('\ninline bool ',start+1)
+  block=s[start:end].replace('bw.alloc(l.getWeightsSize())','bw.alloc(weight_count)').replace('bw.upload(w,l.getWeightsSize())','bw.upload(w,weight_count)')
+  s=s[:start]+block+s[end:]
+ write_if_changed(OUT/f'Portable{family}Ops.hpp',s)
 for name,fields in geometries.items():
  pack+='inline void pack(std::vector<int>& p, const CudaOperationGeometry::'+name+'& g){'+''.join('pack(p,g.'+n+');' for t,n in fields)+'}\n'
 pack+='inline int kernelId(const std::string& name){\n'+''.join(f'if(name=="{n}")return {i};\n' for i,(n,a) in enumerate(kernels))+'return -1;}\n'
-(OUT/'PortableKernelArguments.hpp').write_text(pack)
+pack+='inline std::vector<int> kernelWriteArguments(int id){switch(id){\n'
+for i,(name,args) in enumerate(kernels):
+ indices=[];offset=3
+ for typ,n,original in args:
+  if '*' in original and 'const' not in original:indices.append(offset)
+  offset+=len(geometries[typ[1:]]) if typ.startswith('G') and typ[1:] in geometries else 1
+ pack+=f'case {i}:return {{'+','.join(map(str,indices))+'};\n'
+pack+='default:return {};}}\n'
+write_if_changed(OUT/'PortableKernelArguments.hpp',pack)
 print('generated',len(kernels),'kernels')
 
 from pathlib import Path
@@ -351,21 +407,26 @@ for start,end,rt,name,args,body in ff:
   while (m:=re.search(r'\b'+called+r'\(',body[pos:])):
    at=pos+m.start()+len(called);en=balanced(body,at,'(',')');values=split_args(body[at+1:en-1])
    for idx in references[called]:values[idx]='&('+values[idx]+')'
-   values+=['memory','threadIdx_x','blockIdx_x','blockDim_x','gridDim_x']
+   values+=['memory','threadIdx_x','blockIdx_x','blockDim_x','gridDim_x','normScratch']
    rep=called+'('+','.join(values)+')';body=body[:pos+m.start()]+rep+body[en:];pos=pos+m.start()+len(rep)
+ if name=='atomicAdd':body='{volatile __global uint* address=(volatile __global uint*)(memory+at);uint old=atomic_cmpxchg(address,0u,0u);for(;;){uint expected=old;old=atomic_cmpxchg(address,expected,as_uint(as_float(expected)+value));if(old==expected)return;}}'
+ if name=='tiled_gemm':body=body.replace('int(gl_WorkGroupID.x+gl_WorkGroupID.y*gl_NumWorkGroups.x)','int(get_group_id(0))')
+ if name=='group_id':body='{return int(get_group_id(0));}'
+ if name=='invocation_id':body='{return int(get_global_id(0));}'
+ body=body.replace('gl_GlobalInvocationID.x','get_global_id(0)').replace('gl_LocalInvocationID.x','get_local_id(0)').replace('gl_WorkGroupID.x','get_group_id(0)').replace('barrier();','barrier(CLK_LOCAL_MEM_FENCE);')
  body=re.sub(r'\b(float|int|bool)\(',r'(\1)(',body)
  body=body.replace('floatBitsToInt','as_int').replace('uintBitsToFloat','as_float').replace('intBitsToFloat','as_float').replace('abs(', 'fabs(').replace('inversesqrt','rsqrt')
  body=re.sub(r'(?<![\w.])((?:\d+\.\d*|\.\d+)(?:[eE][+-]?\d+)?|\d+[eE][+-]?\d+)(?![\w.])',r'\1f',body)
  args=[a.replace('inout ','').rsplit(' ',1)[0]+'* '+a.split()[-1] if a.startswith('inout ') else a for a in args]
  if name=='reference_main':
   sig='__kernel void reference(__global float* memory,__global const int* arguments)'
-  body=body[:1]+'int threadIdx_x=0,blockIdx_x=0,blockDim_x=1,gridDim_x=1;'+body[1:]
+  body=body[:1]+'__local float normScratch[512];int threadIdx_x=0,blockIdx_x=0,blockDim_x=1,gridDim_x=1;'+body[1:]
  else:
-  args+=['__global float* memory','int threadIdx_x','int blockIdx_x','int blockDim_x','int gridDim_x'];sig=rt+' '+name+'('+','.join(args)+')'
+  args+=['__global float* memory','int threadIdx_x','int blockIdx_x','int blockDim_x','int gridDim_x','__local float* normScratch'];sig=rt+' '+name+'('+','.join(args)+')'
  result+=sig+body+'\n'
 preamble=s[:s.index('SequenceVector sequence_new')]
-result='#define truth(v) ((v)!=0)\n'+preamble+result
-Path('src/runtimes/portable/reference.cl').write_text(result)
+result='#ifndef specializedOperation\n#define specializedOperation -1\n#endif\n#define truth(v) ((v)!=0)\n'+preamble+result
+write_if_changed(Path('src/runtimes/portable/reference.cl'),result)
 
 import subprocess, tempfile
 with tempfile.TemporaryDirectory(prefix="mimir-portable-") as temporary:
@@ -375,4 +436,4 @@ with tempfile.TemporaryDirectory(prefix="mimir-portable-") as temporary:
     from pathlib import Path
     import struct
     b=spirv_path.read_bytes();words=struct.unpack('<'+str(len(b)//4)+'I',b)
-    s='#pragma once\n#include <cstdint>\nnamespace PortableStaging {\n#ifdef ENABLE_OPENCL\ninline constexpr const char* referenceOpenCL=R"MIMIRCL('+Path('src/runtimes/portable/reference.cl').read_text()+')MIMIRCL";\n#endif\n#ifdef ENABLE_VULKAN\ninline constexpr std::uint32_t referenceSpirv[]={\n'+''.join(','.join(str(x)+'u' for x in words[i:i+16])+',\n' for i in range(0,len(words),16))+'};\n#endif\n}\n';Path('src/runtimes/portable/PortableShaderData.hpp').write_text(s)
+    s='#pragma once\n#include <cstdint>\nnamespace PortableStaging {\n#ifdef ENABLE_OPENCL\ninline constexpr const char* referenceOpenCL=R"MIMIRCL('+Path('src/runtimes/portable/reference.cl').read_text()+')MIMIRCL";\n#endif\n#ifdef ENABLE_VULKAN\ninline constexpr std::uint32_t referenceSpirv[]={\n'+''.join(','.join(str(x)+'u' for x in words[i:i+16])+',\n' for i in range(0,len(words),16))+'};\n#endif\n}\n';write_if_changed(Path('src/runtimes/portable/PortableShaderData.hpp'),s)

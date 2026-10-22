@@ -52,6 +52,36 @@ public:
 };
 int main(int argc,char**argv){try {
     const std::string mode=argc>1?argv[1]:"router";
+    for (size_t count : {size_t{1}, size_t{257}, size_t{4096}}) {
+        Optimizer sgd;
+        sgd.type = OptimizerType::SGD;
+        sgd.step = 1;
+        sgd.weight_decay = 0.5f; // Existing plain SGD semantics ignore this field.
+        Buffers actual(count), expected = actual;
+        auto request = actual.request(sgd);
+        // Optional stale moments must remain untouched by the compact path.
+        request.first_moment = actual.m.data();
+        request.second_moment = actual.v.data();
+        optimizerHostStep(expected.request(sgd));
+        auto compact = optimizerPack(request, true);
+        require(compact.size() == 2*count, "SGD staging contains unused state");
+        auto parameters = optimizerParameters(request);
+        require(parameters.size() == 19 && parameters[2] == 0, "SGD parameter ABI");
+        float lr;
+        std::memcpy(&lr, &parameters[3], sizeof(float));
+        require(lr == request.learning_rate, "SGD learning rate");
+        for (size_t i = 0; i < count; ++i) compact[i] -= lr*compact[count+i];
+        require(optimizerCommit(request, compact), "compact SGD commit");
+        compare(actual, expected);
+        // The default layout stays compatible with the TPU worker protocol.
+        auto legacy = optimizerPack(request);
+        require(legacy.size() == 5*count+2*((count+255)/256)+2, "legacy staging layout");
+        require(optimizerCommit(request, legacy), "legacy SGD commit");
+        compare(actual, expected);
+        compact.pop_back();
+        require(!optimizerCommit(request, compact), "truncated SGD staging accepted");
+    }
+
     nlohmann::json fixtures=nlohmann::json::array();
     std::unique_ptr<AbstractRuntime> runtime;
 #ifdef ENABLE_OPENCL

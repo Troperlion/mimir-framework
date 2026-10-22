@@ -1762,15 +1762,20 @@ void Model::optimizerStep(Optimizer &opt, float learning_rate, const Gradients* 
     } else if (modelConfig.contains("clip_norm")) {
         grad_clip_norm = std::max(0.0f, modelConfig["clip_norm"].get<float>());
     }
-    if (grad_clip_norm > 0.0f) {
+    const bool observe_gradients = runtime_config_->gradient_diagnostics.requested();
+    double unclipped_norm = 0.0;
+    bool gradients_clipped = false;
+    if (grad_clip_norm > 0.0f || observe_gradients) {
         double sum_sq = 0.0;
         for (const auto& layer : layers) {
             if (is_frozen_layer(layer)) continue;
             for (float g : layer.grad_weights) sum_sq += static_cast<double>(g) * static_cast<double>(g);
             for (float g : layer.grad_bias) sum_sq += static_cast<double>(g) * static_cast<double>(g);
         }
-        const float norm = static_cast<float>(std::sqrt(sum_sq));
-        if (norm > grad_clip_norm && norm > 1e-12f) {
+        unclipped_norm = std::sqrt(sum_sq);
+        const float norm = static_cast<float>(unclipped_norm);
+        if (grad_clip_norm > 0.0f && norm > grad_clip_norm && norm > 1e-12f) {
+            gradients_clipped = true;
             const float scale = grad_clip_norm / norm;
             for (auto& layer : layers) {
                 if (is_frozen_layer(layer)) continue;
@@ -1822,6 +1827,8 @@ void Model::optimizerStep(Optimizer &opt, float learning_rate, const Gradients* 
         // Les boucles d'entraînement modernes appellent zeroGradients() en début de step.
         // Garder le dernier gradient permet la sérialisation/debug (include_gradients).
     }
+    if (observe_gradients)
+        runtime_config_->gradient_diagnostics.record(unclipped_norm, gradients_clipped);
 }
 
 Model::DecoderOutput Model::eval(const std::vector<uint8_t> &target) const {
@@ -2419,16 +2426,16 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
     const bool fusion_enabled = env_flag_true(
         "MIMIR_PLANNER_FUSION", env_flag_true("MIMIR_ENABLE_FUSION", true));
     const bool fusion_in_training = env_flag_true("MIMIR_ENABLE_FUSION_TRAIN", false);
-    const bool planner_buffer_reuse = env_flag_true("MIMIR_PLANNER_BUFFER_REUSE", false);
     const bool planner_cost_model = env_flag_true("MIMIR_PLANNER_COST_MODEL", true);
     const std::string planner_mode_value = [] {
         const char* value = std::getenv("MIMIR_PLANNER_MODE");
-        return std::string(value ? value : "legacy");
+        return std::string(value ? value : "cost");
     }();
     const Mimir::Planning::PlannerMode planner_mode =
         planner_mode_value == "cost" && planner_cost_model ? Mimir::Planning::PlannerMode::Cost :
         planner_mode_value == "static" ? Mimir::Planning::PlannerMode::Static :
         Mimir::Planning::PlannerMode::Legacy;
+    const bool planner_buffer_reuse = env_flag_true("MIMIR_PLANNER_BUFFER_REUSE", planner_mode==Mimir::Planning::PlannerMode::Cost);
     // Par défaut, la planification reste silencieuse dans le terminal.
     // Opt-in explicite via MIMIR_PLANNER_STDOUT=1 (compatibilité conservée avec l'ancien nom).
     const bool planner_to_terminal = env_flag_true(
@@ -2546,8 +2553,8 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
     }
 
     const bool runtime_verbose = !Model::frameworkLogsSuppressed();
-    const bool runtime_trace = runtime_verbose;
-    if (runtime_verbose) {
+    const bool runtime_trace = runtime_verbose && env_flag_true("MIMIR_RUNTIME_TRACE", false);
+    if (runtime_verbose && (graph_plan_changed || runtime_trace)) {
         auto join_strings = [](const std::vector<std::string>& items, const char* sep) -> std::string {
             if (items.empty()) return std::string();
             std::ostringstream oss;
@@ -3119,6 +3126,21 @@ const std::vector<float>& Model::forwardPassView(const std::vector<float> &input
                               << std::endl;
                 }
                 return false;
+            }
+            if(planner_enabled && static_plan_.built && planner_mode==Mimir::Planning::PlannerMode::Cost && layer_idx<static_plan_.execution.layers.size()){
+                const auto profile=Mimir::Planning::Calibration::forward_profiles.find(&layer);
+                auto& planned=static_plan_.execution.layers[layer_idx];
+                const auto kind=Mimir::Planning::runtime_kind_from_name(selected_runtime->name());
+                if(planned.runtime!=kind)static_plan_.dumped=false;
+                planned.runtime=kind;
+                static_plan_.execution.tensors.at(planned.output).preferred_location=Mimir::Planning::MemoryLocation::Host;
+                if(profile!=Mimir::Planning::Calibration::forward_profiles.end()){
+                    if(!planned.measured_host_roundtrip)static_plan_.dumped=false;
+                    planned.measured_costs=profile->second;
+                    planned.capability=selected_runtime->queryForwardOperationCapability(layer,inputs,training);
+                    planned.measured_host_roundtrip=true;
+                    for(const auto& m:profile->second)if(m.runtime==selected_runtime)planned.estimated_compute_cost=m.seconds;
+                }else{planned.measured_costs.clear();planned.measured_host_roundtrip=false;}
             }
             if (layer.type_enum == LayerType::Split || layer.type_enum == LayerType::Chunk) {
                 const std::string base = layer.output.empty() ? "x" : layer.output;

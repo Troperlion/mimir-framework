@@ -64,6 +64,7 @@ public:
     // utilisateur devient prioritaire jusqu'à la fin de l'entraînement.
     void setRuntimeConfiguration(std::shared_ptr<LiveModelConfig> config) {
         if (!config) config=std::make_shared<LiveModelConfig>();
+        config->gradient_diagnostics.request();
         auto previous=std::atomic_exchange(&runtime_config_,config);
         if(previous && previous!=config) previous->requestModelGraph(false);
     }
@@ -489,6 +490,7 @@ private:
     float current_bps;
     size_t current_params;
     float current_grad_norm;
+    GradientDiagnostics::Snapshot current_gradient_diagnostics_;
     float current_grad_max;
     int current_opt_type;
     int current_opt_step;

@@ -34,7 +34,8 @@ inline void matmul_avx2(float* C, const float* A, const float* B,
 inline void matmul_transpose_avx2(float* C, const float* A, const float* B,
                                    size_t M, size_t N, size_t K) {
     
-    #pragma omp parallel for if(M * N * K > 262144) schedule(static)
+    const int workers=HardwareOpt::matmul_workers(M,N,K);
+    #pragma omp parallel for if(workers>1) num_threads(workers) schedule(static)
     for (size_t i = 0; i < M; ++i) {
         for (size_t j = 0; j < N; ++j) {
             __m256 sum = _mm256_setzero_ps();

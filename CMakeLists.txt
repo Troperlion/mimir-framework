@@ -30,7 +30,16 @@ set(MIMIR_VIZ_BACKEND "SFML" CACHE STRING
 set_property(CACHE MIMIR_VIZ_BACKEND PROPERTY STRINGS SFML QT GTK WEB NONE)
 option(ENABLE_SCRIPTING_REST "Enable REST scripting bridge" OFF)
 option(ENABLE_SCRIPTING_RUST "Enable Rust scripting bridge" ON)
-option(ENABLE_SCRIPTING_JS "Enable JavaScript scripting bridge" ON)
+# The live Node bridge uses socketpair/posix_spawn, unavailable on Windows.
+if(WIN32)
+    set(MIMIR_SCRIPTING_JS_DEFAULT OFF)
+else()
+    set(MIMIR_SCRIPTING_JS_DEFAULT ON)
+endif()
+option(ENABLE_SCRIPTING_JS "Enable JavaScript scripting bridge (POSIX)" ${MIMIR_SCRIPTING_JS_DEFAULT})
+if(WIN32 AND ENABLE_SCRIPTING_JS)
+    message(FATAL_ERROR "The JavaScript bridge requires POSIX. Configure Windows with ENABLE_SCRIPTING_JS=OFF.")
+endif()
 option(ENABLE_SCRIPTING_CSHARP "Enable C# scripting bridge" ON)
 option(BUILD_EXAMPLES "Build example executables" OFF)
 option(MIMIR_ENABLE_FACE_RECOGNITION_TOOL "Build OpenCV face detection/recognition tool" OFF)
@@ -474,6 +483,7 @@ set(MIMIR_SOURCES
     src/Helpers.cpp
     src/stb_image_impl.cpp
     src/runtimes/portable/PortableRuntime.cpp
+    src/Planning/ExecutionCalibration.cpp
     src/runtimes/portable/PortableDevice.cpp
     src/runtimes/AbstractRuntime.cpp
     src/runtimes/Autograd.cpp
@@ -925,8 +935,6 @@ if(BUILD_MIMIR_STATIC)
     endif()
 endif()
 
-message(STATUS "Tests/exemples désactivés (obsolètes)")
-
 # ============================================================================
 # Outil C++ de détection/reconnaissance faciale (OpenCV)
 # ============================================================================
@@ -953,7 +961,12 @@ if(MIMIR_ENABLE_TESTS)
     include(CTest)
     if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Tests/CMakeLists.txt")
         add_subdirectory(Tests)
+        message(STATUS "Tests unitaires (CTest): activés")
+    else()
+        message(STATUS "Tests unitaires (CTest): désactivés (BUILD_TESTING=OFF ou répertoire Tests absent)")
     endif()
+else()
+    message(STATUS "Tests unitaires (CTest): désactivés (MIMIR_ENABLE_TESTS=OFF)")
 endif()
 
 # ============================================================================

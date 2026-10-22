@@ -26,7 +26,8 @@ function B.finite(v)
 end
 function B.vector(v, expected)
   assert(type(v) == 'table' and #v > 0, 'sortie vide ou invalide')
-  assert(not expected or #v == expected, 'taille de sortie inattendue: ' .. #v)
+  assert(not expected or #v == expected,
+    'taille de sortie inattendue: ' .. #v .. ' (attendue: ' .. tostring(expected) .. ')')
   for i, x in ipairs(v) do assert(B.finite(x), 'NaN/Inf à l’indice ' .. i) end
   return v
 end

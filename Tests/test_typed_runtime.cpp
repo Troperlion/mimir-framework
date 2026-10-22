@@ -36,6 +36,34 @@ int main() {
         }
     }
 
+    // Bulk conversions must match scalar set/get, including SIMD tails, empty
+    // tensors and non-finite floating values; integer rounding stays unchanged.
+    for (auto dtype : {Mimir::DType::F16, Mimir::DType::BF16, Mimir::DType::F64,
+                       Mimir::DType::I8, Mimir::DType::U64, Mimir::DType::BOOL}) {
+        for (int count : {0, 1, 7, 8, 255, 256, 257, 521}) {
+            std::vector<float> source(count);
+            for (int i = 0; i < count; ++i) source[i] = float(i % 101 - 50) * 0.125f;
+            if (Mimir::dtype_is_floating(dtype) && count > 7) {
+                source[0] = -0.0f;
+                source[1] = std::numeric_limits<float>::infinity();
+                source[2] = -std::numeric_limits<float>::infinity();
+                source[3] = std::numeric_limits<float>::quiet_NaN();
+                source[4] = std::numeric_limits<float>::denorm_min();
+            }
+            Mimir::TypedTensor scalar({count}, dtype);
+            for (int i = 0; i < count; ++i) scalar.set(i, source[i]);
+            auto bulk = Mimir::TypedTensor::fromFloat32(source, {count}, dtype);
+            if (count && std::memcmp(scalar.data(), bulk.data(), scalar.size_bytes()))
+                throw std::runtime_error("Bulk conversion differs from scalar storage");
+            auto restored = bulk.toFloat32();
+            for (int i = 0; i < count; ++i) {
+                float expected = static_cast<float>(scalar.get(i));
+                if (std::memcmp(&expected, &restored[i], sizeof(float)))
+                    throw std::runtime_error("Bulk decode differs from scalar get");
+            }
+        }
+    }
+
     CpuRuntime runtime;
     RuntimeConfig runtime_config;
     runtime_config.backend = "CPU";

@@ -23,6 +23,8 @@ public:
     }
 };
 int main() {
+    // This fixture tests priority/fallback policy; calibration has separate timed tests.
+    setTestEnvironment("MIMIR_PLANNER_AUTOTUNE", "0");
     MutableRuntime fast; CpuRuntime cpu; cpu.initialize(RuntimeConfig{});
     auto& router=RuntimeRouter::instance();router.setRuntimes(&fast,nullptr,nullptr,nullptr,&cpu);
     std::vector<Layer> layers;layers.emplace_back("id","Identity",0);

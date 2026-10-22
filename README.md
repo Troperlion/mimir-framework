@@ -14,7 +14,7 @@
 | `develop` | [![unit-tests develop](https://github.com/brit45/mimir-framework/actions/workflows/unit-tests.yml/badge.svg?branch=develop)](https://github.com/brit45/mimir-framework/actions/workflows/unit-tests.yml) | [![publish-wiki develop](https://github.com/brit45/mimir-framework/actions/workflows/wiki.yml/badge.svg?branch=develop)](https://github.com/brit45/mimir-framework/actions/workflows/wiki.yml) |
 
 Version engine : **3.5.0**
-Révision documentation : **2026-10-01**
+Révision documentation : **2026-10-22**
 
 Consultez d'abord l'[état réel du projet](./docs/00-PROJECT-STATUS.md) : cette
 page distingue les chemins stables, partiels, expérimentaux, placeholders et
@@ -114,30 +114,28 @@ Schéma visuel (SVG):
 Guide complet : **[GET STARTED](./docs/01-Getting-Started/00-GET-STARTED.md)**
 
 ```bash
-# 1) Dépendances minimales (Ubuntu/Debian)
-sudo apt-get install -y cmake build-essential lua5.3 liblua5.3-dev libomp-dev
+# 1) Installer les dépendances et configurer la compilation Linux
+./config.sh --gui NONE
 
-# 2) (Option recommande) bootstrap automatique Linux
-./config.sh
+# 2) Compiler le profil sélectionné
+cmake --build build --parallel 2
 
-# 3) Compiler
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
-
-# 4) Vérifier le binaire
+# 3) Vérifier le binaire
 ./bin/mimir --help
 
-# 5) Smoke test
+# 4) Smoke test
 ./bin/mimir --lua scripts/tests/test_serialization_smoke.lua
 
-# 6) Premier modèle
+# 5) Premier modèle
 ./bin/mimir --lua scripts/templates/template_new_model.lua
 ```
 
 Notes rapides sur `config.sh`:
 
 - Script Linux (Debian/Ubuntu) qui installe les dependances et configure CMake dans `build/`.
-- Variables utiles: `BUILD_TYPE=Debug`, `ENABLE_VULKAN=0`, `ENABLE_OPENCL=0`, `ENABLE_SFML=0`, `ENABLE_LZ4=0`.
+- Options : `--gui QT`, `--build-type Debug`, `--enable MIMIR_ENABLE_TESTS`,
+  `--disable ENABLE_VULKAN`, `--disable ENABLE_OPENCL` et `--non-interactive`.
+- `--skip-system-deps` omet apt/sudo seulement lorsque les dépendances sont déjà installées.
 - Voir la doc detaillee: `docs/01-Getting-Started/02-Installation.md`.
 
 Notes scripts Lua (cross-plateforme):
@@ -512,6 +510,8 @@ Installation détaillée (Linux/macOS/Windows, options CMake, troubleshooting):
 ---
 
 ### Documentation
+
+- **[Validation de la version 3.6.0](./docs/06-Contributing/08-Release-Validation.md)**
 
 - **[GET STARTED](./docs/01-Getting-Started/00-GET-STARTED.md)**
 - **[CLI](./docs/01-Getting-Started/03-CLI.md)**

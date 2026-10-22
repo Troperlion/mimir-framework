@@ -33,16 +33,6 @@ jobs:
       - name: Print version
         run: echo "Building Mímir Framework v${{ steps.version.outputs.VERSION }}"
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake \
-            ninja-build \
-            g++ \
-            liblua5.3-dev \
-            liblz4-dev
-
       - name: Install runtime bridge dependencies
         run: |
           set -euo pipefail
@@ -53,29 +43,119 @@ jobs:
 
       - name: Configure (CMake)
         run: |
-          cmake -S . -B build \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DMIMIR_ENABLE_TESTS=ON \
-            -DENABLE_VULKAN=OFF \
-            -DENABLE_OPENCL=OFF \
-            -DENABLE_SFML=OFF \
-            -DENABLE_OPENMP=ON \
-            -DENABLE_LZ4=ON
+          ./config.sh --gui NONE --non-interactive --build-dir build --generator Ninja \
+            --enable MIMIR_ENABLE_TESTS \
+            --enable ENABLE_SCRIPTING_JS --enable ENABLE_SCRIPTING_RUST \
+            --enable ENABLE_SCRIPTING_CSHARP \
+            --disable ENABLE_VULKAN --disable ENABLE_OPENCL
 
       - name: Build
-        run: cmake --build build
+        run: cmake --build build --parallel 2
 
       - name: Run unit tests (CTest)
         run: |
           export PATH="$HOME/.dotnet/tools:$HOME/.cargo/bin:$PATH"
           ctest --test-dir build --output-on-failure --timeout 120
 
+      - name: Verify configuration, documentation and Colab sources
+        run: |
+          python3 scripts/tests/test_config_cli.py
+          python3 scripts/tools/verify_docs.py
+          ./scripts/tools/verify_api_sync.sh
+          python3 -m unittest discover -s scripts/tests -p 'test_colab*.py'
+
       - name: Upload CTest logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ctest-logs-v${{ steps.version.outputs.VERSION }}
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/Testing/Temporary/LastTestsFailed.log
+            build/CTestTestfile.cmake
+
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install CMake dependencies (Lua/LZ4) with vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg "$env:RUNNER_TEMP/vcpkg"
+          & "$env:RUNNER_TEMP/vcpkg/bootstrap-vcpkg.bat"
+          & "$env:RUNNER_TEMP/vcpkg/vcpkg.exe" install lua:x64-windows lz4:x64-windows
+
+      - name: Install runtime bridge dependencies
+        shell: pwsh
+        run: |
+          cargo install rust-script --locked
+          dotnet tool install -g dotnet-script
+          "$HOME/.dotnet/tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "$HOME/.cargo/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Read project version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Print version
+        shell: pwsh
+        run: echo "Building Mímir Framework v${{ steps.version.outputs.VERSION }}"
+
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure (CMake)
+        shell: pwsh
+        run: |
+          cmake -S . -B build `
+            -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:RUNNER_TEMP/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DMIMIR_ENABLE_TESTS=ON `
+            -DENABLE_VULKAN=OFF `
+            -DENABLE_OPENCL=OFF `
+            -DENABLE_SFML=OFF `
+            -DENABLE_SCRIPTING_JS=OFF `
+            -DENABLE_OPENMP=OFF `
+            -DENABLE_LZ4=ON
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --parallel 2
+
+      - name: Run unit tests (CTest)
+        shell: pwsh
+        run: |
+          $env:PATH = "$HOME/.dotnet/tools;$HOME/.cargo/bin;" + $env:PATH
+          ctest --test-dir build --output-on-failure --timeout 180
+
+      - name: Upload CTest logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-logs-windows-v${{ steps.version.outputs.VERSION }}
           path: |
             build/Testing/Temporary/LastTest.log
             build/Testing/Temporary/LastTestsFailed.log
@@ -118,27 +198,22 @@ jobs:
 
       - name: Configure (CMake explicit cross build)
         run: |
-          cmake -S . -B build_win_cross_tests \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_SYSTEM_NAME=Windows \
-            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
-            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
-            -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_TARGET_TRIPLET=x64-mingw-dynamic \
-            -DVCPKG_APPLOCAL_DEPS=OFF \
-            -DMIMIR_ENABLE_TESTS=ON \
-            -DENABLE_VULKAN=OFF \
-            -DENABLE_OPENCL=OFF \
-            -DENABLE_SFML=OFF \
-            -DENABLE_FFMPEG=OFF \
-            -DENABLE_OPENMP=ON \
-            -DENABLE_LZ4=ON
+          ./config.sh --gui NONE --non-interactive --build-dir build_win_cross_tests \
+            --generator Ninja --enable MIMIR_ENABLE_TESTS \
+            --disable ENABLE_SCRIPTING_JS --enable ENABLE_SCRIPTING_RUST \
+            --enable ENABLE_SCRIPTING_CSHARP \
+            --disable ENABLE_VULKAN --disable ENABLE_OPENCL --disable ENABLE_FFMPEG \
+            --cmake-arg -DCMAKE_SYSTEM_NAME=Windows \
+            --cmake-arg -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
+            --cmake-arg -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
+            --cmake-arg -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres \
+            --cmake-arg "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            --cmake-arg -DVCPKG_TARGET_TRIPLET=x64-mingw-dynamic \
+            --cmake-arg -DVCPKG_APPLOCAL_DEPS=OFF
 
       - name: Build (CMake explicit cross build)
         run: |
-          cmake --build build_win_cross_tests
+          cmake --build build_win_cross_tests --parallel 2
 
       - name: Verify Windows binaries
         run: |

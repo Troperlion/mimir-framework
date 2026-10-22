@@ -179,8 +179,12 @@ int main() {
         const bool loaded = load_checkpoint(*modelB, dir.string(), lopts, &err);
         std::cerr.rdbuf(previous_cerr);
         TASSERT_TRUE(loaded);
-        TASSERT_TRUE(load_log.str().find(logged_tensor_name) != std::string::npos);
-        TASSERT_TRUE(load_log.str().find(" | sha256:") != std::string::npos);
+        // Hash-tree output splits tensor paths across directory/leaf lines.
+        const auto leaf = logged_tensor_name.substr(logged_tensor_name.find_last_of("/.")+1);
+        TASSERT_TRUE(load_log.str().find(leaf) != std::string::npos);
+        TASSERT_TRUE(load_log.str().find("[checkpoint hashsums]") != std::string::npos);
+        TASSERT_TRUE(load_log.str().find(" | ") != std::string::npos);
+        TASSERT_TRUE(load_log.str().find("sha256:") != std::string::npos);
 
         // DType should be restored semantically (aliases allowed: f16/fp16/float16...).
         TASSERT_TRUE(Mimir::parse_dtype(modelB->getDefaultDType()) == Mimir::parse_dtype(c.dtype));

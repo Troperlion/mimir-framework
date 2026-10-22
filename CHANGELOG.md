@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Non publié]
 
+## [3.6.0] - 2026-10-22
+
 ### Performances, Viz et benchmarks
 
 - CPU : backward Linear/MatMul vectorisé, forward BatchMatMul par blocs,
@@ -21,6 +23,44 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   frameworks ; RSS externe et résultats MNIST séparés des microbenchmarks.
 - Documentation : procédures Colab, limites de mesure, chemins forward/backward
   Vulkan/OpenCL et contrats d’initialisation des scratchpads actualisés.
+
+### Routage, optimizers et compatibilité
+
+- Planification `cost` par défaut et calibration forward/backward sur copies
+  de travail, avec contrôle numérique, médiane de cinq mesures et budget mémoire.
+  Les opérations non rejouables conservent leur parcours normal.
+- Optimizers : sélection empirique du runtime, caches invalidés lors des changements
+  de configuration, états compacts et sauvegarde canonique des moments actifs.
+- Kernels portables : exécution parallèle par opération, buffers réutilisés,
+  géométrie de convolution partagée et constantes séquentielles interpolées.
+- Conversions typées F16/BF16/F32 par blocs et publication des contrôles runtime
+  évitée lorsque leur état effectif n’a pas changé.
+- Diagnostics optionnels des gradients : médiane, p95, maximum et taux de clipping
+  sur les 256 dernières mises à jour, exposés au monitoring.
+- Régressions ciblées : calibration, reprise des optimizers, tenseurs typés,
+  kernels CPU/portables et limites des annotations de l’interface.
+- `config.sh` : sélection explicite du backend Viz, répertoire de build séparé
+  et options `--enable` / `--disable` pour les profils CI reproductibles.
+  Les workflows Linux installent et configurent via `./config.sh`.
+
+### Corrections de validation
+
+- Le cache des routes forward conserve le rejet d’un runtime ayant échoué,
+  jusqu’au rafraîchissement explicite des routes.
+- Les tests de priorité et de parité de kernels sont indépendants de la
+  calibration des vitesses ; les tests dédiés continuent de vérifier le choix mesuré.
+- Les espacements d’alignement sont inclus dans le budget de scratch convolution.
+- La compilation croisée n’importe plus les chemins Cairo du système hôte.
+  Le bridge JavaScript POSIX reste désactivé sur Windows, tandis que les bridges
+  C#/Rust utilisent les en-têtes de processus adaptés à cette plateforme.
+
+### Validation et publication
+
+- Documentation des nouvelles options de calibration et de la procédure de
+  validation de version.
+- Compilations GitHub limitées à deux tâches concurrentes pour borner la mémoire.
+- Publications du wiki sérialisées entre `develop` et `main` pour éviter les
+  conflits de push vers leur dépôt wiki commun.
 
 ## [3.5.0] - 2026-10-01
 

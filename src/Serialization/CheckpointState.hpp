@@ -39,6 +39,15 @@ inline json optimizer_metadata(const Optimizer& opt) {
         {"initial_lr", opt.initial_lr}, {"min_lr", opt.min_lr},
         {"decay_rate", opt.decay_rate}, {"decay_steps", opt.decay_steps},
         {"total_steps", opt.total_steps}, {"warmup_steps", opt.warmup_steps}};
+    // Disk state stays canonical and backend independent. Device offsets,
+    // gradients, reduction scratch and routing caches are never checkpoint state.
+    // Additive metadata keeps schema 2 and the existing m/v tensor names readable
+    // by older readers; missing fields continue to mean the legacy flat layout.
+    j["state_layout"] = "canonical_m_v_v1";
+    j["state_dtype"] = "F32";
+    j["active_moments"] = json::array();
+    if (opt.usesFirstMoment()) j["active_moments"].push_back("m");
+    if (opt.usesSecondMoment()) j["active_moments"].push_back("v");
     if (opt.type != OptimizerType::SGD && opt.type != OptimizerType::LION) j["eps"] = opt.eps;
     if (opt.usesFirstMoment()) j["beta1"] = opt.beta1;
     if (opt.type != OptimizerType::SGD && opt.type != OptimizerType::RMSPROP && opt.type != OptimizerType::ADAFACTOR) j["beta2"] = opt.beta2;
@@ -64,11 +73,18 @@ inline json optimizer_metadata(const Optimizer& opt) {
 
 inline Optimizer optimizer_from_metadata(const json& j) {
     Optimizer opt;
-    const int type = j.value("type", static_cast<int>(opt.type));
-    if (type < static_cast<int>(OptimizerType::SGD) || type > static_cast<int>(OptimizerType::LAMB)) {
-        throw std::runtime_error("Invalid optimizer type");
+    if (j.contains("type") && j["type"].is_string()) {
+        if (!optimizerTypeFromString(j["type"].get<std::string>(), opt.type))
+            throw std::runtime_error("Invalid optimizer type");
+    } else if (!j.contains("type") && j.contains("name") && j["name"].is_string()) {
+        if (!optimizerTypeFromString(j["name"].get<std::string>(), opt.type))
+            throw std::runtime_error("Invalid optimizer name");
+    } else {
+        const int type = j.value("type", static_cast<int>(opt.type));
+        if (type < static_cast<int>(OptimizerType::SGD) || type > static_cast<int>(OptimizerType::LAMB))
+            throw std::runtime_error("Invalid optimizer type");
+        opt.type = static_cast<OptimizerType>(type);
     }
-    opt.type = static_cast<OptimizerType>(type);
     opt.step = j.value("step", size_t{0});
 #define MIMIR_OPT_FIELD(field) opt.field = j.value(#field, opt.field)
     MIMIR_OPT_FIELD(beta1); MIMIR_OPT_FIELD(beta2); MIMIR_OPT_FIELD(eps);
@@ -92,6 +108,17 @@ inline Optimizer optimizer_from_metadata(const json& j) {
 }
 
 inline void validate_optimizer_state(const Model& model, const Optimizer& opt, const json& metadata) {
+    if (metadata.contains("state_layout") && metadata["state_layout"] != "canonical_m_v_v1")
+        throw std::runtime_error("Unsupported optimizer checkpoint state layout");
+    if (metadata.contains("state_dtype") && metadata["state_dtype"] != "F32")
+        throw std::runtime_error("Unsupported optimizer checkpoint state dtype");
+    if (metadata.contains("active_moments")) {
+        json expected = json::array();
+        if (opt.usesFirstMoment()) expected.push_back("m");
+        if (opt.usesSecondMoment()) expected.push_back("v");
+        if (metadata["active_moments"] != expected)
+            throw std::runtime_error("Optimizer checkpoint active moments mismatch");
+    }
     if (metadata.value("schema_version", 0) < 2) return; // Legacy metadata remains readable.
     const auto sizes = metadata.value("state_sizes", json::object());
     if (opt.m.size() != sizes.value("m", size_t{0}) || opt.v.size() != sizes.value("v", size_t{0})) {

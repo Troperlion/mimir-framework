@@ -12,7 +12,7 @@ formats des modèles existants sont conservés.
 | Linear backward | `src/runtimes/cpu/RuntimeLayerDispatch.hpp` | Réductions par blocs de features contiguës, SIMD et OpenMP selon la charge ; gradients de paramètres accumulés dans le bloc packed. |
 | MatMul/BatchMatMul backward | `src/runtimes/cpu/MatMulKernels.hpp` | Réduction SIMD pour dA et colonnes contiguës pour dB ; pas de tampon de transposition. |
 | BatchMatMul forward | Même header | Blocs de 24 puis 8 colonnes et reste scalaire ; une région parallèle pour les lignes des lots. |
-| Conv2d backward | `src/runtimes/cpu/ConvolutionKernels.hpp` | Réutilisation du tampon im2col pour dCol et accumulation directe de dW ; trois scratchpads au lieu de cinq. |
+| Conv2d backward | `src/runtimes/cpu/ConvolutionKernels.hpp` | Réutilisation du tampon im2col pour dCol et accumulation directe de dW ; un scratchpad découpé en trois vues avec deux espacements de 64 octets pour limiter les conflits de cache. |
 | Convolution 1×1 | Même header | Chemin CHW direct pour stride 1, padding 0 et certaines formes ; les formes larges gardent le packing. |
 | Concat/Stack forward | `src/runtimes/cpu/FlatJoinKernels.hpp` | Entrées empruntées en lecture seule ; une allocation de sortie, sans copies propriétaires de toutes les entrées. |
 | SelfAttention/MultiHeadAttention/CrossAttention forward | `src/runtimes/cpu/LayerOps.hpp` | Lecture des projections combinées sans copies Q/K/V complètes ; scores et contexte temporaire par blocs de 128 requêtes. |
@@ -63,6 +63,43 @@ le repli, un refus peut conduire au CPU. Le microbenchmark Colab vérifie le
 runtime effectivement sélectionné et refuse d’attribuer une exécution CPU à
 Vulkan/OpenCL. Les budgets de sécurité des kernels portables restent actifs.
 Voir [Runtimes GPU](../04-Architecture-Internals/21-GPU-Runtimes.md).
+
+## Sélection du runtime des optimizers
+
+`RuntimeRouter::dispatchOptimizer` compare les runtimes disponibles et compatibles
+pour le type d’optimizer, la taille exacte du bloc et les buffers de moments
+présents. Il effectue une chauffe puis cinq mesures sur des copies de l’état,
+et classe les candidats par médiane. La mesure inclut le coût de l’update réel :
+copies de protection, transferts et synchronisation côté device. Un optimizer
+CPU peut donc gagner même si les couches du modèle sont calculées sur GPU.
+
+Le choix est amorti par un cache borné à 512 configurations par thread. Il est
+réévalué après 1 024 updates réussis pour cette configuration, lors d’une reconfiguration des
+runtimes, d’un changement de device/candidats ou après un échec. Les options
+Adafactor et la phase RAdam qui changent le travail sont distinguées. Une route
+seule ne déclenche pas une compétition inutile.
+
+La calibration ne modifie ni les poids/moments du modèle ni le compteur de pas.
+Un échec device ne valide pas son état temporaire ; le routeur essaie le candidat
+suivant selon les médianes mesurées. Les audits d’optimizer comptent les updates
+réels, pas les essais. Le log `[optimizer]` donne le backend retenu et les temps
+médians des candidats sous `candidates_seconds`. Le choix désigne le plus rapide
+mesuré, pas une garantie permanente face à des variations instantanées de charge.
+
+## Diagnostics de gradients à la demande
+
+`LiveModelConfig::gradient_diagnostics` est observé par le monitoring. Sans
+observateur, le modèle ne demande pas de parcours supplémentaire pour ces
+statistiques. Lorsqu’il est activé, une observation est enregistrée par mise à
+jour d’optimizer, indépendamment de la fréquence de rafraîchissement de la Viz.
+
+La fenêtre contient les 256 dernières observations de norme avant clipping ;
+les couches gelées sont exclues. Le snapshot expose le nombre d’échantillons,
+les valeurs non finies, la médiane, le p95, le maximum non tronqué et le taux de
+clipping effectif. Le taux tient aussi compte des étapes où le clipping est
+désactivé. Il s’agit de diagnostics de gradients, pas d’un indicateur de qualité
+ou de convergence à lui seul. `MetricsTest.GradientDiagnostics` couvre la fenêtre
+et `ModelTest.LiveConfiguration` couvre l’activation via le contrôle runtime.
 
 ## Mesurer et interpréter
 

@@ -2090,7 +2090,10 @@ inline bool cpu_backward_layer(
                     }
                 }
 
+                const bool disjoint_parameters=!affine || !layer.use_bias || layer.getWeightsSize()>=2ULL*channels;
+                const int workers=disjoint_parameters?HardwareOpt::matmul_workers(groups,M,5):1;
                 for (int n = 0; n < batch; ++n) {
+                    #pragma omp parallel for if(workers>1) num_threads(workers) schedule(static)
                     for (int g = 0; g < groups; ++g) {
                         const int c0 = g * cpg;
                         float mean = 0.0f;
@@ -2143,51 +2146,18 @@ inline bool cpu_backward_layer(
                                 const float dxhat = go[idx] * gamma;
                                 grad_inputs[0][idx] = invstd * invM * (static_cast<float>(M) * dxhat - sum_dxhat - xhat * sum_dxhat_xhat);
                             }
-                        }
-                    }
-                }
-
-                if (affine) {
-                    for (int n = 0; n < batch; ++n) {
-                        for (int g = 0; g < groups; ++g) {
-                            const int c0 = g * cpg;
-                            float mean = 0.0f;
-                            for (int c = 0; c < cpg; ++c) {
-                                const int ch = c0 + c;
-                                const size_t base = static_cast<size_t>(n) * static_cast<size_t>(channels * spatial)
-                                    + static_cast<size_t>(ch) * static_cast<size_t>(spatial);
-                                for (int s = 0; s < spatial; ++s) mean += x[base + static_cast<size_t>(s)];
-                            }
-                            mean /= static_cast<float>(M);
-                            float var = 0.0f;
-                            for (int c = 0; c < cpg; ++c) {
-                                const int ch = c0 + c;
-                                const size_t base = static_cast<size_t>(n) * static_cast<size_t>(channels * spatial)
-                                    + static_cast<size_t>(ch) * static_cast<size_t>(spatial);
-                                for (int s = 0; s < spatial; ++s) {
-                                    const float d = x[base + static_cast<size_t>(s)] - mean;
-                                    var += d * d;
-                                }
-                            }
-                            var /= static_cast<float>(M);
-                            const float invstd = 1.0f / std::sqrt(var + eps);
-
-                            for (int c = 0; c < cpg; ++c) {
-                                const int ch = c0 + c;
-                                const size_t base = static_cast<size_t>(n) * static_cast<size_t>(channels * spatial)
-                                    + static_cast<size_t>(ch) * static_cast<size_t>(spatial);
-                                for (int s = 0; s < spatial; ++s) {
-                                    const size_t idx = base + static_cast<size_t>(s);
-                                    const float xhat = (x[idx] - mean) * invstd;
-                                    layer.grad_weights[static_cast<size_t>(ch)] += go[idx] * xhat;
-                                    if (layer.use_bias && ch < static_cast<int>(layer.grad_bias.size())) {
-                                        accumulate_packed_bias(layer, static_cast<size_t>(ch), go[idx]);
-                                    }
-                                }
+                            // Reuse group statistics, but keep the reduction out
+                            // of the independent dX loop so dX remains vectorizable.
+                            if(affine)for(int s=0;s<spatial;++s){
+                                const size_t idx=base+static_cast<size_t>(s);
+                                const float xhat=(x[idx]-mean)*invstd;
+                                layer.grad_weights[static_cast<size_t>(ch)] += go[idx]*xhat;
+                                if(layer.use_bias)accumulate_packed_bias(layer,static_cast<size_t>(ch),go[idx]);
                             }
                         }
                     }
                 }
+
                 return true;
             }
 

@@ -21,6 +21,7 @@
 
 #include "test_utils.hpp"
 #include "Model.hpp"
+#include "runtimes/cpu/RuntimeLayerDispatch.hpp"
 
 #define CHECK(cond) do { if (!(cond)) { std::cerr << "FATAL: " #cond "\n"; std::abort(); } } while(0)
 
@@ -178,6 +179,49 @@ static int check_layernorm_runtime(AbstractRuntime& runtime) {
 #endif
 
 int main() {
+    {
+        Layer l;l.type_enum=LayerType::GroupNorm;l.in_channels=4;
+        l.input_height=3;l.input_width=5;l.num_groups=2;l.affine=l.use_bias=true;l.weights.assign(8,.3f);
+        std::vector<float> x(60),go(60);
+        for(size_t i=0;i<x.size();++i){x[i]=std::sin(float(i)*.17f);go[i]=std::cos(float(i)*.31f)*.1f;}
+        auto objective=[&](){std::vector<std::vector<float>> y;if(!RuntimeLayerDispatch::cpu_forward_layer({&x},y,l,true))throw std::runtime_error("GroupNorm finite-difference forward failed");double sum=0;for(size_t i=0;i<go.size();++i)sum+=double(y[0][i])*go[i];return sum;};
+        std::vector<std::vector<float>> dx;
+        TASSERT_TRUE(RuntimeLayerDispatch::cpu_backward_layer({&x},{&go},dx,l,true));
+        constexpr float epsilon=.001f;
+        for(size_t i:{size_t(0),size_t(3),size_t(4),size_t(7)}){
+            const float saved=l.weights[i];l.weights[i]=saved+epsilon;const double plus=objective();l.weights[i]=saved-epsilon;const double minus=objective();l.weights[i]=saved;
+            TASSERT_NEAR(l.grad_weights[i],float((plus-minus)/(2*epsilon)),3e-4f);
+        }
+        for(size_t i:{size_t(0),size_t(11),size_t(59)}){
+            const float saved=x[i];x[i]=saved+epsilon;const double plus=objective();x[i]=saved-epsilon;const double minus=objective();x[i]=saved;
+            TASSERT_NEAR(dx[0][i],float((plus-minus)/(2*epsilon)),3e-4f);
+        }
+    }
+    // GroupNorm parameter gradients share the normalization pass. Verify
+    // repeated accumulation and disjoint groups across OpenMP team sizes.
+    {
+        Layer l;l.type_enum=LayerType::GroupNorm;l.in_channels=8;
+        l.input_height=l.input_width=256;l.num_groups=4;l.affine=l.use_bias=true;
+        l.weights.assign(16,.3f);l.grad_weights.assign(16,.125f);l.grad_bias.assign(8,.25f);
+        std::vector<float> x(8*256*256),go(x.size());
+        for(size_t i=0;i<x.size();++i){x[i]=std::sin(float(i%997)*.031f);go[i]=std::cos(float(i%197)*.017f)*.1f;}
+        auto serial=l,parallel=l;std::vector<std::vector<float>> a,b,ya,yb;
+#ifdef _OPENMP
+        const int saved_threads=omp_get_max_threads();omp_set_num_threads(1);
+#endif
+        TASSERT_TRUE(RuntimeLayerDispatch::cpu_forward_layer({&x},ya,serial,true));
+        for(int repeat=0;repeat<2;++repeat)TASSERT_TRUE(RuntimeLayerDispatch::cpu_backward_layer({&x},{&go},a,serial,true));
+#ifdef _OPENMP
+        omp_set_num_threads(10);
+#endif
+        TASSERT_TRUE(RuntimeLayerDispatch::cpu_forward_layer({&x},yb,parallel,true));
+        for(int repeat=0;repeat<2;++repeat)TASSERT_TRUE(RuntimeLayerDispatch::cpu_backward_layer({&x},{&go},b,parallel,true));
+#ifdef _OPENMP
+        omp_set_num_threads(saved_threads);
+#endif
+        TASSERT_TRUE(ya==yb && a==b);
+        TASSERT_TRUE(serial.grad_weights==parallel.grad_weights && serial.grad_bias==parallel.grad_bias);
+    }
     // =========================================================================
     // LAYERNORM
     // =========================================================================

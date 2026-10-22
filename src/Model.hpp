@@ -507,6 +507,9 @@ public:
     std::shared_ptr<SkipConnectionControl> skip_control_ = std::make_shared<SkipConnectionControl>();
     bool skip_control_initialized_ = false;
     std::shared_ptr<LiveModelConfig> runtime_config_ = std::make_shared<LiveModelConfig>();
+    json runtime_config_published_model_;
+    std::vector<double> runtime_config_published_controls_;
+    bool runtime_config_published_ = false;
     
     // ========================================================================
     // TENSOR STORE (Multi-input/Branch Support)

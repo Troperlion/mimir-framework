@@ -62,15 +62,17 @@ inline void forward(const std::vector<float>& x,std::vector<float>& y,const floa
         return;
     }
     auto& guard=MemoryGuard::instance();RuntimeAllocator allocator(guard,guard.getLimit()/(1024*1024));
-    auto col=allocator.get_scratchpad_uninitialized(static_cast<size_t>(tile)*k*sizeof(float),"conv/im2col");
-    auto rows=allocator.get_scratchpad_uninitialized(static_cast<size_t>(tile)*out_c*sizeof(float),"conv/output_rows");
+    auto scratch=allocator.get_scratchpad_uninitialized((static_cast<size_t>(tile)*(size_t(k)+out_c)+16)*sizeof(float),"conv/forward");
+    float* col=scratch.data();
+    // Offset scratch regions by one cache line to avoid power-of-two aliases.
+    float* rows=col+static_cast<size_t>(tile)*k+16;
     y.resize(static_cast<size_t>(out_c)*spatial);
     for(int start=0;start<spatial;start+=tile) {
         const int count=std::min(tile,spatial-start);
-        pack(x.data(),col.data(),start,count,h,w,in_c,kernel,stride,pad,dilation,ow);
-        multiply(rows.data(),col.data(),weights,count,out_c,k,true);
+        pack(x.data(),col,start,count,h,w,in_c,kernel,stride,pad,dilation,ow);
+        multiply(rows,col,weights,count,out_c,k,true);
         for(int r=0;r<count;++r) for(int c=0;c<out_c;++c)
-            y[static_cast<size_t>(c)*spatial+start+r]=rows.data()[static_cast<size_t>(r)*out_c+c]+(bias?bias[c]:0.0f);
+            y[static_cast<size_t>(c)*spatial+start+r]=rows[static_cast<size_t>(r)*out_c+c]+(bias?bias[c]:0.0f);
     }
 }
 inline void backward(const std::vector<float>& x,const std::vector<float>& go,std::vector<float>& dx,Layer& layer,
@@ -79,30 +81,31 @@ inline void backward(const std::vector<float>& x,const std::vector<float>& go,st
     const int ow=(w+2*pad-dilation*(kernel-1)-1)/stride+1;
     const int spatial=oh*ow,k=in_c*kernel*kernel,tile=tile_size(k,out_c,spatial);
     auto& guard=MemoryGuard::instance();RuntimeAllocator allocator(guard,guard.getLimit()/(1024*1024));
-    auto col=allocator.get_scratchpad_uninitialized(static_cast<size_t>(tile)*k*sizeof(float),"conv/bwd_im2col");
-    auto dy=allocator.get_scratchpad_uninitialized(static_cast<size_t>(tile)*out_c*sizeof(float),"conv/dy");
-    auto dy_t=allocator.get_scratchpad_uninitialized(static_cast<size_t>(tile)*out_c*sizeof(float),"conv/dy_transpose");
+    auto scratch=allocator.get_scratchpad_uninitialized((static_cast<size_t>(tile)*(size_t(k)+2ULL*out_c)+32)*sizeof(float),"conv/backward");
+    float* col=scratch.data();
+    float* dy=col+static_cast<size_t>(tile)*k+16;
+    float* dy_t=dy+static_cast<size_t>(tile)*out_c+16;
     dx.assign(x.size(),0.0f);
     if(layer.grad_weights.size()!=layer.getWeightsSize()) layer.grad_weights.assign(layer.getWeightsSize(),0.0f);
     if(layer.use_bias && layer.grad_bias.size()!=static_cast<size_t>(out_c)) layer.grad_bias.assign(out_c,0.0f);
     for(int start=0;start<spatial;start+=tile) {
         const int count=std::min(tile,spatial-start);
-        pack(x.data(),col.data(),start,count,h,w,in_c,kernel,stride,pad,dilation,ow);
+        pack(x.data(),col,start,count,h,w,in_c,kernel,stride,pad,dilation,ow);
         for(int r=0;r<count;++r) for(int c=0;c<out_c;++c) {
             const float g=go[static_cast<size_t>(c)*spatial+start+r];
-            dy.data()[static_cast<size_t>(r)*out_c+c]=g;
-            dy_t.data()[static_cast<size_t>(c)*count+r]=g;
+            dy[static_cast<size_t>(r)*out_c+c]=g;
+            dy_t[static_cast<size_t>(c)*count+r]=g;
             if(layer.use_bias) { layer.grad_weights[static_cast<size_t>(out_c)*k+c]+=g;layer.grad_bias[c]+=g; }
         }
-        multiply_add(layer.grad_weights.data(),dy_t.data(),col.data(),out_c,k,count);
+        multiply_add(layer.grad_weights.data(),dy_t,col,out_c,k,count);
         // The packed input is dead after dW. Its allocation now holds dCol.
-        multiply(col.data(),dy.data(),layer.getWeights(),count,k,out_c,false);
+        multiply(col,dy,layer.getWeights(),count,k,out_c,false);
         for(int r=0;r<count;++r) {
             const int row=(start+r)/ow,column=(start+r)%ow;
             for(int c=0;c<in_c;++c) for(int kh=0;kh<kernel;++kh) for(int kw=0;kw<kernel;++kw) {
                 const int ih=row*stride-pad+kh*dilation,iw=column*stride-pad+kw*dilation;
                 if(ih>=0&&ih<h&&iw>=0&&iw<w)
-                    dx[(static_cast<size_t>(c)*h+ih)*w+iw]+=col.data()[static_cast<size_t>(r)*k+(c*kernel+kh)*kernel+kw];
+                    dx[(static_cast<size_t>(c)*h+ih)*w+iw]+=col[static_cast<size_t>(r)*k+(c*kernel+kh)*kernel+kw];
             }
         }
     }

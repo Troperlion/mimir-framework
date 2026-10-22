@@ -2,6 +2,7 @@
 #include "runtimes/RuntimeRouter.hpp"
 
 #include "Layers.hpp"
+#include "Planning/ExecutionCalibration.hpp"
 
 #include <cmath>
 #include <cstddef>
@@ -14,6 +15,15 @@ bool tensorsAreFinite(const std::vector<std::vector<float>>& tensors) {
         if (!Mimir::RuntimeChecks::allFinite(tensor.data(), tensor.size())) return false;
     }
     return true;
+}
+
+auto rankForward(const std::vector<AbstractRuntime*>& candidates,const Layer& layer,
+    const std::vector<const std::vector<float>*>& inputs,bool training,uint64_t generation,const RuntimeForwardContext& context){
+    return Mimir::Planning::Calibration::rank(candidates,layer,inputs,{},false,training,generation,
+        [&](AbstractRuntime& rt,Layer& disposable,std::vector<std::vector<float>>& outputs){
+            auto probe=context;std::vector<uint8_t> mask;if(context.output_mask)probe.output_mask=&mask;
+            return rt.forwardLayerWithContext(inputs,outputs,disposable,training,probe);
+        });
 }
 
 } // namespace
@@ -73,6 +83,7 @@ void RuntimeRouter::setRuntimes(
     AbstractRuntime* tpu,
     AbstractRuntime* cpu
 ) {
+    ++optimizer_routing_generation_;
     runtime_priority_.clear();
     runtime_priority_.reserve(6);
 
@@ -145,6 +156,7 @@ void RuntimeRouter::setActivators(
     std::function<bool()> opencl,
     std::function<bool()> cpu
 ) {
+    ++optimizer_routing_generation_;
     activate_rocm_ = std::move(rocm);
     activate_cuda_ = std::move(cuda);
     activate_vulkan_ = std::move(vulkan);
@@ -306,7 +318,8 @@ bool RuntimeRouter::dispatchForwardLayer(
         it = inserted.first;
     }
 
-    std::vector<AbstractRuntime*>& route = it->second;
+    auto ranking=rankForward(it->second,layer,inputs,training,optimizer_routing_generation_,context);
+    auto route=ranking.route;
     if (route.empty()) return false;
 
     size_t i = 0;
@@ -331,7 +344,11 @@ bool RuntimeRouter::dispatchForwardLayer(
             return true;
         }
 
-        // Runtime a échoué à l'exécution: on invalide cette route pour ce layer.
+        if(ranking.calibrated)Mimir::Planning::Calibration::invalidate(ranking.key);
+        // Keep the failure in the layer cache as well as the measured local order.
+        // planForwardLayerRoutes/setRuntimes can explicitly make it eligible again.
+        auto& cached = it->second;
+        cached.erase(std::remove(cached.begin(), cached.end(), rt), cached.end());
         route.erase(route.begin() + static_cast<std::ptrdiff_t>(i));
     }
 
@@ -366,7 +383,9 @@ bool RuntimeRouter::dispatchForwardLayerPlanned(
         route_it = forward_layer_routes_.emplace(
             &layer, buildForwardRouteForLayer(layer)).first;
     }
-    std::vector<AbstractRuntime*>& route = route_it->second;
+    auto ranking=rankForward(route_it->second,layer,inputs,training,optimizer_routing_generation_,context);
+    auto route=ranking.route;
+    if(ranking.calibrated && !route.empty())preferred=route.front();
 
     auto is_eligible = [&](AbstractRuntime* runtime) {
         return runtime && runtime->isInitialized() &&
@@ -386,6 +405,9 @@ bool RuntimeRouter::dispatchForwardLayerPlanned(
     if (preferred_it != route.end()) {
         if (is_eligible(preferred)) {
             if (execute(preferred)) return true;
+            if(ranking.calibrated)Mimir::Planning::Calibration::invalidate(ranking.key);
+            auto& cached = route_it->second;
+            cached.erase(std::remove(cached.begin(), cached.end(), preferred), cached.end());
             route.erase(preferred_it);
         }
     }
@@ -402,6 +424,9 @@ bool RuntimeRouter::dispatchForwardLayerPlanned(
             continue;
         }
         if (execute(runtime)) return true;
+        if(ranking.calibrated)Mimir::Planning::Calibration::invalidate(ranking.key);
+        auto& cached = route_it->second;
+        cached.erase(std::remove(cached.begin(), cached.end(), runtime), cached.end());
         route.erase(route.begin() + static_cast<std::ptrdiff_t>(index));
     }
     return false;
@@ -450,8 +475,10 @@ bool RuntimeRouter::dispatchBackwardLayer(
             runtimeCapabilityIsNative(rt->queryBackwardCapability(layer.type_enum)))
             route[count++] = rt;
 
-    for (size_t i = 0; i < count; ++i) {
-        AbstractRuntime* rt = route[i];
+    auto ranking=Mimir::Planning::Calibration::rank(std::vector<AbstractRuntime*>(route,route+count),layer,inputs,grad_outputs,true,training,optimizer_routing_generation_,
+        [&](AbstractRuntime& rt,Layer& disposable,std::vector<std::vector<float>>& outputs){return rt.backwardLayerWithContext(inputs,grad_outputs,outputs,disposable,training,context);});
+    for (size_t i = 0; i < ranking.route.size(); ++i) {
+        AbstractRuntime* rt = ranking.route[i];
         if (!rt->isInitialized()) continue;
         if (!runtimeCapabilityIsNative(rt->queryBackwardOperationCapability(
                 layer, inputs, grad_outputs, training))) {
@@ -459,14 +486,20 @@ bool RuntimeRouter::dispatchBackwardLayer(
         }
 
         std::vector<std::vector<float>> local_grad_inputs;
-        if (rt->backwardLayerWithContext(inputs, grad_outputs, local_grad_inputs, layer, training, context) &&
+        Layer disposable;
+        Layer* target=&layer;
+        if(ranking.calibrated){disposable=layer;target=&disposable;}
+        if (rt->backwardLayerWithContext(inputs, grad_outputs, local_grad_inputs, *target, training, context) &&
             (layer.type_enum == LayerType::Constant || !local_grad_inputs.empty()) &&
+            (!ranking.calibrated || (Mimir::RuntimeChecks::allFinite(target->grad_weights.data(),target->grad_weights.size()) && Mimir::RuntimeChecks::allFinite(target->grad_bias.data(),target->grad_bias.size()))) &&
             tensorsAreFinite(local_grad_inputs)) {
+            if(ranking.calibrated){layer.grad_weights=std::move(disposable.grad_weights);layer.grad_bias=std::move(disposable.grad_bias);}
             grad_inputs = std::move(local_grad_inputs);
             if (selected_runtime) *selected_runtime = rt;
             return true;
         }
 
+        if(ranking.calibrated)Mimir::Planning::Calibration::invalidate(ranking.key);
         // Try the next backend if execution or its finiteness check failed.
     }
 

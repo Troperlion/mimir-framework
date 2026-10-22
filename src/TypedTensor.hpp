@@ -137,8 +137,26 @@ public:
     std::vector<float> toFloat32() const {
         if (dtype_ == DType::F32) return values<float>();
         std::vector<float> result(numel_);
-        for (size_t index = 0; index < numel_; ++index)
-            result[index] = static_cast<float>(get(index));
+        // Dispatch once per tensor, rather than visiting/checking every scalar.
+        visit([&](const auto& values) {
+            using T = typename std::decay_t<decltype(values)>::value_type;
+            if constexpr (std::is_same_v<T, Float16> || std::is_same_v<T, BFloat16>) {
+                // Stage wrapper bits without aliasing a struct array as uint16_t[].
+                uint16_t bits[256];
+                for (size_t base = 0; base < numel_; base += 256) {
+                    const size_t count = std::min(size_t{256}, numel_ - base);
+                    for (size_t j = 0; j < count; ++j) bits[j] = values[base+j].bits;
+                    if constexpr (std::is_same_v<T, Float16>)
+                        HardwareOpt::fp16_to_fp32_f16c(result.data()+base, bits, count);
+                    else HardwareOpt::bf16_to_fp32(result.data()+base, bits, count);
+                }
+            } else {
+                for (size_t j = 0; j < numel_; ++j) {
+                    if constexpr (std::is_same_v<T, Bool8>) result[j] = values[j].value != 0;
+                    else result[j] = static_cast<float>(static_cast<double>(values[j]));
+                }
+            }
+        });
         return result;
     }
 
@@ -163,7 +181,25 @@ public:
         TypedTensor result(shape, dtype);
         if (result.numel() != values.size())
             throw std::invalid_argument("TypedTensor::fromFloat32: shape mismatch");
-        for (size_t index = 0; index < values.size(); ++index) result.set(index, values[index]);
+        result.visit([&](auto& destination) {
+            using T = typename std::decay_t<decltype(destination)>::value_type;
+            if constexpr (std::is_same_v<T, Float16> || std::is_same_v<T, BFloat16>) {
+                uint16_t bits[256];
+                for (size_t base = 0; base < values.size(); base += 256) {
+                    const size_t count = std::min(size_t{256}, values.size() - base);
+                    if constexpr (std::is_same_v<T, Float16>)
+                        HardwareOpt::fp32_to_fp16_f16c(bits, values.data()+base, count);
+                    else HardwareOpt::fp32_to_bf16(bits, values.data()+base, count);
+                    for (size_t j = 0; j < count; ++j) destination[base+j].bits = bits[j];
+                }
+            } else {
+                for (size_t j = 0; j < values.size(); ++j) {
+                    if constexpr (std::is_same_v<T, Bool8>) destination[j].value = values[j] != 0.0f;
+                    else if constexpr (std::is_integral_v<T>) destination[j] = castInteger<T>(values[j]);
+                    else destination[j] = static_cast<T>(values[j]);
+                }
+            }
+        });
         return result;
     }
 

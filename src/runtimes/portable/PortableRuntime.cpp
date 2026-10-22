@@ -10,6 +10,9 @@
 #include "PortableStaging.hpp"
 
 #include "runtimes/portable/PortableNativeOps.hpp"
+#include "PortableConstantOps.hpp"
+#include "PortableLayerGeometry.hpp"
+#include "PortableParallelGeometry.hpp"
 #include "runtimes/portable/PortableTrainingOps.hpp"
 #include "runtimes/portable/PortableAttentionOps.hpp"
 #include "runtimes/portable/PortableRecurrentOps.hpp"
@@ -462,13 +465,18 @@ RuntimeCapabilityLevel PortableRuntime::queryBackwardCapability(const LayerType 
 
 RuntimeCapabilityLevel PortableRuntime::queryForwardOperationCapability(
     const Layer& layer, const std::vector<const std::vector<float>*>& inputs, bool training) const {
-    if(layer.type_enum==LayerType::Constant && SequenceConstant::enabled(layer))return RuntimeCapabilityLevel::HostFallback;
-    if (!referenceInputsFit(layer.getWeightsSize(), inputs)) return RuntimeCapabilityLevel::Unsupported;
+    if(layer.type_enum==LayerType::Constant)
+        return !config_.disabled && PortableConstantOps::fits(layer)
+            ?RuntimeCapabilityLevel::Native:RuntimeCapabilityLevel::Unsupported;
+    if (!PortableParallelGeometry::fits(layer,inputs,false) && !referenceInputsFit(layer.getWeightsSize(),inputs))return RuntimeCapabilityLevel::Unsupported;
     return queryForwardGeometryCapability(layer, inputs, training);
 }
 
 RuntimeCapabilityLevel PortableRuntime::queryForwardGeometryCapability(
     const Layer& layer, const std::vector<const std::vector<float>*>& inputs, bool training) const {
+    if(layer.type_enum==LayerType::Constant)
+        return !config_.disabled && PortableConstantOps::fits(layer)
+            ?RuntimeCapabilityLevel::Native:RuntimeCapabilityLevel::Unsupported;
     if(layer.type_enum==LayerType::NMS){
         if(config_.disabled || inputs.size()<2 || !inputs[0] || !inputs[1] || inputs[0]->size()%4 || inputs[0]->size()>INT_MAX || inputs[1]->size()>(1U<<24) || inputs[1]->size()!=inputs[0]->size()/4 ||
             (inputs.size()>2 && inputs[2] && inputs[2]->size()!=inputs[1]->size()) || !std::isfinite(layer.nms_iou_threshold) || layer.nms_iou_threshold<0 || layer.nms_iou_threshold>1 ||
@@ -501,11 +509,11 @@ RuntimeCapabilityLevel PortableRuntime::queryForwardGeometryCapability(
         CudaOperationGeometry::Projection g;return g.valid(layer,inputs)?queryForwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
     }
     if(layer.type_enum==LayerType::LayerNorm || layer.type_enum==LayerType::RMSNorm){
-        const size_t n=inputs[0]->size(),width=layer.in_features>0?static_cast<size_t>(layer.in_features):n;
-        if(!config_.norm_enabled || n<static_cast<size_t>(std::max(0,config_.norm_min_elements)) || !width || n%width ||
-            (layer.affine && (!layer.getWeights() || layer.getWeightsSize()<width*(layer.type_enum==LayerType::LayerNorm && layer.use_bias?2ULL:1ULL))) || !(layer.eps>0.f) || (layer.type_enum==LayerType::RMSNorm && layer.in_features<=0 && (layer.embed_dim>0 || !layer.shape.empty() || !layer.target_shape.empty())))return RuntimeCapabilityLevel::Unsupported;
-        return queryForwardCapability(layer.type_enum);
+        return config_.norm_enabled && inputs[0]->size()>=static_cast<size_t>(std::max(0,config_.norm_min_elements)) &&
+            PortableLayerGeometry::rowNormFits(layer,inputs[0]->size(),false)
+            ?queryForwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
     }
+
     if(CudaOperationGeometry::poolType(layer.type_enum)) {
         CudaOperationGeometry::Pool g;return g.valid(layer,inputs[0]->size())?queryForwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
     }
@@ -565,8 +573,11 @@ void cuda_accumulate_parameters(Layer& layer, const std::vector<float>& weights,
 RuntimeCapabilityLevel PortableRuntime::queryBackwardOperationCapability(
     const Layer& layer, const std::vector<const std::vector<float>*>& inputs,
     const std::vector<const std::vector<float>*>& grad_outputs, bool training) const {
-    if(layer.type_enum==LayerType::Constant && SequenceConstant::enabled(layer))return RuntimeCapabilityLevel::HostFallback;
-    if (!referenceInputsFit(layer.getWeightsSize(), inputs) || !referenceInputsFit(0, grad_outputs)) return RuntimeCapabilityLevel::Unsupported;
+    if(layer.type_enum==LayerType::Constant)
+        return !config_.disabled && PortableConstantOps::fits(layer) && grad_outputs.size()==1 && grad_outputs[0] &&
+            grad_outputs[0]->size()==SequenceConstant::outputSize(layer)
+            ?RuntimeCapabilityLevel::Native:RuntimeCapabilityLevel::Unsupported;
+    if (!PortableParallelGeometry::fits(layer,inputs,true) && (!referenceInputsFit(layer.getWeightsSize(),inputs) || !referenceInputsFit(0,grad_outputs)))return RuntimeCapabilityLevel::Unsupported;
     if(layer.type_enum==LayerType::Lambda) {
         return !config_.disabled && inputs.size()>=1 && inputs[0] && grad_outputs.size()==1 && grad_outputs[0] && inputs[0]->size()==grad_outputs[0]->size()?RuntimeCapabilityLevel::Native:RuntimeCapabilityLevel::Unsupported;
     }
@@ -605,7 +616,9 @@ RuntimeCapabilityLevel PortableRuntime::queryBackwardOperationCapability(
         return queryBackwardCapability(layer.type_enum);
     }
     if(layer.type_enum==LayerType::LayerNorm || layer.type_enum==LayerType::RMSNorm){
-        return grad_outputs.size()==1 && grad_outputs[0]->size()==inputs[0]->size() && runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training))?queryBackwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
+        return !config_.disabled && config_.norm_enabled && grad_outputs.size()==1 && grad_outputs[0]->size()==inputs[0]->size() &&
+            inputs[0]->size()>=static_cast<size_t>(std::max(0,config_.norm_min_elements)) && PortableLayerGeometry::rowNormFits(layer,inputs[0]->size(),true)
+            ?queryBackwardCapability(layer.type_enum):RuntimeCapabilityLevel::Unsupported;
     }
     switch (layer.type_enum) {
         case LayerType::InstanceNorm2d:
@@ -736,13 +749,17 @@ bool PortableRuntime::forwardLayer(
     const Layer& layer,
     bool training
 ) {
-    if (!referenceInputsFit(layer.getWeightsSize(), inputs)) return false;
+    if (!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training))) return false;
+    if (!isInitialized()) return false;
     DeviceScope device_scope(backend_,config_.device_index);
     (void)training;
-    if (!isInitialized()) return false;
     if (config_.disabled) return false;
     if (!supportsForwardLayerType(layer.type_enum)) return false;
 
+    if(layer.type_enum==LayerType::Constant){
+        if(!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training)))return false;
+        outputs.resize(1);return PortableConstantOps::execute(layer,outputs[0]);
+    }
     if(layer.type_enum==LayerType::NMS){
         if(!runtimeCapabilityIsNative(queryForwardOperationCapability(layer,inputs,training)))return false;
         return PortableNativeOps::nms(inputs,outputs,layer);
@@ -1028,12 +1045,12 @@ bool PortableRuntime::forwardLayer(
             if (!d_col.alloc(col_sz * sizeof(float))) return false;
             if (!d_w.alloc(w_k * sizeof(float))) return false;
             if (!d_out.alloc(static_cast<size_t>(C_out) * HW * sizeof(float))) return false;
+            if (!d_w.copyFromHost(wc, w_k * sizeof(float))) return false;
             PortableNativeOps::launch("im2col", (col_sz + PortableNativeOps::threads - 1) / PortableNativeOps::threads,
                                     PortableNativeOps::threads, 
                 reinterpret_cast<const float*>(d_input.ptr), reinterpret_cast<float*>(d_col.ptr),
                 static_cast<int>(col_sz), H, W, k, str, pad, dil, H_out, W_out);
             if (cudaGetLastError() != cudaSuccess) return false;
-            if (!d_w.copyFromHost(wc, w_k * sizeof(float))) return false;
 
             // SGEMM: output_rm[C_out,HW] = weights_rm[C_out,K] × col_rm[K,HW]
             // cuBLAS (col-major): C[HW,C_out] = B[HW,K] × A[K,C_out]
@@ -1145,13 +1162,23 @@ bool PortableRuntime::backwardLayer(
     Layer& layer,
     bool training
 ) {
-    if (!referenceInputsFit(layer.getWeightsSize(), inputs) || !referenceInputsFit(0, grad_outputs)) return false;
+    if (!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training))) return false;
+    if (!isInitialized()) return false;
     DeviceScope device_scope(backend_,config_.device_index);
     (void)training;
-    if (!isInitialized()) return false;
     if (config_.disabled) return false;
     if (!supportsBackwardLayerType(layer.type_enum)) return false;
     if (!impl_ || !impl_->handle) return false;
+    if(layer.type_enum==LayerType::Constant){
+        if(!runtimeCapabilityIsNative(queryBackwardOperationCapability(layer,inputs,grad_outputs,training)))return false;
+        if(layer.trainable_parameter){
+            std::vector<float> gradients;
+            if(!PortableConstantOps::execute(layer,gradients,grad_outputs[0]))return false;
+            if(layer.grad_weights.size()!=layer.getWeightsSize())layer.grad_weights.assign(layer.getWeightsSize(),0.f);
+            for(size_t i=0;i<gradients.size();++i)layer.grad_weights[i]+=gradients[i];
+        }
+        grad_inputs.clear();return true;
+    }
     if (inputs.empty() || !inputs[0] || grad_outputs.empty() || !grad_outputs[0]) return false;
 
     if(layer.type_enum==LayerType::NMS){
@@ -1262,6 +1289,9 @@ bool PortableRuntime::backwardLayer(
             if (!d_go.copyFromHost(go.data(), go_elems * sizeof(float))) return false;
             if (!d_w.copyFromHost(w, w_elems * sizeof(float))) return false;
 
+            const bool has_bias=layer.use_bias && layer.getWeightsSize()>=w_elems+static_cast<size_t>(out_f);
+            std::vector<float> ones,bias_gradient;
+            if(has_bias){ones.assign(batch,1.f);bias_gradient.resize(out_f);if(!d_ones.copyFromHost(ones.data(),batch*sizeof(float)))return false;}
             const float alpha = 1.0f;
             const float beta = 0.0f;
 
@@ -1285,6 +1315,7 @@ bool PortableRuntime::backwardLayer(
                 return false;
             }
 
+            if(has_bias && cublasSgemm(impl_->handle,CUBLAS_OP_N,CUBLAS_OP_N,out_f,1,batch,&alpha,reinterpret_cast<const float*>(d_go.ptr),out_f,reinterpret_cast<const float*>(d_ones.ptr),batch,&beta,reinterpret_cast<float*>(d_bias.ptr),out_f)!=CUBLAS_STATUS_SUCCESS)return false;
             if (cudaDeviceSynchronize() != cudaSuccess) return false;
 
             grad_inputs.resize(1);
@@ -1292,6 +1323,7 @@ bool PortableRuntime::backwardLayer(
             std::vector<float> grad_w(w_elems, 0.0f);
             if (!d_gx.copyToHost(grad_inputs[0].data(), x_elems * sizeof(float))) return false;
             if (!d_gw.copyToHost(grad_w.data(), w_elems * sizeof(float))) return false;
+            if(has_bias && !d_bias.copyToHost(bias_gradient.data(),out_f*sizeof(float)))return false;
 
             if (layer.grad_weights.size() != layer.getWeightsSize()) {
                 layer.grad_weights.assign(layer.getWeightsSize(), 0.0f);
@@ -1302,10 +1334,6 @@ bool PortableRuntime::backwardLayer(
                 if (layer.grad_bias.size() != static_cast<size_t>(out_f)) {
                     layer.grad_bias.assign(static_cast<size_t>(out_f), 0.0f);
                 }
-                std::vector<float> ones(batch,1.f), bias_gradient(out_f);
-                if(!d_ones.copyFromHost(ones.data(),batch*sizeof(float)))return false;
-                if(cublasSgemm(impl_->handle,CUBLAS_OP_N,CUBLAS_OP_N,out_f,1,batch,&alpha,reinterpret_cast<const float*>(d_go.ptr),out_f,reinterpret_cast<const float*>(d_ones.ptr),batch,&beta,reinterpret_cast<float*>(d_bias.ptr),out_f)!=CUBLAS_STATUS_SUCCESS)return false;
-                if(!d_bias.copyToHost(bias_gradient.data(),out_f*sizeof(float)))return false;
                 for(int o=0;o<out_f;++o){layer.grad_bias[o]+=bias_gradient[o];layer.grad_weights[w_elems+o]+=bias_gradient[o];}
             }
             return true;

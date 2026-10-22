@@ -66,6 +66,8 @@ struct CudaRuntime::Impl {
             return cudaMemcpy(ptr, src, nbytes, cudaMemcpyHostToDevice) == cudaSuccess;
         }
 
+        // Blocking D2H completes preceding default-stream kernels and reports
+        // execution errors; a separate device-wide barrier is redundant.
         bool copyToHost(void* dst, size_t nbytes) {
             if (!ptr || nbytes > bytes) return false;
             return cudaMemcpy(dst, ptr, nbytes, cudaMemcpyDeviceToHost) == cudaSuccess;
@@ -84,10 +86,12 @@ struct CudaRuntime::Impl {
         }
     };
 
-    // Scratch is shared by consecutive Linear calls, never by tensor identity:
+    // Scratch is shared by Linear and elementwise calls, never by tensor identity:
     // parameters are uploaded every time, including external in-place updates.
-    std::array<DeviceBuf, 5> linear_scratch;
+    std::array<DeviceBuf, 6> linear_scratch;
     std::mutex linear_scratch_mutex;
+    std::array<DeviceBuf, 2> training_scratch;
+    std::mutex training_scratch_mutex;
     size_t ones_ready_count = 0;
     CachedBuf device_bias;
     CachedBuf device_ones;
@@ -194,19 +198,17 @@ __global__ static void cuda_binary_kernel(const float* a, const float* b, float*
     }
 }
 
-static bool cuda_run_unary(const std::vector<float>& input, std::vector<float>& output, CudaUnaryOp op, float alpha) {
+template<class Scratch>
+static bool cuda_run_unary(Scratch& scratch, std::mutex& mutex, const std::vector<float>& input, std::vector<float>& output, CudaUnaryOp op, float alpha) {
     const int n = static_cast<int>(input.size());
     if (n <= 0) return false;
 
-    float* d_in = nullptr;
-    float* d_out = nullptr;
+    std::lock_guard<std::mutex> lock(mutex);
     const size_t bytes = static_cast<size_t>(n) * sizeof(float);
-
-    if (cudaMalloc(&d_in, bytes) != cudaSuccess) return false;
-    if (cudaMalloc(&d_out, bytes) != cudaSuccess) {
-        cudaFree(d_in);
-        return false;
-    }
+    if (!scratch[0].alloc(bytes)) return false;
+    auto* d_in = static_cast<float*>(scratch[0].ptr);
+    if (!scratch[1].alloc(bytes)) return false;
+    auto* d_out = static_cast<float*>(scratch[1].ptr);
 
     bool ok = true;
     if (cudaMemcpy(d_in, input.data(), bytes, cudaMemcpyHostToDevice) != cudaSuccess) ok = false;
@@ -215,7 +217,7 @@ static bool cuda_run_unary(const std::vector<float>& input, std::vector<float>& 
         const int threads = 256;
         const int blocks = (n + threads - 1) / threads;
         cuda_unary_kernel<<<blocks, threads>>>(d_in, d_out, n, static_cast<int>(op), alpha);
-        if (cudaGetLastError() != cudaSuccess || cudaDeviceSynchronize() != cudaSuccess) ok = false;
+        if (cudaGetLastError() != cudaSuccess) ok = false;
     }
 
     if (ok) {
@@ -223,30 +225,22 @@ static bool cuda_run_unary(const std::vector<float>& input, std::vector<float>& 
         if (cudaMemcpy(output.data(), d_out, bytes, cudaMemcpyDeviceToHost) != cudaSuccess) ok = false;
     }
 
-    cudaFree(d_in);
-    cudaFree(d_out);
     return ok;
 }
 
-static bool cuda_run_binary(const std::vector<float>& a, const std::vector<float>& b, std::vector<float>& output, CudaBinaryOp op) {
+template<class Scratch>
+static bool cuda_run_binary(Scratch& scratch, std::mutex& mutex, const std::vector<float>& a, const std::vector<float>& b, std::vector<float>& output, CudaBinaryOp op) {
     const int n = static_cast<int>(a.size());
     if (n <= 0 || a.size() != b.size()) return false;
 
-    float* d_a = nullptr;
-    float* d_b = nullptr;
-    float* d_out = nullptr;
+    std::lock_guard<std::mutex> lock(mutex);
     const size_t bytes = static_cast<size_t>(n) * sizeof(float);
-
-    if (cudaMalloc(&d_a, bytes) != cudaSuccess) return false;
-    if (cudaMalloc(&d_b, bytes) != cudaSuccess) {
-        cudaFree(d_a);
-        return false;
-    }
-    if (cudaMalloc(&d_out, bytes) != cudaSuccess) {
-        cudaFree(d_a);
-        cudaFree(d_b);
-        return false;
-    }
+    if (!scratch[0].alloc(bytes)) return false;
+    auto* d_a = static_cast<float*>(scratch[0].ptr);
+    if (!scratch[1].alloc(bytes)) return false;
+    auto* d_b = static_cast<float*>(scratch[1].ptr);
+    if (!scratch[2].alloc(bytes)) return false;
+    auto* d_out = static_cast<float*>(scratch[2].ptr);
 
     bool ok = true;
     if (cudaMemcpy(d_a, a.data(), bytes, cudaMemcpyHostToDevice) != cudaSuccess) ok = false;
@@ -256,7 +250,7 @@ static bool cuda_run_binary(const std::vector<float>& a, const std::vector<float
         const int threads = 256;
         const int blocks = (n + threads - 1) / threads;
         cuda_binary_kernel<<<blocks, threads>>>(d_a, d_b, d_out, n, static_cast<int>(op));
-        if (cudaGetLastError() != cudaSuccess || cudaDeviceSynchronize() != cudaSuccess) ok = false;
+        if (cudaGetLastError() != cudaSuccess) ok = false;
     }
 
     if (ok) {
@@ -264,9 +258,6 @@ static bool cuda_run_binary(const std::vector<float>& a, const std::vector<float
         if (cudaMemcpy(output.data(), d_out, bytes, cudaMemcpyDeviceToHost) != cudaSuccess) ok = false;
     }
 
-    cudaFree(d_a);
-    cudaFree(d_b);
-    cudaFree(d_out);
     return ok;
 }
 
@@ -391,7 +382,8 @@ __global__ static void cuda_binary_backward_kernel(
     }
 }
 
-static bool cuda_run_unary_backward(
+template<class Scratch>
+static bool cuda_run_unary_backward(Scratch& scratch, std::mutex& mutex,
     const std::vector<float>& in,
     const std::vector<float>& grad_out,
     std::vector<float>& grad_in,
@@ -401,14 +393,14 @@ static bool cuda_run_unary_backward(
     const int n = static_cast<int>(in.size());
     if (n <= 0 || grad_out.size() != in.size()) return false;
 
-    float* d_in = nullptr;
-    float* d_go = nullptr;
-    float* d_gi = nullptr;
+    std::lock_guard<std::mutex> lock(mutex);
     const size_t bytes = static_cast<size_t>(n) * sizeof(float);
-
-    if (cudaMalloc(&d_in, bytes) != cudaSuccess) return false;
-    if (cudaMalloc(&d_go, bytes) != cudaSuccess) { cudaFree(d_in); return false; }
-    if (cudaMalloc(&d_gi, bytes) != cudaSuccess) { cudaFree(d_in); cudaFree(d_go); return false; }
+    if (!scratch[0].alloc(bytes)) return false;
+    auto* d_in = static_cast<float*>(scratch[0].ptr);
+    if (!scratch[1].alloc(bytes)) return false;
+    auto* d_go = static_cast<float*>(scratch[1].ptr);
+    if (!scratch[2].alloc(bytes)) return false;
+    auto* d_gi = static_cast<float*>(scratch[2].ptr);
 
     bool ok = true;
     if (cudaMemcpy(d_in, in.data(), bytes, cudaMemcpyHostToDevice) != cudaSuccess) ok = false;
@@ -418,7 +410,7 @@ static bool cuda_run_unary_backward(
         const int threads = 256;
         const int blocks = (n + threads - 1) / threads;
         cuda_unary_backward_kernel<<<blocks, threads>>>(d_in, d_go, d_gi, n, static_cast<int>(op), alpha);
-        if (cudaGetLastError() != cudaSuccess || cudaDeviceSynchronize() != cudaSuccess) ok = false;
+        if (cudaGetLastError() != cudaSuccess) ok = false;
     }
 
     if (ok) {
@@ -426,13 +418,11 @@ static bool cuda_run_unary_backward(
         if (cudaMemcpy(grad_in.data(), d_gi, bytes, cudaMemcpyDeviceToHost) != cudaSuccess) ok = false;
     }
 
-    cudaFree(d_in);
-    cudaFree(d_go);
-    cudaFree(d_gi);
     return ok;
 }
 
-static bool cuda_run_binary_backward(
+template<class Scratch>
+static bool cuda_run_binary_backward(Scratch& scratch, std::mutex& mutex,
     const std::vector<float>& a,
     const std::vector<float>& b,
     const std::vector<float>& grad_out,
@@ -443,18 +433,18 @@ static bool cuda_run_binary_backward(
     const int n = static_cast<int>(a.size());
     if (n <= 0 || b.size() != a.size() || grad_out.size() != a.size()) return false;
 
-    float* d_a = nullptr;
-    float* d_b = nullptr;
-    float* d_go = nullptr;
-    float* d_ga = nullptr;
-    float* d_gb = nullptr;
+    std::lock_guard<std::mutex> lock(mutex);
     const size_t bytes = static_cast<size_t>(n) * sizeof(float);
-
-    if (cudaMalloc(&d_a, bytes) != cudaSuccess) return false;
-    if (cudaMalloc(&d_b, bytes) != cudaSuccess) { cudaFree(d_a); return false; }
-    if (cudaMalloc(&d_go, bytes) != cudaSuccess) { cudaFree(d_a); cudaFree(d_b); return false; }
-    if (cudaMalloc(&d_ga, bytes) != cudaSuccess) { cudaFree(d_a); cudaFree(d_b); cudaFree(d_go); return false; }
-    if (cudaMalloc(&d_gb, bytes) != cudaSuccess) { cudaFree(d_a); cudaFree(d_b); cudaFree(d_go); cudaFree(d_ga); return false; }
+    if (!scratch[0].alloc(bytes)) return false;
+    auto* d_a = static_cast<float*>(scratch[0].ptr);
+    if (!scratch[1].alloc(bytes)) return false;
+    auto* d_b = static_cast<float*>(scratch[1].ptr);
+    if (!scratch[2].alloc(bytes)) return false;
+    auto* d_go = static_cast<float*>(scratch[2].ptr);
+    if (!scratch[3].alloc(bytes)) return false;
+    auto* d_ga = static_cast<float*>(scratch[3].ptr);
+    if (!scratch[4].alloc(bytes)) return false;
+    auto* d_gb = static_cast<float*>(scratch[4].ptr);
 
     bool ok = true;
     if (cudaMemcpy(d_a, a.data(), bytes, cudaMemcpyHostToDevice) != cudaSuccess) ok = false;
@@ -465,7 +455,7 @@ static bool cuda_run_binary_backward(
         const int threads = 256;
         const int blocks = (n + threads - 1) / threads;
         cuda_binary_backward_kernel<<<blocks, threads>>>(d_a, d_b, d_go, d_ga, d_gb, n, static_cast<int>(op));
-        if (cudaGetLastError() != cudaSuccess || cudaDeviceSynchronize() != cudaSuccess) ok = false;
+        if (cudaGetLastError() != cudaSuccess) ok = false;
     }
 
     if (ok) {
@@ -475,11 +465,6 @@ static bool cuda_run_binary_backward(
         if (ok && cudaMemcpy(grad_b.data(), d_gb, bytes, cudaMemcpyDeviceToHost) != cudaSuccess) ok = false;
     }
 
-    cudaFree(d_a);
-    cudaFree(d_b);
-    cudaFree(d_go);
-    cudaFree(d_ga);
-    cudaFree(d_gb);
     return ok;
 }
 #endif
@@ -1075,7 +1060,10 @@ bool CudaRuntime::forwardLayer(
             if (ops < static_cast<long long>(std::max(0, config_.linear_min_ops))) break;
 
 #ifdef ENABLE_CUDA
-            Impl::DeviceBuf d_a, d_b, d_c;
+            std::lock_guard<std::mutex> scratch_lock(impl_->linear_scratch_mutex);
+            auto& d_a = impl_->linear_scratch[0];
+            auto& d_b = impl_->linear_scratch[1];
+            auto& d_c = impl_->linear_scratch[2];
             if (!d_a.alloc(static_cast<size_t>(batches) * a_batch_elems * sizeof(float))) break;
             if (!d_b.alloc(static_cast<size_t>(batches) * b_batch_elems * sizeof(float))) break;
             if (!d_c.alloc(static_cast<size_t>(batches) * c_batch_elems * sizeof(float))) break;
@@ -1112,7 +1100,6 @@ bool CudaRuntime::forwardLayer(
                 }
             }
             if (!ok) break;
-            if (cudaDeviceSynchronize() != cudaSuccess) break;
 
             outputs.resize(1);
             outputs[0].resize(static_cast<size_t>(batches) * c_batch_elems);
@@ -1147,7 +1134,10 @@ bool CudaRuntime::forwardLayer(
             if (ops < static_cast<long long>(std::max(0, config_.linear_min_ops))) break;
 
 #ifdef ENABLE_CUDA
-            Impl::DeviceBuf d_a, d_b, d_c;
+            std::lock_guard<std::mutex> scratch_lock(impl_->linear_scratch_mutex);
+            auto& d_a = impl_->linear_scratch[0];
+            auto& d_b = impl_->linear_scratch[1];
+            auto& d_c = impl_->linear_scratch[2];
             if (!d_a.alloc(static_cast<size_t>(batches) * a_batch_elems * sizeof(float))) break;
             if (!d_b.alloc(static_cast<size_t>(batches) * b_batch_elems * sizeof(float))) break;
             if (!d_c.alloc(static_cast<size_t>(batches) * c_batch_elems * sizeof(float))) break;
@@ -1182,7 +1172,6 @@ bool CudaRuntime::forwardLayer(
                 }
             }
             if (!ok) break;
-            if (cudaDeviceSynchronize() != cudaSuccess) break;
 
             outputs.resize(1);
             outputs[0].resize(static_cast<size_t>(batches) * c_batch_elems);
@@ -1254,7 +1243,11 @@ bool CudaRuntime::forwardLayer(
 
             // Im2col runs on the device too: col[K, HW].
             const size_t col_sz = static_cast<size_t>(K) * HW;
-            Impl::DeviceBuf d_input, d_col, d_w, d_out;
+            std::lock_guard<std::mutex> scratch_lock(impl_->linear_scratch_mutex);
+            auto& d_input = impl_->linear_scratch[0];
+            auto& d_col = impl_->linear_scratch[1];
+            auto& d_w = impl_->linear_scratch[2];
+            auto& d_out = impl_->linear_scratch[3];
             if (!d_input.alloc(xc.size() * sizeof(float))) return false;
             if (!d_input.copyFromHost(xc.data(), xc.size() * sizeof(float))) return false;
             if (!d_col.alloc(col_sz * sizeof(float))) return false;
@@ -1282,7 +1275,8 @@ bool CudaRuntime::forwardLayer(
             // Bias: d_out_cm[HW,C_out] += ones_HW[HW] × bias[C_out]^T  (cublasSger)
             if (layer.use_bias) {
                 std::vector<float> ones_hw(static_cast<size_t>(HW), 1.0f);
-                Impl::DeviceBuf d_bias, d_ones_hw;
+                auto& d_bias = impl_->linear_scratch[4];
+                auto& d_ones_hw = impl_->linear_scratch[5];
                 if (!d_bias.alloc(static_cast<size_t>(C_out) * sizeof(float))) return false;
                 if (!d_ones_hw.alloc(static_cast<size_t>(HW) * sizeof(float))) return false;
                 if (!d_bias.copyFromHost(wc + w_k, static_cast<size_t>(C_out) * sizeof(float))) return false;
@@ -1293,7 +1287,6 @@ bool CudaRuntime::forwardLayer(
                         reinterpret_cast<float*>(d_out.ptr), HW) != CUBLAS_STATUS_SUCCESS) return false;
             }
 
-            if (cudaDeviceSynchronize() != cudaSuccess) return false;
             outputs.resize(1);
             outputs[0].resize(static_cast<size_t>(C_out) * HW);
             if (!d_out.copyToHost(outputs[0].data(), static_cast<size_t>(C_out) * HW * sizeof(float))) return false;
@@ -1318,7 +1311,7 @@ bool CudaRuntime::forwardLayer(
             const CudaBinaryOp op = static_cast<CudaBinaryOp>(op_code);
 
             outputs.resize(1);
-            if (!cuda_run_binary(a, b, outputs[0], op)) return false;
+            if (!cuda_run_binary(impl_->linear_scratch, impl_->linear_scratch_mutex, a, b, outputs[0], op)) return false;
             return true;
             } while (false);
             break;
@@ -1346,7 +1339,7 @@ bool CudaRuntime::forwardLayer(
             const CudaUnaryOp op = static_cast<CudaUnaryOp>(op_code);
 
             outputs.resize(1);
-            if (!cuda_run_unary(in, outputs[0], op, alpha)) return false;
+            if (!cuda_run_unary(impl_->linear_scratch, impl_->linear_scratch_mutex, in, outputs[0], op, alpha)) return false;
             return true;
             } while (false);
             break;
@@ -1569,7 +1562,12 @@ bool CudaRuntime::backwardLayer(
             const size_t c_elems = static_cast<size_t>(batches) * c_batch;
             if (A.size() != a_elems || B.size() != b_elems || go.size() != c_elems) return false;
 
-            Impl::DeviceBuf d_a, d_b, d_go, d_ga, d_gb;
+            std::lock_guard<std::mutex> scratch_lock(impl_->linear_scratch_mutex);
+            auto& d_a = impl_->linear_scratch[0];
+            auto& d_b = impl_->linear_scratch[1];
+            auto& d_go = impl_->linear_scratch[2];
+            auto& d_ga = impl_->linear_scratch[3];
+            auto& d_gb = impl_->linear_scratch[4];
             if (!d_a.alloc(a_elems * sizeof(float))) return false;
             if (!d_b.alloc(b_elems * sizeof(float))) return false;
             if (!d_go.alloc(c_elems * sizeof(float))) return false;
@@ -1609,7 +1607,6 @@ bool CudaRuntime::backwardLayer(
                 }
             }
 
-            if (cudaDeviceSynchronize() != cudaSuccess) return false;
 
             grad_inputs.resize(2);
             grad_inputs[0].resize(a_elems);
@@ -1635,7 +1632,7 @@ bool CudaRuntime::backwardLayer(
             const CudaBinaryOp op = static_cast<CudaBinaryOp>(op_code);
 
             grad_inputs.resize(2);
-            return cuda_run_binary_backward(a, b, go, grad_inputs[0], grad_inputs[1], op);
+            return cuda_run_binary_backward(impl_->linear_scratch, impl_->linear_scratch_mutex, a, b, go, grad_inputs[0], grad_inputs[1], op);
         }
 
         case LayerType::ReLU:
@@ -1659,7 +1656,7 @@ bool CudaRuntime::backwardLayer(
             const CudaUnaryOp op = static_cast<CudaUnaryOp>(op_code);
 
             grad_inputs.resize(1);
-            return cuda_run_unary_backward(in, go, grad_inputs[0], op, alpha);
+            return cuda_run_unary_backward(impl_->linear_scratch, impl_->linear_scratch_mutex, in, go, grad_inputs[0], op, alpha);
         }
 
         case LayerType::Conv2d: {
@@ -1738,19 +1735,21 @@ bool CudaRuntime::supportsOptimizer() const {
 bool CudaRuntime::optimizerStep(const RuntimeOptimizerRequest& request) {
 #ifdef ENABLE_CUDA
     if(!supportsOptimizer() || (!optimizerDeviceSizeFits(request) || !optimizerRequestValid(request)) || cudaSetDevice(config_.device_index)!=cudaSuccess)return false;
-    auto memory=optimizerPack(request);auto args=optimizerParameters(request);
-    Impl::DeviceBuf data,parameters;
+    auto memory=optimizerPack(request, true);auto args=optimizerParameters(request, true);
+    std::lock_guard<std::mutex> lock(impl_->training_scratch_mutex);
+    auto& data = impl_->training_scratch[0];
+    auto& parameters = impl_->training_scratch[1];
     if(!data.alloc(memory.size()*4) || !parameters.alloc(args.size()*4) ||
-       !data.copyFromHost(memory.data(),memory.size()*4) || !parameters.copyFromHost(args.data(),args.size()*4))return false;
+       !data.copyFromHost(memory.data(),optimizerInputCount(args)*sizeof(float)) || !parameters.copyFromHost(args.data(),args.size()*4))return false;
     const int n=int(request.count);
     std::vector<int> passes{0};if(args[2]==4 || args[2]==8){passes.push_back(1);passes.push_back(3);passes.push_back(2);}
     for(int pass:passes) {
-        if(cudaMemcpy(parameters.ptr,&pass,4,cudaMemcpyHostToDevice)!=cudaSuccess)return false;
-        mimir_optimizer<<<pass==3?1:(n+255)/256,256>>>(static_cast<float*>(data.ptr),static_cast<int*>(parameters.ptr));
-        if(!CudaNativeOps::finished())return false;
+        mimir_optimizer<<<pass==3?1:(n+255)/256,256>>>(static_cast<float*>(data.ptr),static_cast<int*>(parameters.ptr),pass);
+        if(cudaGetLastError()!=cudaSuccess)return false;
     }
-    if(!data.copyToHost(memory.data(),memory.size()*4))return false;
-    return optimizerCommit(request,memory);
+    const size_t result_count = optimizerResultCount(args);
+    if(!data.copyToHost(memory.data(),result_count*sizeof(float)))return false;
+    return optimizerCommit(request,memory,true);
 #else
     (void)request;return false;
 #endif
@@ -1761,13 +1760,14 @@ bool CudaRuntime::reconstructionLoss(const RuntimeLossGrad::Request& r,RuntimeLo
 #ifdef ENABLE_CUDA
     if(!supportsReconstructionLoss() || !RuntimeLossGrad::deviceSizeFits(r) || cudaSetDevice(config_.device_index)!=cudaSuccess)return false;
     auto memory=RuntimeLossGrad::pack(r);auto args=RuntimeLossGrad::parameters(r);
-    Impl::DeviceBuf data,parameters;
+    std::lock_guard<std::mutex> lock(impl_->training_scratch_mutex);
+    auto& data = impl_->training_scratch[0];
+    auto& parameters = impl_->training_scratch[1];
     if(!data.alloc(memory.size()*4) || !parameters.alloc(args.size()*4) ||
        !data.copyFromHost(memory.data(),memory.size()*4) || !parameters.copyFromHost(args.data(),args.size()*4))return false;
     for(int pass:RuntimeLossGrad::passes(args)) {
-        if(cudaMemcpy(parameters.ptr,&pass,4,cudaMemcpyHostToDevice)!=cudaSuccess)return false;
-        mimir_reconstruction<<<pass==91?1:(args[1]+255)/256,256>>>(static_cast<float*>(data.ptr),static_cast<int*>(parameters.ptr));
-        if(!CudaNativeOps::finished())return false;
+        mimir_reconstruction<<<pass==91?1:(args[1]+255)/256,256>>>(static_cast<float*>(data.ptr),static_cast<int*>(parameters.ptr),pass);
+        if(cudaGetLastError()!=cudaSuccess)return false;
     }
     if(!data.copyToHost(memory.data(),memory.size()*4))return false;
     return RuntimeLossGrad::unpack(r,memory,out);

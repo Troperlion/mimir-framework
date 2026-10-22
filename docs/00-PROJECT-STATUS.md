@@ -1,6 +1,6 @@
 # État réel du projet
 
-Cette page est la carte de maturité du checkout Mímir 3.5.0 au 1 octobre 2026.
+Cette page est la carte de maturité du checkout Mímir 3.6.0 au 22 octobre 2026.
 Elle distingue ce qui est compilé et exploitable de ce qui est partiel, en test,
 prototype ou simple placeholder. Une entrée dans le registre, un fichier source
 ou un bouton d'interface ne constitue pas à lui seul une garantie de production.
@@ -45,12 +45,9 @@ Le chemin le plus reproductible aujourd'hui est :
 6. valider avec les tests CTest ciblés.
 
 ```bash
-cmake -S . -B build -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DMIMIR_ENABLE_TESTS=ON \
-  -DENABLE_VULKAN=OFF \
-  -DENABLE_OPENCL=OFF \
-  -DENABLE_SFML=OFF
+./config.sh --gui NONE --non-interactive --generator Ninja \
+  --enable MIMIR_ENABLE_TESTS \
+  --disable ENABLE_VULKAN --disable ENABLE_OPENCL
 cmake --build build -j"$(nproc)"
 ctest --test-dir build -R 'RegistryTest|LuaTest|SerializationTest' \
   --output-on-failure
@@ -65,7 +62,7 @@ disponibilité d'un GPU, de SFML, de FFmpeg ou d'un bridge externe.
 | --- | --- | --- | --- |
 | Graphe `Model` et layers | Actif, exploitable | Construction C++, forward/backward, paramètres nommés, routage nommé, entraînement ciblé. | La couverture backward dépend du type de layer et du runtime. |
 | Registry | Actif, exploitable | Création par nom, config par défaut, alias `sd3.5`, auto-enregistrement MPK. | « enregistré » ne veut pas dire « modèle complet ». |
-| Planner | Expérimental, en test | Plans legacy/static/cost, réutilisation de buffers, fusion et inspection JSON selon variables. | Équivalence et coût sont testés sur des cas ciblés, pas sur tous les graphes. |
+| Planner | Expérimental, en test | Plans legacy/static/cost, calibration bornée des opérations natives, réutilisation de buffers, fusion et inspection JSON selon variables. | Équivalence et coût sont testés sur des cas ciblés, pas sur tous les graphes. |
 | RuntimeRouter | Actif, en test | Classe les capacités en `Unsupported`, `HostFallback`, `Native`, `NativeOptimized`; planifie forward et backward. | Le fallback hôte peut masquer une absence de kernel GPU natif. |
 | CPU | Actif, exploitable | Référence générale, OpenMP, SIMD selon compilation, forward/backward étendus. | Certains chemins restent float32 internes ou coûtent beaucoup de mémoire. |
 | Mémoire | Actif, exploitable | `MemoryGuard`, allocator dynamique, scratchpads, métriques et limites explicites. | Les politiques strictes doivent être dimensionnées pour la charge réelle. |

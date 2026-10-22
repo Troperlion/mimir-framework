@@ -40,15 +40,29 @@ class NotebookIntegrity(unittest.TestCase):
                     self.assertIn(operation, values['CPP_SOURCE'])
 
     def test_runtime_helper_works_with_old_or_missing_checkout(self):
-        source = next(s for s in sources() if 'MICRO_SUITE_SOURCE = ' in s)
+        source = next(s for s in sources() if 'MICRO_SUITE_SOURCE = ' in s or 'helper.write_text(' in s)
         values = literals(source)
-        self.assertEqual(values['MICRO_SUITE_SOURCE'],
-                         (ROOT / 'scripts/benchmarks/colab_micro_suite.py').read_text())
-        prefix = source[source.index('import types'):source.index('MICRO_ENTRIES=')]
         with tempfile.TemporaryDirectory() as directory:
             scope = dict(RUN_DIR=Path(directory), REPO=Path(directory) / 'old-snapshot')
-            exec(compile(prefix, 'notebook-helper', 'exec'), scope)
-            module = scope['MICRO_SUITE']
+            if 'MICRO_SUITE_SOURCE' in values:
+                self.assertEqual(values['MICRO_SUITE_SOURCE'],
+                                 (ROOT / 'scripts/benchmarks/colab_micro_suite.py').read_text())
+                prefix = source[source.index('import types'):source.index('MICRO_ENTRIES=')]
+                exec(compile(prefix, 'notebook-helper', 'exec'), scope)
+                module = scope['MICRO_SUITE']
+                helper_path = Path(directory) / 'colab_micro_suite.py'
+            else:
+                # A manually pasted bootstrap is also valid: exercise its actual
+                # file creation against an old checkout instead of assuming a cell prefix.
+                write = next(n for n in ast.parse(source).body if isinstance(n, ast.Expr)
+                             and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Attribute)
+                             and n.value.func.attr == 'write_text')
+                prefix = ''.join(source.splitlines(True)[:write.end_lineno])
+                exec(compile(prefix, 'notebook-helper', 'exec'), scope)
+                helper_path = scope['helper']
+                import types
+                module = types.ModuleType('manual_notebook_helper')
+                exec(compile(helper_path.read_text(), str(helper_path), 'exec'), module.__dict__)
             entries = module.contenders(['mimir','jax'], 'cuda', ['vulkan','opencl'])
             self.assertEqual([e['label'] for e in entries], ['mimir-vulkan','mimir-opencl','jax'])
             for entry in entries[:2]:
@@ -59,10 +73,10 @@ class NotebookIntegrity(unittest.TestCase):
                     module.validate_identity(row, entry, 'cuda', 'test')
             with self.assertRaises(ValueError):module.contenders(['mimir'], 'cuda', [])
             self.assertEqual(module.contenders(['mimir'], 'cpu', [])[0]['label'], 'mimir')
-            self.assertTrue((Path(directory) / 'colab_micro_suite.py').is_file())
+            self.assertTrue(helper_path.is_file())
 
     def test_embedded_optimized_sources_and_validation_targets(self):
-        expected = ['MatMulBackward', 'BatchMatMulForward', 'FlatJoin', 'AttentionTiled']
+        expected = ['MatMulBackward', 'BatchMatMulForward', 'FlatJoin', 'AttentionTiled', 'OptimizerSelection']
         for name in ('Colab-test.ipynb', 'Colab-bench-multi-framework.ipynb'):
             cells = json.loads((ROOT / name).read_text())['cells']
             code = [''.join(c['source']) for c in cells if c['cell_type'] == 'code']
@@ -73,10 +87,20 @@ class NotebookIntegrity(unittest.TestCase):
             with tarfile.open(fileobj=io.BytesIO(gzip.decompress(packed))) as archive:
                 manifest = json.load(archive.extractfile('colab-source-manifest.json'))
                 for path in ('src/runtimes/cpu/MatMulKernels.hpp', 'src/runtimes/cpu/FlatJoinKernels.hpp',
-                             'src/runtimes/cpu/LayerOps.hpp', 'src/runtimes/cpu/RuntimeLayerDispatch.hpp'):
+                             'src/runtimes/cpu/LayerOps.hpp', 'src/runtimes/cpu/RuntimeLayerDispatch.hpp',
+                             'src/Planning/ExecutionCalibration.cpp', 'src/runtimes/cpu/ConvolutionKernels.hpp',
+                             'src/runtimes/cpu/HardwareOpt.hpp', 'src/runtimes/portable/PortableDevice.cpp',
+                             'scripts/benchmarks/colab_native_suite.py',
+                             'scripts/benchmarks/benchmark_whole_model.cpp',
+                             'scripts/benchmarks/benchmark_vgg16_whole_model.cpp',
+                             'scripts/benchmarks/colab_real_model.cpp'):
                     digest = hashlib.sha256(archive.extractfile(path).read()).hexdigest()
                     self.assertEqual(digest, manifest['files'][path])
                     self.assertEqual(digest, hashlib.sha256((ROOT / path).read_bytes()).hexdigest())
+                for path, expected_digest in manifest['files'].items():
+                    self.assertEqual(hashlib.sha256(archive.extractfile(path).read()).hexdigest(), expected_digest, path)
+                    self.assertEqual(hashlib.sha256((ROOT / path).read_bytes()).hexdigest(), expected_digest, path)
+                self.assertEqual(archive.extractfile('VERSION').read().decode().strip(), (ROOT / 'VERSION').read_text().strip())
             build = next(s for s in code if s.startswith('TEST_TARGETS='))
             validation = next(s for s in code if 'REFERENCE_TARGETS=' in s)
             for target in expected:

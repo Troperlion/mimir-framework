@@ -8,6 +8,9 @@
 #include <cstdlib>
 #include <algorithm>
 #include <vector>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 #if !defined(_WIN32)
 #include <sys/mman.h>   // madvise, HugePages
 #include <unistd.h>
@@ -16,6 +19,18 @@
 // ===== FP16 STORAGE + F16C =====
 
 namespace HardwareOpt {
+
+// Keep small tiled GEMMs inside one worker. A large global thread setting
+// otherwise launches a full team for every small convolution tile.
+inline int matmul_workers(size_t rows,size_t columns,size_t reduction) {
+    if(!rows || !columns || !reduction)return 1;
+#ifdef _OPENMP
+    const size_t workers=std::min(rows,std::max(size_t(1),rows*columns*reduction/(1024*1024)));
+    return static_cast<int>(std::min(size_t(omp_get_max_threads()),workers));
+#else
+    return 1;
+#endif
+}
 
 #if defined(_MSC_VER)
 #define MIMIR_RESTRICT __restrict
@@ -133,7 +148,8 @@ inline void matmul_fma_saturated_impl(float* MIMIR_RESTRICT C,
     const size_t vecN8 = N & ~static_cast<size_t>(7);
     const size_t vecN24 = (N / 24) * 24;
 
-    #pragma omp parallel for if(M * N * K > 262144) schedule(static)
+    const int workers=matmul_workers(M,N,K);
+    #pragma omp parallel for if(workers>1) num_threads(workers) schedule(static)
     for (size_t i = 0; i < M; ++i) {
         // 24-wide unroll (3x8) for FMA saturation
         for (size_t j = 0; j < vecN24; j += 24) {

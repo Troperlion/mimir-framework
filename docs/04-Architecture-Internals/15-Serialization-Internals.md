@@ -102,3 +102,21 @@ Le code convertit `SaveOptions` → `DebugJsonOptions` (voir `Serialization.cpp`
 - [Page précédente : Internals : layers, `LayerType`, `LayerOps` et layouts de poids (C++)](14-Layers-And-Ops.md)
 - [Index de la documentation](../00-INDEX.md)
 - [Page suivante : Internals : Tokenizer / ConditioningEncoder (C++)](16-Tokenizer-Encoder-Internals.md)
+
+
+## États d’optimizer en 3.6.0
+
+`src/Serialization/CheckpointState.hpp` conserve le schéma 2 et les noms des
+tenseurs de moments `m` / `v`. Les buffers de calcul device, offsets, gradients,
+scratch de réduction et caches de routage ne sont pas des états de reprise.
+Les états sauvegardés sont canoniques et indépendants du backend.
+
+Les métadonnées additives `state_layout="canonical_m_v_v1"`,
+`state_dtype="F32"` et `active_moments` décrivent les moments attendus par
+l’optimizer. Leur absence reste compatible avec les métadonnées historiques ;
+une valeur présente mais incompatible est refusée. Le lecteur accepte un type
+numérique, un type nommé ou le champ `name` de compatibilité. Le DebugJSON
+présente le type nommé et conserve également son identifiant sous `type_id`.
+
+`SerializationTest.ActiveState`, `SerializationTest.RawFolderModel` et
+`SerializationTest.SafeTensorsModel` vérifient ces parcours de sauvegarde/reprise.

@@ -11,6 +11,7 @@
 
 #include "test_utils.hpp"
 #include "Model.hpp"
+#include "runtimes/cpu/ConvolutionKernels.hpp"
 
 #define CHECK(cond) do { if (!(cond)) { std::cerr << "FATAL: " #cond "\n"; std::abort(); } } while(0)
 
@@ -68,6 +69,27 @@ static std::vector<float> run_conv2d_cpu(
 }
 
 int main() {
+    // Finite differences cover packed forward/backward, border windows, stride
+    // and dilation, including the partially filled final tile.
+    for(int stride:{1,2})for(int dilation:{1,2}) {
+        Layer layer;layer.use_bias=true;layer.weights.resize(2*2*9+2);
+        for(size_t i=0;i<layer.weights.size();++i)layer.weights[i]=std::sin(float(i)*.37f)*.1f;
+        std::vector<float> x(2*7*9);for(size_t i=0;i<x.size();++i)x[i]=std::cos(float(i)*.21f)*.3f;
+        auto forward=[&](){std::vector<float> y;CpuConvolution::forward(x,y,layer.weights.data(),layer.weights.data()+36,7,9,2,2,3,stride,2,dilation);return y;};
+        auto output=forward();std::vector<float> go(output.size());
+        for(size_t i=0;i<go.size();++i)go[i]=std::sin(float(i)*.43f)*.2f;
+        auto objective=[&](){auto y=forward();double sum=0;for(size_t i=0;i<y.size();++i)sum+=double(y[i])*go[i];return sum;};
+        std::vector<float> dx;CpuConvolution::backward(x,go,dx,layer,7,9,2,2,3,stride,2,dilation);
+        constexpr float epsilon=.001f;
+        for(size_t i:{size_t(0),size_t(8),size_t(35),size_t(36),size_t(37)}){
+            const float saved=layer.weights[i];layer.weights[i]=saved+epsilon;const auto plus=objective();layer.weights[i]=saved-epsilon;const auto minus=objective();layer.weights[i]=saved;
+            TASSERT_NEAR(layer.grad_weights[i],float((plus-minus)/(2*epsilon)),2e-4f);
+        }
+        for(size_t i:{size_t(0),size_t(31),size_t(125)}){
+            const float saved=x[i];x[i]=saved+epsilon;const auto plus=objective();x[i]=saved-epsilon;const auto minus=objective();x[i]=saved;
+            TASSERT_NEAR(dx[i],float((plus-minus)/(2*epsilon)),2e-4f);
+        }
+    }
     // =========================================================================
     // A. Kernel 1×1 = 2 : sortie = 2 × entrée
     // =========================================================================

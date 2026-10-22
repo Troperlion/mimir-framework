@@ -1,6 +1,9 @@
 #version 450
-layout(local_size_x=1)in;
-layout(set=0,binding=0,std430)buffer Data{float memory[];};
+layout(local_size_x=256)in;
+shared float normScratch[512];
+layout(constant_id=0)const int specializedOperation=-1;
+layout(set=0,binding=0,std430)coherent buffer Data{float memory[];};
+layout(set=0,binding=0,std430)coherent buffer DataBits{uint integer_memory[];};
 layout(set=0,binding=1,std430)readonly buffer Params{int arguments[];};
 struct GRecurrent { int steps; int input_value; int hidden; int gates; int parameters; int workspace; };
 struct GAttention { int ed; int ked; int heads; int q; int k; bool cross; bool causal; int qbias; int obias; int mainParameters; int output_value; };
@@ -22,8 +25,21 @@ void sequence_swap(inout SequenceVector a,inout SequenceVector b){SequenceVector
 void sequence_copy(int first,int last,int output_value){while(first!=last){memory[output_value++]=memory[first++];}}
 float sequence_dot(int w,int x,int n){float s=0;for(int i=0;i<n;++i)s+=memory[w+i]*memory[x+i];return s;}
 float reduce_sum(float value,int scratch){return value;}
+float parallel_sum(float value){
+ normScratch[int(gl_LocalInvocationID.x)]=value;barrier();
+ for(int stride=128;stride>0;stride/=2){if(int(gl_LocalInvocationID.x)<stride)normScratch[int(gl_LocalInvocationID.x)]+=normScratch[int(gl_LocalInvocationID.x)+stride];barrier();}
+ float result=normScratch[0];barrier();return result;
+}
 float reduce_max(float value,int scratch){return value;}
-void atomicAdd(int at,float value){memory[at]+=value;}
+float parallel_max(float value){
+ normScratch[int(gl_LocalInvocationID.x)]=value;barrier();
+ for(int stride=128;stride>0;stride/=2){if(int(gl_LocalInvocationID.x)<stride)normScratch[int(gl_LocalInvocationID.x)]=max(normScratch[int(gl_LocalInvocationID.x)],normScratch[int(gl_LocalInvocationID.x)+stride]);barrier();}
+ float result=normScratch[0];barrier();return result;
+}
+void atomicAdd(int at,float value){
+ uint old=atomicCompSwap(integer_memory[at],0u,0u);
+ for(;;){uint expected=old;old=atomicCompSwap(integer_memory[at],expected,floatBitsToUint(uintBitsToFloat(expected)+value));if(old==expected)return;}
+}
 bool truth(bool v){return v;}
 bool truth(int v){return v!=0;}
 bool truth(float v){return v!=0.0;}
@@ -37,16 +53,16 @@ void norm_forward(int x,int weights,int y,int normalized,int invstd,int group_si
     int scratch=0;
     int base = blockIdx_x * group_size;
     float sum = 0;
-    for (int i = threadIdx_x; i < group_size; i += 1) sum += memory[x+(base + i)];
-    float mean = reduce_sum(sum, scratch) / group_size;
+    for (int i = threadIdx_x; i < group_size; i +=blockDim_x) sum += memory[x+(base + i)];
+    float mean = parallel_sum(sum) / group_size;
     float variance = 0;
-    for (int i = threadIdx_x; i < group_size; i += 1) {
+    for (int i = threadIdx_x; i < group_size; i +=blockDim_x) {
         float d = memory[x+(base + i)] - mean;
         variance += d * d;
     }
-    float inv = rsqrtf(reduce_sum(variance, scratch) / group_size + eps);
+    float inv = rsqrtf(parallel_sum(variance) / group_size + eps);
     if (threadIdx_x == 0 && invstd!=0) memory[invstd+(blockIdx_x)] = inv;
-    for (int i = threadIdx_x; i < group_size; i += 1) {
+    for (int i = threadIdx_x; i < group_size; i +=blockDim_x) {
         int index = base + i;
         int channel = (index / spatial) % channels;
         float value = (memory[x+(index)] - mean) * inv;
@@ -58,15 +74,15 @@ void norm_backward(int xhat,int invstd,int dy,int weights,int dx,int group_size,
     int scratch=0;
     int base = blockIdx_x * group_size;
     float sum = 0, product = 0;
-    for (int i = threadIdx_x; i < group_size; i += 1) {
+    for (int i = threadIdx_x; i < group_size; i +=blockDim_x) {
         int index = base + i;
         float g = memory[dy+(index)] * (weights!=0 ? memory[weights+((index / spatial) % channels)] : 1.);
         sum += g;
         product += g * memory[xhat+(index)];
     }
-    float s1 = reduce_sum(sum, scratch);
-    float s2 = reduce_sum(product, scratch);
-    for (int i = threadIdx_x; i < group_size; i += 1) {
+    float s1 = parallel_sum(sum);
+    float s2 = parallel_sum(product);
+    for (int i = threadIdx_x; i < group_size; i +=blockDim_x) {
         int index = base + i;
         float g = memory[dy+(index)] * (weights!=0 ? memory[weights+((index / spatial) % channels)] : 1.);
         memory[dx+(index)] = memory[invstd+(blockIdx_x)] * (g - s1 / group_size - memory[xhat+(index)] * s2 / group_size);
@@ -76,13 +92,13 @@ void channel_gradient(int dy,int xhat,int dw,int db,int spatial){
     int scratch=0;
     int channel = blockIdx_x;
     float sum = 0, product = 0;
-    for (int s = threadIdx_x; s < spatial; s += 1) {
+    for (int s = threadIdx_x; s < spatial; s +=blockDim_x) {
         int index = channel * spatial + s;
         sum += memory[dy+(index)];
         if(truth(xhat)) product += memory[dy+(index)] * memory[xhat+(index)];
     }
-    float bias = reduce_sum(sum, scratch);
-    float gamma = reduce_sum(product, scratch);
+    float bias = parallel_sum(sum);
+    float gamma = parallel_sum(product);
     if (threadIdx_x == 0) {
         if(truth(dw)) memory[dw+(channel)] = gamma;
         if(truth(db)) memory[db+(channel)] = bias;
@@ -132,18 +148,18 @@ void softmax_kernel(int x,int dy,int y,int axis_size,int inner,bool logarithmic)
     int row = blockIdx_x;
     int base = (row / inner) * axis_size * inner + row % inner;
     float maximum = -uintBitsToFloat(0x7f800000u);
-    for (int a = threadIdx_x; a < axis_size; a += 1) maximum = max(maximum, memory[x+(base+a*inner)]);
-    maximum = reduce_max(maximum, scratch);
+    for (int a = threadIdx_x; a < axis_size; a +=blockDim_x) maximum = max(maximum, memory[x+(base+a*inner)]);
+    maximum = parallel_max(maximum);
     float sum = 0;
-    for (int a = threadIdx_x; a < axis_size; a += 1) sum += exp(memory[x+(base+a*inner)]-maximum);
-    sum = reduce_sum(sum, scratch);
+    for (int a = threadIdx_x; a < axis_size; a +=blockDim_x) sum += exp(memory[x+(base+a*inner)]-maximum);
+    sum = parallel_sum(sum);
     float reduction = 0;
     if(truth(dy)) {
-        for (int a = threadIdx_x; a < axis_size; a += 1)
+        for (int a = threadIdx_x; a < axis_size; a +=blockDim_x)
             reduction += memory[dy+(base+a*inner)] * ( truth(logarithmic) ? 1. : exp(memory[x+(base+a*inner)]-maximum)/sum);
-        reduction = reduce_sum(reduction, scratch);
+        reduction = parallel_sum(reduction);
     }
-    for (int a = threadIdx_x; a < axis_size; a += 1) {
+    for (int a = threadIdx_x; a < axis_size; a +=blockDim_x) {
         int i = base+a*inner;
         float probability = exp(memory[x+(i)]-maximum)/sum;
         // Preserve the existing CPU LogSoftmax backward contract, which uses
@@ -175,15 +191,15 @@ void col2im(int col,int dx,int count,int h,int w,int k,int stride,int pad,int di
 }
 void row_norm_kernel(int x,int w,int dy,int y,int xhat,int width,float eps,bool rms,bool bias){
     int scratch=0;int base=blockIdx_x*width;float sum=0;
-    if(!truth(rms))for(int i=threadIdx_x;i<width;i+=1)sum+=memory[x+(base+i)];
-    float mean=truth(rms) ?0.:reduce_sum(sum,scratch)/width;float variance=0;
-    for(int i=threadIdx_x;i<width;i+=1){float d=memory[x+(base+i)]-mean;variance+=d*d;}
-    float inv=rsqrtf(reduce_sum(variance,scratch)/width+eps);
-    if(!truth(dy)){for(int i=threadIdx_x;i<width;i+=1){float v=(memory[x+(base+i)]-mean)*inv;memory[y+(base+i)]=v*(w!=0 ?memory[w+(i)]:1.)+( truth(bias) ?memory[w+(width+i)]:0.);}return;}
+    if(!truth(rms))for(int i=threadIdx_x;i<width;i+=blockDim_x)sum+=memory[x+(base+i)];
+    float mean=truth(rms) ?0.:parallel_sum(sum)/width;float variance=0;
+    for(int i=threadIdx_x;i<width;i+=blockDim_x){float d=memory[x+(base+i)]-mean;variance+=d*d;}
+    float inv=rsqrtf(parallel_sum(variance)/width+eps);
+    if(!truth(dy)){for(int i=threadIdx_x;i<width;i+=blockDim_x){float v=(memory[x+(base+i)]-mean)*inv;memory[y+(base+i)]=v*(w!=0 ?memory[w+(i)]:1.)+( truth(bias) ?memory[w+(width+i)]:0.);}return;}
     float sg=0,sgx=0;
-    for(int i=threadIdx_x;i<width;i+=1){float v=(memory[x+(base+i)]-mean)*inv;float g=memory[dy+(base+i)]*(w!=0 ?memory[w+(i)]:1.);memory[xhat+(base+i)]=v;sg+=g;sgx+=g*v;}
-    float a=reduce_sum(sg,scratch)/width,b=reduce_sum(sgx,scratch)/width;
-    for(int i=threadIdx_x;i<width;i+=1){float g=memory[dy+(base+i)]*(w!=0 ?memory[w+(i)]:1.);memory[y+(base+i)]=inv*(g-( truth(rms) ?0.:a)-memory[xhat+(base+i)]*b);}
+    for(int i=threadIdx_x;i<width;i+=blockDim_x){float v=(memory[x+(base+i)]-mean)*inv;float g=memory[dy+(base+i)]*(w!=0 ?memory[w+(i)]:1.);memory[xhat+(base+i)]=v;sg+=g;sgx+=g*v;}
+    float a=parallel_sum(sg)/width,b=parallel_sum(sgx)/width;
+    for(int i=threadIdx_x;i<width;i+=blockDim_x){float g=memory[dy+(base+i)]*(w!=0 ?memory[w+(i)]:1.);memory[y+(base+i)]=inv*(g-( truth(rms) ?0.:a)-memory[xhat+(base+i)]*b);}
 }
 void row_norm_grad(int dy,int xhat,int dw,int db,int rows,int width){
     int i=blockIdx_x*blockDim_x+threadIdx_x;if(i>=width)return;float a=0,b=0;
@@ -225,24 +241,30 @@ void bicubic_kernel(int x,int dy,int y,GResize g,int count){
     if(!truth(dy)){memory[y+(o)]=truth(wsum) ?sum/wsum:0.;return;}if(!truth(wsum))return;
     for(int h=-1;h<=2;++h)for(int w=-1;w<=2;++w){float weight=cubic(sy-(iy+h))*cubic(sx-(ix+w));int i=(c*g.ih+max(0,min(iy+h,g.ih-1)))*g.iw+max(0,min(ix+w,g.iw-1));atomicAdd(y+i,memory[dy+(o)]*(weight/wsum));}
 }
+
 void pool_kernel(int x,int dy,int y,int dx,GPool g,int count){
-    int o=blockIdx_x*blockDim_x+threadIdx_x;if(o>=count)return;
-    int c=o/(g.oh*g.ow),oy=(o/g.ow)%g.oh,ox=o%g.ow;
-    float value=g.maximum?-uintBitsToFloat(0x7f800000u):0.;int valid=0,best=-1;
-    for(int ky=0;ky<g.kh;++ky)for(int kx=0;kx<g.kw;++kx) {
-        int iy=oy*g.sh+ky-g.ph,ix=ox*g.sw+kx-g.pw;
-        if(iy<0 || iy>=g.h || ix<0 || ix>=g.w)continue;
-        int i=g.token?iy*g.c+c:(c*g.h+iy)*g.w+ix;
-        ++valid;if(truth(g.maximum)){if(memory[x+(i)]>value){value=memory[x+(i)];best=i;}}else value+=memory[x+(i)];
-    }
-    if(!truth(dy)){memory[y+(o)]=g.maximum?value:( truth(valid) ?value/valid:0.);return;}
-    if(truth(g.maximum)){if(best>=0)atomicAdd(dx+best,memory[dy+(o)]);return;}
-    if(!truth(valid))return;float grad=memory[dy+(o)]/valid;
-    for(int ky=0;ky<g.kh;++ky)for(int kx=0;kx<g.kw;++kx){
-        int iy=oy*g.sh+ky-g.ph,ix=ox*g.sw+kx-g.pw;
-        if(iy>=0 && iy<g.h && ix>=0 && ix<g.w)atomicAdd(dx+( truth(g.token) ?iy*g.c+c:(c*g.h+iy)*g.w+ix),grad);
-    }
+ int o=blockIdx_x;if(o>=count)return;
+ int c=o/(g.oh*g.ow),oy=(o/g.ow)%g.oh,ox=o%g.ow;
+ float value=g.maximum?-uintBitsToFloat(0x7f800000u):0.;int valid=0,best=-1;
+ for(int k=threadIdx_x;k<g.kh*g.kw;k+=blockDim_x){
+  int iy=oy*g.sh+k/g.kw-g.ph,ix=ox*g.sw+k%g.kw-g.pw;
+  if(iy<0 || iy>=g.h || ix<0 || ix>=g.w)continue;
+  int i=g.token?iy*g.c+c:(c*g.h+iy)*g.w+ix;
+  ++valid;if(g.maximum){if(memory[x+i]>value){value=memory[x+i];best=i;}}else value+=memory[x+i];
+ }
+ float reduced=g.maximum?parallel_max(value):parallel_sum(value);
+ float valid_count=parallel_sum(float(valid));
+ float winner=g.maximum?-parallel_max(-(best>=0 && value==reduced?float(best):1e30)):0.;
+ if(dy==0){if(threadIdx_x==0)memory[y+o]=g.maximum?reduced:(valid_count>0.?reduced/valid_count:0.);return;}
+ if(g.maximum){if(threadIdx_x==0 && winner<1e30)atomicAdd(dx+int(winner),memory[dy+o]);return;}
+ if(valid_count==0.)return;
+ float gradient=memory[dy+o]/valid_count;
+ for(int k=threadIdx_x;k<g.kh*g.kw;k+=blockDim_x){
+  int iy=oy*g.sh+k/g.kw-g.ph,ix=ox*g.sw+k%g.kw-g.pw;
+  if(iy>=0 && iy<g.h && ix>=0 && ix<g.w)atomicAdd(dx+(g.token?iy*g.c+c:(c*g.h+iy)*g.w+ix),gradient);
+ }
 }
+
 void permute_kernel(int x,int y,int out_shape,int in_stride,int rank,int count,bool backward){
     int o=blockIdx_x*blockDim_x+threadIdx_x;if(o>=count)return;int tmp=o,i=0;
     for(int d=rank-1;d>=0;--d){i+=(tmp%floatBitsToInt(memory[out_shape+(d)]))*floatBitsToInt(memory[in_stride+(d)]);tmp/=floatBitsToInt(memory[out_shape+(d)]);}
@@ -294,17 +316,17 @@ void reparameterize_kernel(int mu,int lv,int noise,int dy,int a,int b,int n,bool
 void batch_norm_kernel(int x,int w,int running,int dy,int y,int dw,GBatchNorm g,float eps,bool training){
     int scratch=0;int c=blockIdx_x,N=g.batch*g.spatial;float sum=0;
     bool estimate=truth(dy) || truth(training) || !truth(g.running);
-    if(truth(estimate))for(int j=threadIdx_x;j<N;j+=1)sum+=memory[x+((j/g.spatial*g.channels+c)*g.spatial+j%g.spatial)];
-    float mean=truth(estimate) ?reduce_sum(sum,scratch)/N:memory[running+(c)];float variance=0;
-    if(truth(estimate))for(int j=threadIdx_x;j<N;j+=1){float d=memory[x+((j/g.spatial*g.channels+c)*g.spatial+j%g.spatial)]-mean;variance+=d*d;}
-    float var=truth(estimate) ?reduce_sum(variance,scratch)/N:memory[running+(g.channels+c)],inv=rsqrtf(var+eps);
+    if(truth(estimate))for(int j=threadIdx_x;j<N;j+=blockDim_x)sum+=memory[x+((j/g.spatial*g.channels+c)*g.spatial+j%g.spatial)];
+    float mean=truth(estimate) ?parallel_sum(sum)/N:memory[running+(c)];float variance=0;
+    if(truth(estimate))for(int j=threadIdx_x;j<N;j+=blockDim_x){float d=memory[x+((j/g.spatial*g.channels+c)*g.spatial+j%g.spatial)]-mean;variance+=d*d;}
+    float var=truth(estimate) ?parallel_sum(variance)/N:memory[running+(g.channels+c)],inv=rsqrtf(var+eps);
     float gamma=g.affine?memory[w+(c)]:1.,beta=g.bias?memory[w+(g.channels+c)]:0.;
-    if(!truth(dy)){for(int j=threadIdx_x;j<N;j+=1){int i=(j/g.spatial*g.channels+c)*g.spatial+j%g.spatial;memory[y+(i)]=(memory[x+(i)]-mean)*inv*gamma+beta;}return;}
+    if(!truth(dy)){for(int j=threadIdx_x;j<N;j+=blockDim_x){int i=(j/g.spatial*g.channels+c)*g.spatial+j%g.spatial;memory[y+(i)]=(memory[x+(i)]-mean)*inv*gamma+beta;}return;}
     float s1=0,s2=0;
-    for(int j=threadIdx_x;j<N;j+=1){int i=(j/g.spatial*g.channels+c)*g.spatial+j%g.spatial;s1+=memory[dy+(i)];s2+=memory[dy+(i)]*(memory[x+(i)]-mean)*inv;}
-    s1=reduce_sum(s1,scratch);s2=reduce_sum(s2,scratch);
+    for(int j=threadIdx_x;j<N;j+=blockDim_x){int i=(j/g.spatial*g.channels+c)*g.spatial+j%g.spatial;s1+=memory[dy+(i)];s2+=memory[dy+(i)]*(memory[x+(i)]-mean)*inv;}
+    s1=parallel_sum(s1);s2=parallel_sum(s2);
     if(threadIdx_x==0 && truth(g.affine)){memory[dw+(c)]=s2;if(truth(g.bias))memory[dw+(g.channels+c)]=s1;}
-    for(int j=threadIdx_x;j<N;j+=1){int i=(j/g.spatial*g.channels+c)*g.spatial+j%g.spatial;float xhat=(memory[x+(i)]-mean)*inv;memory[y+(i)]=inv*gamma*(memory[dy+(i)]-s1/N-xhat*s2/N);}
+    for(int j=threadIdx_x;j<N;j+=blockDim_x){int i=(j/g.spatial*g.channels+c)*g.spatial+j%g.spatial;float xhat=(memory[x+(i)]-mean)*inv;memory[y+(i)]=inv*gamma*(memory[dy+(i)]-s1/N-xhat*s2/N);}
 }
 void attention_add_bias(int y,int w,int n,int width,int offset){
     int i=blockIdx_x*blockDim_x+threadIdx_x;if(i<n && offset>=0)memory[y+(i)]+=memory[w+(offset+i%width)];
@@ -321,10 +343,10 @@ void attention_project(int input_value,int w,int result,GAttention g,int part,bo
 void attention_probabilities(int q,int k,int p,GAttention g){
     int scratch=0;int h=blockIdx_x/g.q,t=blockIdx_x%g.q,width=g.ed/g.heads,base=(h*g.q+t)*g.k;
     float scale=rsqrtf(float(width));float maximum=-1e30;
-    for(int j=threadIdx_x;j<g.k;j+=1){float score=-1e9;if(!truth(g.causal) || j<=t){score=0;for(int d=0;d<width;++d)score+=memory[q+(t*g.ed+h*width+d)]*memory[k+(j*g.ed+h*width+d)];score*=scale;}memory[p+(base+j)]=score;maximum=max(maximum,score);}
-    maximum=reduce_max(maximum,scratch);float sum=0;
-    for(int j=threadIdx_x;j<g.k;j+=1){float v=exp(memory[p+(base+j)]-maximum);memory[p+(base+j)]=v;sum+=v;}
-    float inv=1./(reduce_sum(sum,scratch)+1e-9);for(int j=threadIdx_x;j<g.k;j+=1)memory[p+(base+j)]*=inv;
+    for(int j=threadIdx_x;j<g.k;j+=blockDim_x){float score=-1e9;if(!truth(g.causal) || j<=t){score=0;for(int d=0;d<width;++d)score+=memory[q+(t*g.ed+h*width+d)]*memory[k+(j*g.ed+h*width+d)];score*=scale;}memory[p+(base+j)]=score;maximum=max(maximum,score);}
+    maximum=parallel_max(maximum);float sum=0;
+    for(int j=threadIdx_x;j<g.k;j+=blockDim_x){float v=exp(memory[p+(base+j)]-maximum);memory[p+(base+j)]=v;sum+=v;}
+    float inv=1./(parallel_sum(sum)+1e-9);for(int j=threadIdx_x;j<g.k;j+=blockDim_x)memory[p+(base+j)]*=inv;
 }
 void attention_context(int p,int v,int ctx,GAttention g,int n){
     int i=blockIdx_x*blockDim_x+threadIdx_x;if(i>=n)return;int t=i/g.ed,d=i%g.ed,h=d/(g.ed/g.heads);float sum=0;
@@ -337,8 +359,8 @@ void attention_output(int ctx,int w,int dy,int y,GAttention g,int n){
 }
 void attention_score_grad(int p,int v,int dc,int ds,GAttention g){
     int scratch=0;int h=blockIdx_x/g.q,t=blockIdx_x%g.q,width=g.ed/g.heads,base=(h*g.q+t)*g.k;float dot=0;
-    for(int j=threadIdx_x;j<g.k;j+=1){float dp=0;for(int f=0;f<width;++f)dp+=memory[dc+(t*g.ed+h*width+f)]*memory[v+(j*g.ed+h*width+f)];memory[ds+(base+j)]=dp;dot+=dp*memory[p+(base+j)];}
-    dot=reduce_sum(dot,scratch);for(int j=threadIdx_x;j<g.k;j+=1)memory[ds+(base+j)]=g.causal && j>t?0.:(memory[ds+(base+j)]-dot)*memory[p+(base+j)];
+    for(int j=threadIdx_x;j<g.k;j+=blockDim_x){float dp=0;for(int f=0;f<width;++f)dp+=memory[dc+(t*g.ed+h*width+f)]*memory[v+(j*g.ed+h*width+f)];memory[ds+(base+j)]=dp;dot+=dp*memory[p+(base+j)];}
+    dot=parallel_sum(dot);for(int j=threadIdx_x;j<g.k;j+=blockDim_x)memory[ds+(base+j)]=g.causal && j>t?0.:(memory[ds+(base+j)]-dot)*memory[p+(base+j)];
 }
 void attention_projected_grad(int q,int k,int dc,int p,int ds,int result,GAttention g,int part,int n){
     int i=blockIdx_x*blockDim_x+threadIdx_x;if(i>=n)return;int t=i/g.ed,d=i%g.ed,h=d/(g.ed/g.heads);float sum=0;
@@ -1194,13 +1216,41 @@ void cuda_binary_backward_kernel(int a,int b,int grad_out,int grad_a,int grad_b,
             break;
     }
 }
-void portable_copy(int source,int dest,int n){for(int i=0;i<n;++i)memory[dest+(i)]=memory[source+(i)];}
+void portable_copy(int source,int dest,int n){int i=blockIdx_x*blockDim_x+threadIdx_x;if(i<n)memory[dest+(i)]=memory[source+(i)];}
 void portable_gemm(int a,int b,int c,int m,int n,int k,int lda,int ldb,int ldc,bool ta,bool tb,float alpha,float beta){
- for(int j=0;j<n;++j)for(int i=0;i<m;++i){float sum=0;for(int f=0;f<k;++f)sum+=memory[a+( truth(ta) ?f+i*lda:i+f*lda)]*memory[b+( truth(tb) ?j+f*ldb:f+j*ldb)];memory[c+(i+j*ldc)]=alpha*sum+beta*memory[c+(i+j*ldc)];}}
-void portable_ger(int x,int y,int a,int m,int n,int sx,int sy,int lda,float alpha){for(int j=0;j<n;++j)for(int i=0;i<m;++i)memory[a+(i+j*lda)]+=alpha*memory[x+(i*sx)]*memory[y+(j*sy)];}
+ int index=blockIdx_x*blockDim_x+threadIdx_x;int i=index%m,j=index/m;if(j<n){float sum=0;for(int f=0;f<k;++f)sum+=memory[a+( truth(ta) ?f+i*lda:i+f*lda)]*memory[b+( truth(tb) ?j+f*ldb:f+j*ldb)];memory[c+(i+j*ldc)]=alpha*sum+beta*memory[c+(i+j*ldc)];}}
+void portable_ger(int x,int y,int a,int m,int n,int sx,int sy,int lda,float alpha){int index=blockIdx_x*blockDim_x+threadIdx_x;int i=index%m,j=index/m;if(j<n)memory[a+(i+j*lda)]+=alpha*memory[x+(i*sx)]*memory[y+(j*sy)];}
+void portable_sequence_constant_forward(int source,int rows,int result,int width,int base_rows,int count){
+ int i=blockIdx_x*blockDim_x+threadIdx_x;if(i>=count)return;
+ int row=i/width,c=i%width,a=int(memory[rows+(2*row)]),b=a+1<base_rows?a+1:base_rows-1;
+ float t=memory[rows+(2*row+1)];memory[result+(i)]=(1.0-t)*memory[source+(a*width+c)]+t*memory[source+(b*width+c)];
+}
+void portable_sequence_constant_backward(int source,int rows,int result,int width,int base_rows,int count){
+ int i=blockIdx_x*blockDim_x+threadIdx_x;if(i>=count)return;
+ int row=i/width,c=i%width,a=int(memory[rows+(2*row)]),b=a+1<base_rows?a+1:base_rows-1;
+ float t=memory[rows+(2*row+1)];atomicAdd(result+a*width+c,(1.0-t)*memory[source+(i)]);atomicAdd(result+b*width+c,t*memory[source+(i)]);
+}
+
+void tiled_gemm(int a,int b,int c,int m,int n,int k,int lda,int ldb,int ldc,bool ta,bool tb,float alpha,float beta){
+ int local_value=int(gl_LocalInvocationID.x),group=int(gl_WorkGroupID.x+gl_WorkGroupID.y*gl_NumWorkGroups.x);
+ int tiles=(m+15)/16,r=local_value%16,d=local_value/16,row=(group%tiles)*16+r,col=(group/tiles)*16+d;
+ float sum=0;
+ for(int base=0;base<k;base+=16){
+  int fa=base+d,fb=base+r;
+  normScratch[local_value]=row<m && fa<k?memory[a+(ta?fa+row*lda:row+fa*lda)]:0.;
+  normScratch[256+local_value]=col<n && fb<k?memory[b+(tb?col+fb*ldb:fb+col*ldb)]:0.;
+  barrier();
+  for(int f=0;f<16;++f)sum+=normScratch[r+f*16]*normScratch[256+f+d*16];
+  barrier();
+ }
+ if(row<m && col<n)memory[c+row+col*ldc]=alpha*sum+(beta==0.?0.:beta*memory[c+row+col*ldc]);
+}
+int group_id(){return int(gl_WorkGroupID.x+gl_WorkGroupID.y*gl_NumWorkGroups.x); }
+int invocation_id(){return int(gl_GlobalInvocationID.x+gl_WorkGroupID.y*gl_NumWorkGroups.x*256u); }
 void reference_main(){
  blockDim_x=arguments[1];gridDim_x=arguments[2];
- for(int gid=0;gid<blockDim_x*gridDim_x;++gid){blockIdx_x=gid/blockDim_x;threadIdx_x=gid%blockDim_x;switch(arguments[0]){
+ int selected=specializedOperation>=0?specializedOperation:arguments[0];if(selected==0){blockDim_x=256;blockIdx_x=group_id();threadIdx_x=int(gl_LocalInvocationID.x);norm_forward(arguments[3],arguments[4],arguments[5],arguments[6],arguments[7],arguments[8],arguments[9],arguments[10],intBitsToFloat(arguments[11]),arguments[12]!=0);return;}if(selected==1){blockDim_x=256;blockIdx_x=group_id();threadIdx_x=int(gl_LocalInvocationID.x);norm_backward(arguments[3],arguments[4],arguments[5],arguments[6],arguments[7],arguments[8],arguments[9],arguments[10]);return;}if(selected==2){blockDim_x=256;blockIdx_x=group_id();threadIdx_x=int(gl_LocalInvocationID.x);channel_gradient(arguments[3],arguments[4],arguments[5],arguments[6],arguments[7]);return;}if(selected==7){blockDim_x=256;blockIdx_x=group_id();threadIdx_x=int(gl_LocalInvocationID.x);softmax_kernel(arguments[3],arguments[4],arguments[5],arguments[6],arguments[7],arguments[8]!=0);return;}if(selected==10){blockDim_x=256;blockIdx_x=group_id();threadIdx_x=int(gl_LocalInvocationID.x);row_norm_kernel(arguments[3],arguments[4],arguments[5],arguments[6],arguments[7],arguments[8],intBitsToFloat(arguments[9]),arguments[10]!=0,arguments[11]!=0);return;}if(selected==15){blockDim_x=256;blockIdx_x=group_id();threadIdx_x=int(gl_LocalInvocationID.x);GPool g=GPool(arguments[7],arguments[8],arguments[9],arguments[10],arguments[11],arguments[12],arguments[13],arguments[14],arguments[15],arguments[16],arguments[17],arguments[18]!=0,arguments[19]!=0);pool_kernel(arguments[3],arguments[4],arguments[5],arguments[6],g,arguments[20]);return;}if(selected==21){blockDim_x=256;blockIdx_x=group_id();threadIdx_x=int(gl_LocalInvocationID.x);GBatchNorm g=GBatchNorm(arguments[9],arguments[10],arguments[11],arguments[12]!=0,arguments[13]!=0,arguments[14]!=0);batch_norm_kernel(arguments[3],arguments[4],arguments[5],arguments[6],arguments[7],arguments[8],g,intBitsToFloat(arguments[15]),arguments[16]!=0);return;}if(selected==24){blockDim_x=256;blockIdx_x=group_id();threadIdx_x=int(gl_LocalInvocationID.x);GAttention g=GAttention(arguments[6],arguments[7],arguments[8],arguments[9],arguments[10],arguments[11]!=0,arguments[12]!=0,arguments[13],arguments[14],arguments[15],arguments[16]);attention_probabilities(arguments[3],arguments[4],arguments[5],g);return;}if(selected==27){blockDim_x=256;blockIdx_x=group_id();threadIdx_x=int(gl_LocalInvocationID.x);GAttention g=GAttention(arguments[7],arguments[8],arguments[9],arguments[10],arguments[11],arguments[12]!=0,arguments[13]!=0,arguments[14],arguments[15],arguments[16],arguments[17]);attention_score_grad(arguments[3],arguments[4],arguments[5],arguments[6],g);return;}if(selected==39){tiled_gemm(arguments[3],arguments[4],arguments[5],arguments[6],arguments[7],arguments[8],arguments[9],arguments[10],arguments[11],arguments[12]!=0,arguments[13]!=0,intBitsToFloat(arguments[14]),intBitsToFloat(arguments[15]));return;}
+ int id=selected;bool parallel=(id>=0 && id<=42 && id!=31 && id!=32);int count=blockDim_x*gridDim_x;if(id==38)count=arguments[5];if(id==39 || id==40)count=arguments[6]*arguments[7];int first=parallel?invocation_id():0;if(!parallel && invocation_id()!=0)return;for(int gid=first;gid<count;gid+=parallel?count:1){blockIdx_x=gid/blockDim_x;threadIdx_x=gid%blockDim_x;if(id>=38 && id<=40){blockIdx_x=gid;threadIdx_x=0;blockDim_x=1;}switch(selected){
 case 0: {norm_forward(arguments[3],arguments[4],arguments[5],arguments[6],arguments[7],arguments[8],arguments[9],arguments[10],intBitsToFloat(arguments[11]),arguments[12]!=0);break;}
 case 1: {norm_backward(arguments[3],arguments[4],arguments[5],arguments[6],arguments[7],arguments[8],arguments[9],arguments[10]);break;}
 case 2: {channel_gradient(arguments[3],arguments[4],arguments[5],arguments[6],arguments[7]);break;}
@@ -1242,6 +1292,8 @@ case 37: {cuda_binary_backward_kernel(arguments[3],arguments[4],arguments[5],arg
 case 38: {portable_copy(arguments[3],arguments[4],arguments[5]);break;}
 case 39: {portable_gemm(arguments[3],arguments[4],arguments[5],arguments[6],arguments[7],arguments[8],arguments[9],arguments[10],arguments[11],arguments[12]!=0,arguments[13]!=0,intBitsToFloat(arguments[14]),intBitsToFloat(arguments[15]));break;}
 case 40: {portable_ger(arguments[3],arguments[4],arguments[5],arguments[6],arguments[7],arguments[8],arguments[9],arguments[10],intBitsToFloat(arguments[11]));break;}
+case 41: {portable_sequence_constant_forward(arguments[3],arguments[4],arguments[5],arguments[6],arguments[7],arguments[8]);break;}
+case 42: {portable_sequence_constant_backward(arguments[3],arguments[4],arguments[5],arguments[6],arguments[7],arguments[8]);break;}
 default:break;}}}
 
 void main(){reference_main();}

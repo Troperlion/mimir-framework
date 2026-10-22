@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "Layers.hpp"
+#include "Planning/ExecutionCalibration.hpp"
 #include "runtimes/AbstractRuntime.hpp"
 
 namespace Mimir::Planning {
@@ -159,6 +160,8 @@ struct ExecutionPlan {
         bool kernel_fused = false;
         std::optional<size_t> fused_into;
         size_t scratch_bytes = 0;
+        std::vector<Calibration::Measurement> measured_costs;
+        bool measured_host_roundtrip = false;
         double estimated_compute_cost = 0.0;
         double estimated_transfer_cost = 0.0;
     };
@@ -564,6 +567,10 @@ inline void apply_runtime_placement(ExecutionPlan& plan,
     for (PlannedLayer& layer : plan.layers) {
         AbstractRuntime* selected = nullptr;
         double selected_cost = std::numeric_limits<double>::infinity();
+        layer.measured_host_roundtrip=false;
+        bool have_measurements=false;
+        if(plan.mode==PlannerMode::Cost)for(const auto& m:layer.measured_costs)
+            if(std::find(priority.begin(),priority.end(),m.runtime)!=priority.end() && m.runtime->isInitialized() && m.configuration==Calibration::configuration(*m.runtime))have_measurements=true;
         for (AbstractRuntime* runtime : priority) {
             if (!runtime || !runtime->isInitialized()) continue;
             const auto capability = runtime->queryForwardCapability(layer.layer_type);
@@ -572,6 +579,12 @@ inline void apply_runtime_placement(ExecutionPlan& plan,
                     selected = runtime;
                     layer.capability = capability;
                     break;
+                }
+                if(have_measurements){
+                    for(const auto& m:layer.measured_costs)if(m.runtime==runtime && m.configuration==Calibration::configuration(*runtime) && m.seconds<selected_cost){
+                        selected=runtime;selected_cost=m.seconds;layer.capability=capability;layer.estimated_compute_cost=m.seconds;layer.measured_host_roundtrip=true;
+                    }
+                    continue;
                 }
                 const RuntimeKind candidate_kind = runtime_kind_from_name(runtime->name());
                 const MemoryLocation candidate_location = memory_location_for_runtime(candidate_kind);
@@ -585,6 +598,7 @@ inline void apply_runtime_placement(ExecutionPlan& plan,
                 }
                 const auto& output = plan.tensors.at(layer.output);
                 work_bytes += output.bytes;
+                transfer_cost += estimated_transfer_cost(output.bytes,candidate_location,MemoryLocation::Host);
                 double throughput = 1.0e9;
                 switch (candidate_kind) {
                     case RuntimeKind::CUDA:
@@ -615,7 +629,7 @@ inline void apply_runtime_placement(ExecutionPlan& plan,
             auto& tensor = plan.tensors.at(input);
             if (tensor.preferred_location != destination) {
                 PlannedTransfer transfer{input, tensor.preferred_location, destination, tensor.bytes,
-                                         estimated_transfer_cost(tensor.bytes, tensor.preferred_location, destination)};
+                                         layer.measured_host_roundtrip?0.0:estimated_transfer_cost(tensor.bytes, tensor.preferred_location, destination)};
                 layer.estimated_transfer_cost += transfer.estimated_cost;
                 plan.stats.transfer_bytes += transfer.bytes;
                 plan.transfers.push_back(transfer);
@@ -623,7 +637,11 @@ inline void apply_runtime_placement(ExecutionPlan& plan,
         }
         auto& output = plan.tensors.at(layer.output);
         output.producer_runtime = layer.runtime;
-        output.preferred_location = destination;
+        output.preferred_location = plan.mode==PlannerMode::Cost?MemoryLocation::Host:destination;
+        if(plan.mode==PlannerMode::Cost && destination!=MemoryLocation::Host){
+            plan.transfers.push_back({output.id,destination,MemoryLocation::Host,output.bytes,layer.measured_host_roundtrip?0.0:estimated_transfer_cost(output.bytes,destination,MemoryLocation::Host)});
+            plan.stats.transfer_bytes+=output.bytes;
+        }
         if (plan.regions.empty() || previous != layer.runtime) {
             plan.regions.push_back({plan.regions.size(), layer.runtime, {}});
         }
@@ -699,6 +717,7 @@ inline std::string dump_execution_plan_text(const ExecutionPlan& plan) {
             << " output_location=" << memory_location_name(plan.tensors.at(layer.output).preferred_location)
             << " skip=" << layer.skip << " graph_fused=" << layer.graph_fused
             << " kernel_fused=" << layer.kernel_fused << " scratch=" << layer.scratch_bytes
+            << " cost_basis=" << (layer.measured_host_roundtrip?"measured_host_roundtrip":"estimated")
             << " compute_cost=" << layer.estimated_compute_cost
             << " transfer_cost=" << layer.estimated_transfer_cost << '\n';
     }
@@ -730,6 +749,7 @@ inline std::string dump_execution_plan_json(const ExecutionPlan& plan) {
             << "\",\"graph_fused\":" << (layer.graph_fused ? "true" : "false")
             << ",\"kernel_fused\":" << (layer.kernel_fused ? "true" : "false")
             << ",\"scratch_bytes\":" << layer.scratch_bytes
+            << ",\"measured_host_roundtrip\":" << (layer.measured_host_roundtrip?"true":"false")
             << ",\"estimated_compute_cost\":" << std::setprecision(17) << layer.estimated_compute_cost
             << ",\"estimated_transfer_cost\":" << layer.estimated_transfer_cost << '}';
     }

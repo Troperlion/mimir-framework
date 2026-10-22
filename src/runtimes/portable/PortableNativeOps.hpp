@@ -2,6 +2,7 @@
 
 // Device implementations only. No CPU kernels or CPU runtime changes.
 #include "PortableStaging.hpp"
+#include "PortableLayerGeometry.hpp"
 #include "runtimes/cuda/CudaOperationGeometry.hpp"
 
 #include <algorithm>
@@ -146,11 +147,15 @@ inline bool conv_backward(cublasHandle_t handle, const std::vector<float>& x,
 
 
 inline bool row_norm(const std::vector<float>& x,const Layer& l,std::vector<float>& y,const std::vector<float>* dy=nullptr,std::vector<float>* dw=nullptr,std::vector<float>* db=nullptr) {
-    const int width=l.in_features>0?l.in_features:x.size();const int rows=x.size()/width;
-    const float* w=l.affine?l.getWeights():nullptr;const bool bias=w && l.use_bias && l.getWeightsSize()>=2ULL*width;
+    const int width=PortableLayerGeometry::rowNormWidth(l,x.size(),dy!=nullptr);const int rows=x.size()/width;
+    size_t weight_count=l.getWeightsSize();
+    const float* w=l.affine?l.getWeights():nullptr;
+    std::vector<float> padded;
+    if(!dy && w && weight_count<static_cast<size_t>(width)){padded.assign(width,1.f);std::copy_n(w,weight_count,padded.data());w=padded.data();weight_count=padded.size();}
+    const bool bias=w && l.use_bias && weight_count>=2ULL*width;
     Buffer bx,bw,bg,by,bh,bdw,bdb;
     if(!bx.alloc(x.size()) || !bx.upload(x.data(),x.size()) || !by.alloc(x.size()))return false;
-    if(w && (!bw.alloc(l.getWeightsSize()) || !bw.upload(w,l.getWeightsSize())))return false;
+    if(w && (!bw.alloc(weight_count) || !bw.upload(w,weight_count)))return false;
     if(dy && (!bg.alloc(x.size()) || !bg.upload(dy->data(),x.size()) || !bh.alloc(x.size())))return false;
     launch("row_norm_kernel", rows,threads, bx.ptr,bw.ptr,bg.ptr,by.ptr,bh.ptr,width,l.eps>0?l.eps:1e-5f,l.type_enum==LayerType::RMSNorm,bias && (dy || l.type_enum!=LayerType::RMSNorm));
     if(dy && w){

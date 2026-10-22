@@ -10,7 +10,7 @@ inline bool portableOptimizer(const RuntimeOptimizerRequest& request,const char*
     auto& device=contexts[{backend,index}];
     if(!device)device=PortableStaging::createOptimizerDevice(backend,index);
     if(!device)return false;
-    auto memory=optimizerPack(request);const auto arguments=optimizerParameters(request);
+    auto memory=optimizerPack(request, true);const auto arguments=optimizerParameters(request, true);
     if(!device->run(memory,arguments)){device.reset();return false;}
-    return optimizerCommit(request,memory);
+    return optimizerCommit(request,memory,true);
 }

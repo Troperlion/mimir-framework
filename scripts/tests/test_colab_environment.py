@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import Mock
 
@@ -72,6 +73,33 @@ class EnvironmentDetection(unittest.TestCase):
                 for name in ('cuda','vulkan','opencl'):
                     self.assertEqual(env['RUNTIME_ENV']['MIMIR_DISABLE_'+name.upper()],'0' if name in expected else '1')
                 self.assertEqual(env['MIMIR_MICRO_RUNTIME'],expected[0] if expected else backend)
+
+    def test_cpu_setup_never_requires_nvcc_after_gpu_session(self):
+        for filename in ('Colab-test.ipynb','Colab-bench-multi-framework.ipynb'):
+            notebook=json.loads((ROOT/filename).read_text())
+            source=next(''.join(c['source']) for c in notebook['cells'] if 'NVCC=shutil.which' in ''.join(c['source']))
+            prefix=source[:source.index("apt=['apt-get']")]
+            setup=source[source.index('NVCC='):]
+            for backend in ('cpu','cuda'):
+                with tempfile.TemporaryDirectory() as directory:
+                    run=Mock(side_effect=AssertionError('Unexpected GPU tool invocation'))
+                    scope=dict(BACKEND=backend,MIMIR_GPU_RUNTIMES=['cuda','vulkan','opencl'],
+                        MIMIR_MICRO_RUNTIME='cuda',RUNTIME_ENV={},ENVIRONMENT={},run=run,
+                        shutil=SimpleNamespace(which=lambda _:None),
+                        Path=lambda p:SimpleNamespace(is_file=lambda:False),
+                        BUILD=Path(directory)/'build',REPO=ROOT)
+                    exec(prefix,scope)
+                    if backend=='cuda':
+                        with self.assertRaisesRegex(RuntimeError,'nvcc est absent'):exec(setup,scope)
+                        continue
+                    exec(setup,scope)
+                    run.assert_not_called()
+                    self.assertEqual(scope['MIMIR_GPU_RUNTIMES'],[])
+                    self.assertEqual(scope['MIMIR_MICRO_RUNTIME'],'cpu')
+                    self.assertEqual(scope['RUNTIME_ENV']['MIMIR_BENCH_RUNTIME'],'cpu')
+                    for runtime in ('CUDA','ROCM','VULKAN','OPENCL'):
+                        self.assertIn('-DENABLE_'+runtime+'=OFF',scope['CMAKE_ARGS'])
+                    self.assertFalse(any(str(a).startswith('-DCMAKE_CUDA_') for a in scope['CMAKE_ARGS']))
 
     def test_benchmark(self):self.check_notebook('Colab-bench-multi-framework.ipynb')
     def test_runtime(self):self.check_notebook('Colab-test.ipynb')

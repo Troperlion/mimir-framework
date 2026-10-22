@@ -2,9 +2,76 @@
 set -euo pipefail
 
 WORKROOT="${WORKROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-BUILD_DIR="$WORKROOT/build"
+BUILD_DIR="${BUILD_DIR:-$WORKROOT/build}"
 BUILD_TYPE="Release"
-VIZ_BACKEND="${MIMIR_VIZ_BACKEND:-SFML}"
+VIZ_BACKEND="${MIMIR_VIZ_BACKEND:-}"
+SKIP_SYSTEM_DEPS="${SKIP_SYSTEM_DEPS:-0}"
+CMAKE_GENERATOR=""
+EXTRA_CMAKE_ARGS=()
+declare -A FEATURE_OVERRIDES=()
+
+usage() {
+  cat <<'HELP'
+Usage: ./config.sh [options]
+  --gui BACKEND           SFML, QT (Qt 6), GTK (GTK 3), WEB ou NONE
+  --viz-backend BACKEND   Alias de --gui
+  --build-dir DIR         Répertoire CMake (défaut: build)
+  --enable FEATURE       Activer une option CMake (ex.: MIMIR_ENABLE_TESTS)
+  --disable FEATURE      Désactiver une option CMake (ex.: ENABLE_VULKAN)
+  --build-type TYPE      Release, Debug, RelWithDebInfo ou MinSizeRel
+  --generator NAME       Générateur CMake (ex.: Ninja)
+  --cmake-arg ARG        Argument CMake supplémentaire, répétable (cross compilation)
+  --non-interactive      Utiliser les choix fournis sans ouvrir les menus
+  --skip-system-deps     Ne pas utiliser apt-get/sudo (dépendances déjà installées)
+  -h, --help              Afficher cette aide
+
+Sans --gui: MIMIR_VIZ_BACKEND, puis choix du cache CMake, puis SFML.
+Qt/GTK/Web utilisent Cairo et ne nécessitent pas SFML.
+Exemple: ./config.sh --gui QT --non-interactive --skip-system-deps
+HELP
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --gui|--viz-backend|--build-dir)
+      if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+        echo "[error] Valeur manquante pour $1" >&2; exit 1
+      fi
+      if [[ "$1" == "--build-dir" ]]; then BUILD_DIR="$2"; else VIZ_BACKEND="$2"; fi
+      shift 2 ;;
+    --enable|--disable|--build-type|--generator|--cmake-arg)
+      if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+        echo "[error] Valeur manquante pour $1" >&2; exit 1
+      fi
+      case "$1" in
+        --enable) FEATURE_OVERRIDES["$2"]=1 ;;
+        --disable) FEATURE_OVERRIDES["$2"]=0 ;;
+        --build-type) BUILD_TYPE="$2" ;;
+        --generator) CMAKE_GENERATOR="$2" ;;
+        --cmake-arg) EXTRA_CMAKE_ARGS+=("$2") ;;
+      esac
+      shift 2 ;;
+    --non-interactive) NON_INTERACTIVE=1; shift ;;
+    --skip-system-deps) SKIP_SYSTEM_DEPS=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "[error] Option inconnue: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$VIZ_BACKEND" && -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+  VIZ_BACKEND="$(sed -n 's/^MIMIR_VIZ_BACKEND:STRING=//p' "$BUILD_DIR/CMakeCache.txt")"
+  VIZ_BACKEND="${VIZ_BACKEND^^}"
+  if [[ "$VIZ_BACKEND" == "SFML" ]]; then
+    legacy_sfml_enabled="$(sed -n 's/^ENABLE_SFML:BOOL=//p' "$BUILD_DIR/CMakeCache.txt")"
+    if [[ "$legacy_sfml_enabled" == "OFF" ]]; then VIZ_BACKEND="NONE"; fi
+  fi
+fi
+VIZ_BACKEND="${VIZ_BACKEND:-SFML}"
+VIZ_BACKEND="${VIZ_BACKEND^^}"
+case "$VIZ_BACKEND" in
+  SFML|QT|GTK|WEB|NONE) ;;
+  *) echo "[error] Interface Viz inconnue: $VIZ_BACKEND (SFML/QT/GTK/WEB/NONE)" >&2; exit 1 ;;
+esac
 
 if [[ ! -f "$WORKROOT/CMakeLists.txt" ]]; then
   echo "[error] CMakeLists.txt introuvable dans WORKROOT=$WORKROOT"
@@ -16,18 +83,15 @@ if [[ "$OSTYPE" != linux* ]]; then
   exit 1
 fi
 
-if ! command -v apt-get >/dev/null 2>&1; then
-  echo "[error] apt-get introuvable. Utilise le guide docs pour ton OS/distribution."
-  exit 1
-fi
-
 SUDO=""
-if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-  if command -v sudo >/dev/null 2>&1; then
-    SUDO="sudo"
-  else
-    echo "[error] Exécute en root ou installe sudo."
+if [[ "$SKIP_SYSTEM_DEPS" != "1" ]]; then
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "[error] apt-get introuvable. Installe les dépendances puis utilise --skip-system-deps."
     exit 1
+  fi
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    if command -v sudo >/dev/null 2>&1; then SUDO="sudo";
+    else echo "[error] Exécute en root ou utilise --skip-system-deps avec les dépendances installées."; exit 1; fi
   fi
 fi
 
@@ -82,6 +146,16 @@ declare -A FEATURE_DEFAULTS=(
   [MIMIR_ENABLE_TESTS]=0
 )
 
+case "$BUILD_TYPE" in
+  Release|Debug|RelWithDebInfo|MinSizeRel) ;;
+  *) echo "[error] Type de build invalide: $BUILD_TYPE" >&2; exit 1 ;;
+esac
+for key in "${!FEATURE_OVERRIDES[@]}"; do
+  if [[ ! -v FEATURE_DEFAULTS[$key] ]]; then
+    echo "[error] Feature inconnue: $key" >&2; exit 1
+  fi
+done
+
 is_interactive=0
 if [[ -t 0 && -t 1 ]]; then
   is_interactive=1
@@ -92,7 +166,7 @@ fi
 
 get_feature() {
   local key="$1"
-  echo "${FEATURE_DEFAULTS[$key]}"
+  echo "${FEATURE_OVERRIDES[$key]:-${FEATURE_DEFAULTS[$key]}}"
 }
 
 declare -A FEATURE_VALUES
@@ -197,10 +271,10 @@ interactive_configure() {
 if [[ "$is_interactive" == "1" ]]; then
   interactive_configure
   if command -v whiptail >/dev/null 2>&1; then
-    VIZ_BACKEND="$(whiptail --title "Mímir Viz" --menu "Interface Viz (scène commune, moteurs indépendants)" 18 80 5 \
-      SFML "Fenêtre SFML" QT "Qt 6" GTK "GTK 3" WEB "Navigateur local" NONE "Sans interface" 3>&1 1>&2 2>&3)" || exit 0
+    VIZ_BACKEND="$(whiptail --title "Mímir Viz" --default-item "$VIZ_BACKEND" --menu "Interface Viz (choix exclusif à la compilation)" 18 80 5 \
+      SFML "Fenêtre native SFML 3" QT "Fenêtre native Qt 6 + Cairo" GTK "Fenêtre native GTK 3 + Cairo" WEB "Navigateur local + Cairo" NONE "Sans GUI (entraînement headless)" 3>&1 1>&2 2>&3)" || exit 0
   else
-    read -r -p "Interface Viz [SFML/QT/GTK/WEB/NONE] ($VIZ_BACKEND): " selected_viz
+    read -r -p "Interface Viz : SFML 3 / QT 6 / GTK 3 / WEB / NONE [$VIZ_BACKEND]: " selected_viz
     VIZ_BACKEND="${selected_viz:-$VIZ_BACKEND}"
   fi
 fi
@@ -227,37 +301,7 @@ detect_sfml_version() {
 
 SFML_DETECTED_VERSION=""
 SFML_MODE="disabled"
-
-# SFML n'est requis que par son backend historique.
-if [[ "$VIZ_BACKEND" == "SFML" ]]; then
-  SFML_DETECTED_VERSION="$(detect_sfml_version)"
-  if [[ -z "$SFML_DETECTED_VERSION" ]]; then
-    SFML_MODE="missing"
-    echo "[warn] SFML non détecté via pkg-config (sfml-graphics/sfml-all)."
-    echo "[note] CMake exigera SFML 3 pour cette interface."
-  else
-    SFML_MAJOR="${SFML_DETECTED_VERSION%%.*}"
-    if [[ "$SFML_MAJOR" =~ ^[0-9]+$ ]]; then
-      if (( SFML_MAJOR >= 3 )); then
-        SFML_MODE="sfml3-enabled"
-        echo "[ok] SFML $SFML_DETECTED_VERSION détecté: visualizer SFML3 activé."
-      else
-        SFML_MODE="sfml2-incompatible"
-        echo "[warn] SFML $SFML_DETECTED_VERSION détecté (v2): visualizer SFML3 non compatible."
-        echo "[note] Installe SFML 3 ou choisis MIMIR_VIZ_BACKEND=NONE."
-      fi
-    else
-      SFML_MODE="unknown-version"
-      echo "[warn] Version SFML non interprétable: '$SFML_DETECTED_VERSION'."
-      echo "[note] ENABLE_SFML conservé tel quel."
-    fi
-  fi
-
-  # Variable legacy: garder une trace explicite pour éviter les confusions.
-  if [[ "${MIMIR_FORCE_SFML3_VISUALIZER:-0}" == "1" ]]; then
-    echo "[note] MIMIR_FORCE_SFML3_VISUALIZER=1 est désormais inutile (SFML3 auto-détecté)."
-  fi
-fi
+if [[ "$VIZ_BACKEND" == "SFML" ]]; then SFML_MODE="sfml3-required"; fi
 
 echo
 printf "Configuration retenue:\n"
@@ -268,13 +312,12 @@ if [[ -n "$SFML_DETECTED_VERSION" ]]; then
   printf "  - %-24s : %s\n" "SFML_DETECTED_VERSION" "$SFML_DETECTED_VERSION"
 fi
 printf "  - %-24s : %s\n" "MIMIR_VIZ_BACKEND" "$VIZ_BACKEND"
+printf "  - %-24s : %s\n" "ENABLE_SFML" "$(cmake_bool "${FEATURE_VALUES[ENABLE_SFML]}")"
 printf "  - %-24s : %s\n" "SFML_MODE" "$SFML_MODE"
 printf "  - %-24s : %s\n" "CMAKE_BUILD_TYPE" "$BUILD_TYPE"
 printf "  - %-24s : %s\n" "BUILD_DIR" "$BUILD_DIR"
 
 echo
-
-SKIP_SYSTEM_DEPS="${SKIP_SYSTEM_DEPS:-0}"
 
 if [[ "$SKIP_SYSTEM_DEPS" == "1" ]]; then
   echo "[1/4] Installation des dépendances système... (skipped: SKIP_SYSTEM_DEPS=1)"
@@ -289,6 +332,7 @@ REQUIRED_PACKAGES=(
   lua5.3
   liblua5.3-dev
   pkg-config
+  ninja-build
 )
 
 if [[ "${FEATURE_VALUES[ENABLE_OPENMP]}" == "1" ]]; then
@@ -296,10 +340,10 @@ if [[ "${FEATURE_VALUES[ENABLE_OPENMP]}" == "1" ]]; then
 fi
 
 OPTIONAL_PACKAGES=()
-if [[ "$VIZ_BACKEND" == "QT" ]]; then OPTIONAL_PACKAGES+=(qt6-base-dev); fi
-if [[ "$VIZ_BACKEND" == "GTK" ]]; then OPTIONAL_PACKAGES+=(libgtk-3-dev); fi
+if [[ "$VIZ_BACKEND" == "QT" ]]; then REQUIRED_PACKAGES+=(qt6-base-dev); fi
+if [[ "$VIZ_BACKEND" == "GTK" ]]; then REQUIRED_PACKAGES+=(libgtk-3-dev); fi
 if [[ "$VIZ_BACKEND" == "QT" || "$VIZ_BACKEND" == "GTK" || "$VIZ_BACKEND" == "WEB" ]]; then
-  OPTIONAL_PACKAGES+=(libcairo2-dev)
+  REQUIRED_PACKAGES+=(libcairo2-dev)
 fi
 if [[ "${FEATURE_VALUES[ENABLE_VULKAN]}" == "1" ]]; then
   OPTIONAL_PACKAGES+=(vulkan-tools libvulkan-dev glslang-tools)
@@ -311,11 +355,13 @@ if [[ "${FEATURE_VALUES[ENABLE_FFMPEG]}" == "1" ]]; then
   OPTIONAL_PACKAGES+=(ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev)
 fi
 if [[ "$VIZ_BACKEND" == "SFML" ]]; then
-  # Privilégier SFML3 si disponible; fallback SFML2 uniquement si nécessaire.
-  if apt-cache show libsfml3-dev >/dev/null 2>&1; then
-    OPTIONAL_PACKAGES+=(libsfml3-dev)
-  elif apt-cache show libsfml-dev >/dev/null 2>&1; then
-    OPTIONAL_PACKAGES+=(libsfml-dev)
+  # CMake exige SFML 3; ne pas installer un paquet SFML 2 incompatible.
+  if command -v apt-cache >/dev/null 2>&1 && apt-cache show libsfml3-dev >/dev/null 2>&1; then
+    REQUIRED_PACKAGES+=(libsfml3-dev)
+  elif command -v apt-cache >/dev/null 2>&1 &&
+       sfml_package_version="$(apt-cache show libsfml-dev 2>/dev/null | sed -n 's/^Version: //p' | sed -n '1p')" &&
+       [[ -n "$sfml_package_version" ]] && dpkg --compare-versions "${sfml_package_version#*:}" ge 3.0; then
+    REQUIRED_PACKAGES+=(libsfml-dev)
   else
     echo "[warn] Aucun package SFML apt détecté (libsfml3-dev/libsfml-dev)."
     echo "[note] Installe SFML3 manuellement puis relance ./config.sh."
@@ -330,6 +376,28 @@ if [[ "$SKIP_SYSTEM_DEPS" != "1" ]]; then
 fi
 
 echo "[2/4] Vérification des outils..."
+case "$VIZ_BACKEND" in
+  QT) gui_modules=(Qt6Widgets cairo) ;;
+  GTK) gui_modules=(gtk+-3.0 cairo) ;;
+  WEB) gui_modules=(cairo) ;;
+  *) gui_modules=() ;;
+esac
+for module in "${gui_modules[@]}"; do
+  if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists "$module"; then
+    echo "[error] Dépendance GUI manquante pour $VIZ_BACKEND: $module. Relance sans --skip-system-deps ou installe son paquet de développement." >&2
+    exit 1
+  fi
+  echo "[ok] GUI $VIZ_BACKEND: $module $(pkg-config --modversion "$module")"
+done
+if [[ "$VIZ_BACKEND" == "SFML" ]]; then
+  SFML_DETECTED_VERSION="$(detect_sfml_version)"
+  SFML_MAJOR="${SFML_DETECTED_VERSION%%.*}"
+  if ! [[ "$SFML_MAJOR" =~ ^[0-9]+$ ]] || (( SFML_MAJOR < 3 )); then
+    echo "[error] L'interface SFML exige SFML 3. Installe SFML 3 ou sélectionne --gui QT/GTK/WEB/NONE." >&2
+    exit 1
+  fi
+  echo "[ok] GUI SFML: SFML $SFML_DETECTED_VERSION"
+fi
 cmake --version | head -n 1
 c++ --version | head -n 1
 lua -v || true
@@ -337,7 +405,19 @@ if [[ "${FEATURE_VALUES[ENABLE_VULKAN]}" == "1" ]]; then
   command -v glslangValidator >/dev/null 2>&1 && glslangValidator --version | head -n 1 || true
 fi
 if [[ "${FEATURE_VALUES[ENABLE_OPENCL]}" == "1" ]]; then
-  command -v clinfo >/dev/null 2>&1 && clinfo | sed -n '1,20p' || true
+  # Match the AMD Rusticl activation used by run_mimir.sh. Preserve an explicit
+  # environment override, including an empty value used to disable drivers.
+  if [[ ! -v RUSTICL_ENABLE ]]; then
+    for vendor_file in /sys/class/drm/card*/device/vendor; do
+      [[ -r "$vendor_file" ]] || continue
+      if [[ "$(<"$vendor_file")" == "0x1002" ]]; then
+        export RUSTICL_ENABLE=radeonsi
+        echo "[note] Rusticl AMD: RUSTICL_ENABLE=radeonsi pour la détection OpenCL."
+        break
+      fi
+    done
+  fi
+  command -v clinfo >/dev/null 2>&1 && clinfo --list || true
 fi
 if [[ "${FEATURE_VALUES[MIMIR_AUTO_DETECT_GPU_BACKENDS]}" == "1" ]]; then
   echo "[note] Auto-détection GPU activée: CMake recherchera CUDA et ROCm/HIP."
@@ -364,6 +444,8 @@ for key in "${FEATURE_KEYS[@]}"; do
   CMAKE_ARGS+=("-D${key}=$(cmake_bool "${FEATURE_VALUES[$key]}")")
 done
 
+if [[ -n "$CMAKE_GENERATOR" ]]; then CMAKE_ARGS+=(-G "$CMAKE_GENERATOR"); fi
+CMAKE_ARGS+=("${EXTRA_CMAKE_ARGS[@]}")
 cmake "${CMAKE_ARGS[@]}"
 
 echo "[4/4] Préparation terminée."

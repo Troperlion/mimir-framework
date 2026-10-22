@@ -1,3 +1,4 @@
+#include "test_utils.hpp"
 #include "runtimes/opencl/OpenCLRuntime.hpp"
 #include "runtimes/vulkan/VulkanRuntime.hpp"
 #include "runtimes/cpu/CpuRuntime.hpp"
@@ -34,6 +35,8 @@ void check(AbstractRuntime& gpu,CpuRuntime& cpu,Layer layer,std::vector<std::vec
     std::cout<<gpu.name()<<" "<<layer.type<<" OK\n";
 }
 int main(int argc, char** argv) {
+    // Verify kernel parity and actual device dispatch, independently of speed ranking.
+    setTestEnvironment("MIMIR_PLANNER_AUTOTUNE", "0");
     CpuRuntime cpu; RuntimeConfig cfg; cfg.linear_enabled=true; cfg.linear_min_ops=0; cfg.conv_enabled=true; cfg.conv_min_ops=0; cpu.initialize(cfg);
     std::vector<AbstractRuntime*> backends;
 #ifdef ENABLE_OPENCL

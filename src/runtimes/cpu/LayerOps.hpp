@@ -752,6 +752,8 @@ inline std::vector<float> groupnorm_forward(
     const float* bias = (layer.affine && layer.use_bias) ? 
                         (weights + channels) : nullptr;
     
+    const int workers=HardwareOpt::matmul_workers(num_groups,group_size,4);
+    #pragma omp parallel for if(workers>1) num_threads(workers) schedule(static)
     for (int g = 0; g < num_groups; ++g) {
         // Compute mean for this group
         float mean = 0.0f;
@@ -774,19 +776,20 @@ inline std::vector<float> groupnorm_forward(
         
         // Normalize
         float inv_std = 1.0f / std::sqrt(var + eps);
-        #pragma omp simd
-        for (int i = 0; i < group_size; ++i) {
-            int idx = g * group_size + i;
-            float normalized = (input[idx] - mean) * inv_std;
-            
-            // Apply affine transform (per-channel)
-            if (weights) {
-                int c = (idx / (height * width)) % channels;
-                normalized = normalized * weights[c];
-                if (bias) normalized += bias[c];
+        // Affine parameters are constant across a channel. Hoist channel
+        // indexing instead of integer division/modulo for every spatial value.
+        const int spatial=height*width;
+        for(int c=0;c<channels_per_group;++c){
+            const int channel=g*channels_per_group+c,base=channel*spatial;
+            const float gamma=weights?weights[channel]:1.f;
+            const float beta=bias?bias[channel]:0.f;
+            #pragma omp simd
+            for(int i=0;i<spatial;++i){
+                float normalized=(input[base+i]-mean)*inv_std;
+                if(weights)normalized*=gamma;
+                if(bias)normalized+=beta;
+                output[base+i]=normalized;
             }
-            
-            output[idx] = normalized;
         }
     }
     

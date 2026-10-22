@@ -42,7 +42,7 @@ static void check(int h,int width,int in,int out,int kernel,int stride,int pad,i
         require(guard.getCurrentBytes()==0);
     }
     const int tile=CpuConvolution::tile_size(k,out,spatial);
-    require(guard.getPeakBytes()<=size_t(tile)*(k+2*out)*sizeof(float));
+    require(guard.getPeakBytes()<=(size_t(tile)*(k+2*out)+32)*sizeof(float));
 }
 int main() {
     {

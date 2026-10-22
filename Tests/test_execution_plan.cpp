@@ -138,6 +138,16 @@ int main() {
     TASSERT_TRUE(cost_placed.layers[0].runtime == RuntimeKind::CPU);
     TASSERT_TRUE(cost_placed.layers[0].estimated_compute_cost > 0.0);
 
+    cost_placed.layers[0].measured_costs={{&vulkan, Mimir::Planning::Calibration::configuration(vulkan),1e-7},{&cpu,Mimir::Planning::Calibration::configuration(cpu),1e-3}};
+    Mimir::Planning::apply_runtime_placement(cost_placed,{&vulkan,&cpu});
+    TASSERT_TRUE(cost_placed.layers[0].runtime==RuntimeKind::Vulkan);
+    TASSERT_TRUE(cost_placed.layers[0].measured_host_roundtrip);
+    TASSERT_TRUE(cost_placed.tensors.at(cost_placed.layers[0].output).preferred_location==Mimir::Planning::MemoryLocation::Host);
+    TASSERT_TRUE(cost_placed.transfers.size()==2); // real host upload AND download
+    cost_placed.layers[0].measured_costs[0].seconds=.01;
+    Mimir::Planning::apply_runtime_placement(cost_placed,{&vulkan,&cpu});
+    TASSERT_TRUE(cost_placed.layers[0].runtime==RuntimeKind::CPU);
+
     Mimir::RuntimeTensorHandle resident({2, 3}, Mimir::DType::F32);
     TASSERT_TRUE(resident.bytes() == 24);
     resident.prepareHostWrite();

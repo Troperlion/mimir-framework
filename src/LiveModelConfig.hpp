@@ -1,4 +1,5 @@
 #pragma once
+#include "GradientDiagnostics.hpp"
 #include "include/json.hpp"
 #include <algorithm>
 #include <cmath>
@@ -14,6 +15,7 @@
 // UI threads submit typed requests; only the training thread applies them.
 class LiveModelConfig {
 public:
+    GradientDiagnostics gradient_diagnostics;
     // The UI queues exports; model access stays on the training thread.
     bool requestDebugJson(const std::string& path = "checkpoints/debug/model.debug.json") {
         std::lock_guard<std::mutex> lock(mutex_);
