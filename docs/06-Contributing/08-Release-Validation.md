@@ -150,3 +150,8 @@ Le job MSVC suivant a permis de corriger la forme GNU `__restrict__` dans le
 calcul spectral : le qualificatif est maintenant choisi selon le compilateur.
 Le contrôle MSVC initial compile aussi cette unité sans dépendances GPU. Les
 tests de pertes de reconstruction sont relancés sur le parcours CPU.
+
+La compilation native a également révélé les appels POSIX `popen`/`pclose`
+dans les métadonnées Git des checkpoints. Sous Windows, cette lecture utilise
+maintenant `_popen`/`_pclose` et redirige les erreurs vers `NUL` ; Linux conserve
+les appels POSIX et `/dev/null`.

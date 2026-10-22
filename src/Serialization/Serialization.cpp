@@ -10,6 +10,7 @@
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
+#include <cstdio>
 #include <algorithm>
 #include <cctype>
 
@@ -255,8 +256,13 @@ std::string get_mimir_version() {
 
 std::string get_git_commit() {
     // Try to get git commit hash
+#ifdef _WIN32
+    const char* cmd = "git rev-parse --short HEAD 2>NUL";
+    FILE* pipe = _popen(cmd, "r");
+#else
     const char* cmd = "git rev-parse --short HEAD 2>/dev/null";
     FILE* pipe = popen(cmd, "r");
+#endif
     if (!pipe) return "";
     
     char buffer[128];
@@ -268,7 +274,11 @@ std::string get_git_commit() {
             result.pop_back();
         }
     }
+#ifdef _WIN32
+    _pclose(pipe);
+#else
     pclose(pipe);
+#endif
     return result;
 }
 
