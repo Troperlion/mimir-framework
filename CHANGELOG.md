@@ -58,6 +58,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   chaînes brutes ni directives imbriquées visibles au préprocesseur MSVC. Un test
   indépendant du SDK GPU vérifie leur identité octet par octet.
 
+- Le qualificatif d’aliasing du calcul spectral utilise la forme MSVC ou GNU
+  selon le compilateur, sans modifier les opérations numériques.
+
 ### Validation et publication
 
 - Documentation des nouvelles options de calibration et de la procédure de

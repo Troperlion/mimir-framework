@@ -95,6 +95,11 @@ jobs:
             "/Fe:$env:RUNNER_TEMP/mimir-shader-text.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "$env:RUNNER_TEMP/mimir-shader-text.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & cl.exe /nologo /EHsc /std:c++17 /c /Isrc /Isrc/include `
+            src/runtimes/ops_loss_and_grad.cpp `
+            "/Fo:$env:RUNNER_TEMP/mimir-reconstruction-loss.obj"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

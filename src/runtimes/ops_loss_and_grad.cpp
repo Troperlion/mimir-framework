@@ -10,6 +10,12 @@
 #include <mutex>
 #include <unordered_map>
 
+#if defined(_MSC_VER)
+#define MIMIR_LOSS_RESTRICT __restrict
+#else
+#define MIMIR_LOSS_RESTRICT __restrict__
+#endif
+
 namespace RuntimeLossGrad {
 
 float sigmoid_scalar(float x) {
@@ -403,23 +409,23 @@ static void dct2d_ortho_hwc(
     out.assign(n, 0.0f);
     if (in.size() < n) return;
 
-    const float* __restrict__ in_ptr = in.data();
-    float* __restrict__ out_ptr = out.data();
+    const float* MIMIR_LOSS_RESTRICT in_ptr = in.data();
+    float* MIMIR_LOSS_RESTRICT out_ptr = out.data();
 
     const auto& cw = get_dct1d_cache(W);
     const auto& ch = get_dct1d_cache(H);
-    const float* __restrict__ cw_cos = cw.cos_nk.data();
-    const float* __restrict__ cw_alpha = cw.alpha_k.data();
-    const float* __restrict__ ch_cos = ch.cos_nk.data();
-    const float* __restrict__ ch_alpha = ch.alpha_k.data();
+    const float* MIMIR_LOSS_RESTRICT cw_cos = cw.cos_nk.data();
+    const float* MIMIR_LOSS_RESTRICT cw_alpha = cw.alpha_k.data();
+    const float* MIMIR_LOSS_RESTRICT ch_cos = ch.cos_nk.data();
+    const float* MIMIR_LOSS_RESTRICT ch_alpha = ch.alpha_k.data();
 
     const size_t n2 = static_cast<size_t>(W) * static_cast<size_t>(H);
     static thread_local std::vector<float> tmp_row;
     static thread_local std::vector<float> tmp_col;
     tmp_row.resize(n2);
     tmp_col.resize(n2);
-    float* __restrict__ tmp_row_ptr = tmp_row.data();
-    float* __restrict__ tmp_col_ptr = tmp_col.data();
+    float* MIMIR_LOSS_RESTRICT tmp_row_ptr = tmp_row.data();
+    float* MIMIR_LOSS_RESTRICT tmp_col_ptr = tmp_col.data();
 
     const size_t stride_c = static_cast<size_t>(C);
     const size_t stride_wc = static_cast<size_t>(W) * stride_c;
@@ -477,23 +483,23 @@ static void idct2d_ortho_hwc(
     out.assign(n, 0.0f);
     if (in.size() < n) return;
 
-    const float* __restrict__ in_ptr = in.data();
-    float* __restrict__ out_ptr = out.data();
+    const float* MIMIR_LOSS_RESTRICT in_ptr = in.data();
+    float* MIMIR_LOSS_RESTRICT out_ptr = out.data();
 
     const auto& cw = get_dct1d_cache(W);
     const auto& ch = get_dct1d_cache(H);
-    const float* __restrict__ cw_cos = cw.cos_nk.data();
-    const float* __restrict__ cw_alpha = cw.alpha_k.data();
-    const float* __restrict__ ch_cos = ch.cos_nk.data();
-    const float* __restrict__ ch_alpha = ch.alpha_k.data();
+    const float* MIMIR_LOSS_RESTRICT cw_cos = cw.cos_nk.data();
+    const float* MIMIR_LOSS_RESTRICT cw_alpha = cw.alpha_k.data();
+    const float* MIMIR_LOSS_RESTRICT ch_cos = ch.cos_nk.data();
+    const float* MIMIR_LOSS_RESTRICT ch_alpha = ch.alpha_k.data();
 
     const size_t n2 = static_cast<size_t>(W) * static_cast<size_t>(H);
     static thread_local std::vector<float> tmp_row;
     static thread_local std::vector<float> tmp_col;
     tmp_row.resize(n2);
     tmp_col.resize(n2);
-    float* __restrict__ tmp_row_ptr = tmp_row.data();
-    float* __restrict__ tmp_col_ptr = tmp_col.data();
+    float* MIMIR_LOSS_RESTRICT tmp_row_ptr = tmp_row.data();
+    float* MIMIR_LOSS_RESTRICT tmp_col_ptr = tmp_col.data();
 
     const size_t stride_c = static_cast<size_t>(C);
     const size_t stride_wc = static_cast<size_t>(W) * stride_c;
@@ -559,9 +565,9 @@ LossWithGrad spectral_dct_l1_hwc(
 
     static thread_local std::vector<float> grad_coeff;
     grad_coeff.assign(n, 0.0f);
-    const float* __restrict__ coeff_p_ptr = coeff_p.data();
-    const float* __restrict__ coeff_t_ptr = coeff_t.data();
-    float* __restrict__ grad_coeff_ptr = grad_coeff.data();
+    const float* MIMIR_LOSS_RESTRICT coeff_p_ptr = coeff_p.data();
+    const float* MIMIR_LOSS_RESTRICT coeff_t_ptr = coeff_t.data();
+    float* MIMIR_LOSS_RESTRICT grad_coeff_ptr = grad_coeff.data();
     const double inv_n = 1.0 / static_cast<double>(std::max<size_t>(1, n));
     double sum_abs = 0.0;
     for (size_t i = 0; i < n; ++i) {
@@ -578,3 +584,5 @@ LossWithGrad spectral_dct_l1_hwc(
 
 } // namespace Host
 } // namespace RuntimeLossGrad
+
+#undef MIMIR_LOSS_RESTRICT

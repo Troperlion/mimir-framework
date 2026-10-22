@@ -144,3 +144,9 @@ snapshots embarqués ne contiennent plus ces sorties locales (`.bit`, `.svf` et
 netlists générées) ; les sources FPGA versionnées restent disponibles. Le test
 vérifie chaque fichier de l’archive contre le checkout, ce qui permet aussi de
 régénérer le snapshot depuis un clone propre.
+
+
+Le job MSVC suivant a permis de corriger la forme GNU `__restrict__` dans le
+calcul spectral : le qualificatif est maintenant choisi selon le compilateur.
+Le contrôle MSVC initial compile aussi cette unité sans dépendances GPU. Les
+tests de pertes de reconstruction sont relancés sur le parcours CPU.
