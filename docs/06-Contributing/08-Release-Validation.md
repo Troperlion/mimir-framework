@@ -155,3 +155,20 @@ La compilation native a également révélé les appels POSIX `popen`/`pclose`
 dans les métadonnées Git des checkpoints. Sous Windows, cette lecture utilise
 maintenant `_popen`/`_pclose` et redirige les erreurs vers `NUL` ; Linux conserve
 les appels POSIX et `/dev/null`.
+
+### Exécution des tests MSVC
+
+Une fois la compilation native réussie, les tests Windows ont révélé une erreur
+réelle de conversion FP16 logicielle : l'exposant non signé transformait le zéro
+et les petites valeurs en infinis. Le fallback traite désormais les zéros signés,
+les sous-normaux, les infinis/NaN et l'arrondi au plus proche pair. Le nouveau test
+`RuntimeTest.SoftwareFP16` vérifie le chemin logiciel sur toutes les valeurs
+FP16 finies, même lorsque le compilateur active F16C.
+
+L'affichage htop ignore aussi un descripteur négatif plutôt que de déclencher le
+gestionnaire de paramètre invalide du CRT Windows. Les fixtures ferment leur
+fichier CSV avant suppression, utilisent des chemins compatibles Windows et
+comparent les chemins comme objets `filesystem`. La fixture de masquage emploie
+une cible asymétrique afin de ne pas dépendre du générateur aléatoire de la
+bibliothèque standard. La fixture de calibration mesure un délai actif borné ;
+elle ne dépend plus de la granularité de `sleep_for` sous Windows.

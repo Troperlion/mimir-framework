@@ -20,6 +20,7 @@ int main() {
     const std::string csv{
         std::istreambuf_iterator<char>(input),
         std::istreambuf_iterator<char>()};
+    input.close();
     std::filesystem::remove(csv_path);
 
     TASSERT_TRUE(csv.find("val_loss,val_mse,val_step") != std::string::npos);

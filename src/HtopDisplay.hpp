@@ -79,7 +79,7 @@ private:
 
         const char* data = pbase();
         std::ptrdiff_t remaining = n;
-        while (remaining > 0) {
+        while (fd_ >= 0 && remaining > 0) {
 #if defined(_WIN32)
             const int written = _write(fd_, data, static_cast<unsigned int>(remaining));
 #else

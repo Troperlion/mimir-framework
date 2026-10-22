@@ -277,7 +277,7 @@ int main() {
     )";
 
     std::string mpk_code_filled = mpk_code;
-    const std::string mpk_path_str = mpk_path.string();
+    const std::string mpk_path_str = mpk_path.generic_string();
     const std::string placeholder = "__MPK_PATH__";
     size_t pos = 0;
     while ((pos = mpk_code_filled.find(placeholder, pos)) != std::string::npos) {

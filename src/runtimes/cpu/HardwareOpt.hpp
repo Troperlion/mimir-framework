@@ -55,19 +55,34 @@ inline void fp32_to_fp16_f16c(uint16_t* dst, const float* src, size_t count) {
         dst[i] = _mm_extract_epi16(f16, 0);
     }
 #else
-    // Fallback software avec OpenMP
-    #pragma omp simd
     for (size_t i = 0; i < count; ++i) {
-        union { float f; uint32_t u; } v;
-        v.f = src[i];
-        uint32_t sign = (v.u >> 16) & 0x8000;
-        uint32_t exp = ((v.u >> 23) & 0xFF) - 112;
-        uint32_t mant = (v.u >> 13) & 0x3FF;
-        
-        if (exp > 30) exp = 31, mant = 0; // Inf/NaN
-        else if (exp < 0) exp = 0, mant = 0; // Denorm -> 0
-        
-        dst[i] = sign | (exp << 10) | mant;
+        uint32_t bits;
+        std::memcpy(&bits, src + i, sizeof(bits));
+        const uint32_t sign = (bits >> 16) & 0x8000u;
+        const uint32_t exponent = (bits >> 23) & 0xffu;
+        uint32_t mantissa = bits & 0x7fffffu;
+        if (exponent == 255) {
+            dst[i] = static_cast<uint16_t>(sign | 0x7c00u | (mantissa ? 0x200u : 0));
+            continue;
+        }
+        const int half_exponent = static_cast<int>(exponent) - 112;
+        if (half_exponent >= 31) {
+            dst[i] = static_cast<uint16_t>(sign | 0x7c00u);
+        } else if (half_exponent <= 0) {
+            if (half_exponent < -10) {
+                dst[i] = static_cast<uint16_t>(sign);
+                continue;
+            }
+            mantissa |= 0x800000u;
+            const unsigned shift = static_cast<unsigned>(14 - half_exponent);
+            const uint32_t rounded = (mantissa + ((1u << (shift - 1)) - 1u)
+                                      + ((mantissa >> shift) & 1u)) >> shift;
+            dst[i] = static_cast<uint16_t>(sign | rounded);
+        } else {
+            // Round to nearest, ties to even; carry may promote the exponent.
+            const uint32_t rounded = (mantissa + 0xfffu + ((mantissa >> 13) & 1u)) >> 13;
+            dst[i] = static_cast<uint16_t>(sign | ((static_cast<uint32_t>(half_exponent) << 10) + rounded));
+        }
     }
 #endif
 }
@@ -89,25 +104,25 @@ inline void fp16_to_fp32_f16c(float* dst, const uint16_t* src, size_t count) {
         dst[i] = _mm_cvtss_f32(f32);
     }
 #else
-    // Fallback software avec OpenMP
-    #pragma omp simd
     for (size_t i = 0; i < count; ++i) {
-        uint16_t h = src[i];
-        uint32_t sign = (h & 0x8000) << 16;
-        uint32_t exp = ((h >> 10) & 0x1F);
-        uint32_t mant = (h & 0x3FF);
-        
-        if (exp == 0) {
-            exp = 0; mant = 0; // Denorm -> 0
-        } else if (exp == 31) {
-            exp = 255; // Inf/NaN
+        const uint32_t half = src[i];
+        const uint32_t sign = (half & 0x8000u) << 16;
+        const uint32_t exponent = (half >> 10) & 31u;
+        uint32_t mantissa = half & 0x3ffu;
+        uint32_t bits;
+        if (exponent == 0) {
+            bits = sign;
+            if (mantissa) {
+                int unbiased = -14;
+                while ((mantissa & 0x400u) == 0) { mantissa <<= 1; --unbiased; }
+                bits |= (static_cast<uint32_t>(unbiased + 127) << 23) | ((mantissa & 0x3ffu) << 13);
+            }
+        } else if (exponent == 31) {
+            bits = sign | 0x7f800000u | (mantissa << 13);
         } else {
-            exp += 112; // Rebias
+            bits = sign | ((exponent + 112u) << 23) | (mantissa << 13);
         }
-        
-        union { float f; uint32_t u; } v;
-        v.u = sign | (exp << 23) | (mant << 13);
-        dst[i] = v.f;
+        std::memcpy(dst + i, &bits, sizeof(bits));
     }
 #endif
 }

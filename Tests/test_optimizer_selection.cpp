@@ -22,7 +22,10 @@ public:
         ++calls;
         int delay=delay_us;
         if(last_sample_outlier)delay=(calls==1||calls==6)?0:2000;
-        if(delay)std::this_thread::sleep_for(std::chrono::microseconds(delay));
+        if(delay) {
+            const auto until=std::chrono::steady_clock::now()+std::chrono::microseconds(delay);
+            while(std::chrono::steady_clock::now()<until)std::this_thread::yield();
+        }
         if(fail){r.weights[0]=900;if(r.first_moment)r.first_moment[0]=900;return false;}
         optimizerHostStep(r);return true;
     }

@@ -104,7 +104,7 @@ int main() {
     auto items = loadDataset(root.string(), 8, 4, 2);
     TASSERT_TRUE(items.size() == 3);
     auto& portrait = named(items, "portraits/photo");
-    TASSERT_TRUE(portrait.annotation_file == annotation_path.string());
+    TASSERT_TRUE(fs::path(portrait.annotation_file) == annotation_path);
     TASSERT_TRUE(portrait.text_file == annotation_path.string());
     TASSERT_TRUE(!portrait.text && !portrait.annotation && !portrait.img_loaded);
     TASSERT_TRUE(portrait.countModalities() == 2);

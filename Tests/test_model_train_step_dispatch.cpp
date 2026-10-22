@@ -62,7 +62,7 @@ int main() {
     vision_model.initializeWeights("xavier", 321u);
 
     std::vector<float> image = {0.1f, 0.2f, 0.3f, 0.4f};
-    std::vector<float> image_target = {0.0f, 0.0f, 0.0f, 0.0f};
+    std::vector<float> image_target = {0.0f, 0.0f, 3.0f, 3.0f};
     std::vector<float> image_mask = {0.4f, 0.4f, 1.6f, 1.6f};
     Model::TrainStepRequest vision_request;
     vision_request.float_inputs["__input__"] = &image;

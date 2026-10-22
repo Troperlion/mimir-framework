@@ -59,7 +59,7 @@ int main() {
     TASSERT_TRUE(!FpgaRuntime::detectDevice(tree.path().string()).has_value());
 
     addUsbDevice(tree.path(), "icesugar-pro", "1D50", "602B", "0710ABCDEF");
-    fs::create_directories(tree.path() / "icesugar-pro" / "1-1:1.0" / "ttyACM0");
+    fs::create_directories(tree.path() / "icesugar-pro" / "usb-interface" / "ttyACM0");
 
     const auto detected = FpgaRuntime::detectDevice(tree.path().string());
     TASSERT_TRUE(detected.has_value());
