@@ -1,0 +1,18 @@
+services:
+  mimir:
+    image: mimir:local
+    build:
+      context: .
+      args:
+        BUILD_JOBS: ${BUILD_JOBS:-2}
+    working_dir: /workspace
+    user: "${MIMIR_UID:-1000}:${MIMIR_GID:-1000}"
+    environment:
+      SCRIPT: ${SCRIPT:-}
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-2}
+      MIMIR_DISABLE_CUDA: "1"
+      MIMIR_DISABLE_ROCM: "1"
+      MIMIR_DISABLE_VULKAN: "1"
+      MIMIR_DISABLE_OPENCL: "1"
+    volumes:
+      - ./:/workspace

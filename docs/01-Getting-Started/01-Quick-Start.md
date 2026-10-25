@@ -26,6 +26,43 @@ Temps moyen : 10 à 15 minutes.
 - Linux
 - CMake + compilateur C++17
 
+## Démarrage rapide avec Docker (Alpine)
+
+Si Docker Engine et le plugin Compose sont installés, le conteneur évite
+d'installer localement les dépendances de compilation. Depuis la racine du dépôt,
+construire l'image une fois :
+
+```bash
+docker compose build
+```
+
+Le service lance toujours Mímir via `run_mimir.sh`, qui applique la
+configuration runtime. Le dépôt est monté dans `/workspace` pour fournir les
+scripts et conserver les fichiers produits.
+Choisir l'une des deux façons de désigner le script :
+
+```bash
+# Script Lua donné en argument
+docker compose run --rm mimir \
+  --lua scripts/templates/template_new_model.lua
+
+# Ou script choisi avec SCRIPT, avec les arguments Lua après --
+SCRIPT=scripts/benchmarks/benchmark_nms.lua \
+  docker compose run --rm mimir -- --quick
+```
+
+Les scripts, données et sorties restent sur la machine hôte. Le conteneur
+s'exécute avec UID/GID `1000` par défaut ; les adapter à l'utilisateur courant
+pour éviter des fichiers appartenant à un autre utilisateur :
+
+```bash
+MIMIR_UID="$(id -u)" MIMIR_GID="$(id -g)" \
+  docker compose run --rm mimir --version
+```
+
+La variable `SCRIPT` et l'option CLI sont deux modes alternatifs : ne pas
+combiner `SCRIPT` avec un autre `--lua`.
+
 ## 1) Build
 
 ```bash

@@ -1,26 +1,19 @@
-# syntax=docker/dockerfile:1.7
+ARG ALPINE_VERSION=3.22
 
-ARG UBUNTU_VERSION=24.04
+FROM alpine:${ALPINE_VERSION} AS builder
 
-FROM ubuntu:${UBUNTU_VERSION} AS builder
-
-ARG DEBIAN_FRONTEND=noninteractive
 ARG BUILD_JOBS=2
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
+RUN apk add --no-cache \
+        build-base \
         ca-certificates \
         cmake \
         ninja-build \
-        pkg-config \
-        liblua5.3-dev \
-        liblz4-dev \
-        libavcodec-dev \
-        libavformat-dev \
-        libavutil-dev \
-        libswresample-dev \
-        libswscale-dev \
-    && rm -rf /var/lib/apt/lists/*
+        ninja-is-really-ninja \
+        pkgconf \
+        lua5.3-dev \
+        lz4-dev \
+        ffmpeg-dev
 
 WORKDIR /src
 COPY . .
@@ -33,6 +26,7 @@ RUN cmake -S . -B build-container -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG" \
         -DMIMIR_RUNTIME_OUTPUT_DIRECTORY=/src/container-bin \
+        -DLUA_LIBRARY=/usr/lib/lua5.3/liblua.so \
         -DMIMIR_ENABLE_TESTS=OFF \
         -DENABLE_SIMD=ON \
         -DENABLE_OPENMP=ON \
@@ -50,42 +44,33 @@ RUN cmake -S . -B build-container -G Ninja \
     && cmake --build build-container --target mimir --parallel "${BUILD_JOBS}" \
     && /src/container-bin/mimir --version
 
-FROM ubuntu:${UBUNTU_VERSION} AS runtime
+FROM alpine:${ALPINE_VERSION} AS runtime
 
-ARG DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
+        bash \
         ca-certificates \
-        ffmpeg \
-        libgomp1 \
-        liblua5.3-0 \
-        liblz4-1 \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system --gid 10001 mimir \
-    && useradd --system --uid 10001 --gid mimir --create-home mimir
+        coreutils \
+        ffmpeg-libs \
+        libgomp \
+        libstdc++ \
+        lua5.3-libs \
+        lz4-libs \
+    && addgroup -S -g 10001 mimir \
+    && adduser -S -D -H -u 10001 -G mimir mimir
 
 WORKDIR /workspace
 
 COPY --from=builder /src/container-bin/mimir /usr/local/bin/mimir
-COPY --from=builder --chown=mimir:mimir /src/scripts ./scripts
-COPY --from=builder --chown=mimir:mimir /src/configs ./configs
-COPY --from=builder --chown=mimir:mimir /src/_archi ./_archi
-COPY --from=builder --chown=mimir:mimir /src/assets ./assets
-COPY --from=builder --chown=mimir:mimir /src/mimir-api.lua ./mimir-api.lua
-COPY --from=builder --chown=mimir:mimir /src/VERSION ./VERSION
-
-RUN mkdir -p datasets checkpoint checkpoints logs .mimir-spill \
-    && chown -R mimir:mimir /workspace
+COPY run_mimir.sh /usr/local/bin/run_mimir.sh
+RUN chmod 755 /usr/local/bin/run_mimir.sh && chown mimir:mimir /workspace
 
 USER mimir
 
-ENV OMP_NUM_THREADS=2 \
+ENV MIMIR_EXECUTABLE=/usr/local/bin/mimir \
+    OMP_NUM_THREADS=2 \
     MIMIR_DISABLE_CUDA=1 \
     MIMIR_DISABLE_ROCM=1 \
     MIMIR_DISABLE_VULKAN=1 \
     MIMIR_DISABLE_OPENCL=1
 
-VOLUME ["/workspace/datasets", "/workspace/checkpoint", "/workspace/checkpoints"]
-
-ENTRYPOINT ["mimir"]
-CMD ["--help"]
+ENTRYPOINT ["/bin/sh", "-c", "if [ -n \"${SCRIPT:-}\" ]; then exec /usr/local/bin/run_mimir.sh --lua \"$SCRIPT\" \"$@\"; else exec /usr/local/bin/run_mimir.sh \"$@\"; fi", "mimir"]

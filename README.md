@@ -130,6 +130,32 @@ cmake --build build --parallel 2
 ./bin/mimir --lua scripts/templates/template_new_model.lua
 ```
 
+#### Variante Docker Compose (Alpine)
+
+Pour démarrer sans installer les dépendances C++ localement, construis l'image
+puis lance un script depuis le dépôt monté :
+
+```bash
+docker compose build
+MIMIR_UID="$(id -u)" MIMIR_GID="$(id -g)" \
+  docker compose run --rm mimir \
+  --lua scripts/templates/template_new_model.lua
+```
+
+Autre possibilité, sélectionner le script avec `SCRIPT` et passer ses options
+Lua après `--` :
+
+```bash
+MIMIR_UID="$(id -u)" MIMIR_GID="$(id -g)" \
+SCRIPT=scripts/benchmarks/benchmark_nms.lua \
+  docker compose run --rm mimir -- --quick
+```
+
+Le conteneur embarque uniquement le binaire et ses bibliothèques ; scripts,
+configurations, données et sorties sont dans le dépôt monté. Pour le détail
+des options Docker et des exemples, voir [Docker (CPU/headless)](#docker-cpuheadless)
+plus bas.
+
 Notes rapides sur `config.sh`:
 
 - Script Linux (Debian/Ubuntu) qui installe les dependances et configure CMake dans `build/`.
@@ -184,26 +210,37 @@ script a besoin de la table complète et des arguments positionnels.
 
 ### Docker (CPU/headless)
 
-L'image Docker générique compile Mímir sans dépendre des instructions CPU de la
-machine de build. Elle active Lua, OpenMP, LZ4 et FFmpeg, mais désactive SFML,
-CUDA, ROCm, Vulkan, OpenCL et les bridges externes.
+L'image Docker générique est basée sur Alpine Linux et compile Mímir sans
+dépendre des instructions CPU de la machine de build. Elle active Lua, OpenMP,
+LZ4 et FFmpeg, mais désactive SFML, CUDA, ROCm, Vulkan, OpenCL et les bridges
+externes.
+
+L'image runtime contient le binaire Mímir, ses bibliothèques et le lanceur
+`run_mimir.sh` ; scripts, configurations, données et sorties sont fournis par
+le montage du répertoire du projet dans le service Compose. Tous les lancements
+du conteneur passent par ce lanceur afin d'appliquer la configuration runtime.
 
 ```bash
-docker build --build-arg BUILD_JOBS=4 -t mimir:3.5.0 .
-docker run --rm mimir:3.5.0 --version
-docker run --rm mimir:3.5.0 \
+docker compose build
+docker compose run --rm mimir --version
+
+# Passer le script et ses options directement sur la ligne de commande.
+docker compose run --rm mimir \
   --lua scripts/templates/template_new_model.lua
+
+# Ou sélectionner le script avec SCRIPT.
+SCRIPT=scripts/templates/template_new_model.lua \
+  docker compose run --rm mimir
+
+# Les arguments Lua sont transmis après le séparateur --.
+SCRIPT=scripts/benchmarks/benchmark_nms.lua \
+  docker compose run --rm mimir -- --quick
 ```
 
-Pour utiliser des données et conserver les checkpoints :
-
-```bash
-docker run --rm \
-  -v "$PWD/datasets:/workspace/datasets:ro" \
-  -v "$PWD/checkpoint:/workspace/checkpoint" \
-  mimir:3.5.0 \
-  --conf configs/vae_conv-training.json
-```
+Compose monte le dépôt dans `/workspace` afin que le binaire puisse accéder
+aux scripts et à leurs modules. Les UID/GID par défaut du processus sont 1000 ;
+définir `MIMIR_UID` et `MIMIR_GID` pour que les fichiers produits appartiennent
+à l'utilisateur hôte approprié.
 
 La configuration JSON peut remplacer `OMP_NUM_THREADS` grâce à sa section
 `env`. Les backends GPU nécessitent des images spécialisées avec leurs SDK et
