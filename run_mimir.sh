@@ -2,7 +2,7 @@
 
 # GPU runtime switches (1=enabled, 0=disabled), applied when compiled and available.
 # Notebook/runtime MIMIR_DISABLE_* overrides remain authoritative for CPU/TPU runs.
-MIMIR_GPU_CUDA="${MIMIR_GPU_CUDA:-1}"
+MIMIR_GPU_CUDA="${MIMIR_GPU_CUDA:-0}"
 MIMIR_GPU_VULKAN="${MIMIR_GPU_VULKAN:-1}"
 MIMIR_GPU_OPENCL="${MIMIR_GPU_OPENCL:-1}"
 for runtime in CUDA VULKAN OPENCL; do
@@ -22,7 +22,7 @@ export MIMIR_ALLOCATOR_LOG_VERBOSE=0
 
 # Global execution planner (override possible via environment).
 export MIMIR_ENABLE_PLANNER="${MIMIR_ENABLE_PLANNER:-1}"
-export MIMIR_PLANNER_MODE="${MIMIR_PLANNER_MODE:-cost}" # legacy | static | cost
+export MIMIR_PLANNER_MODE="${MIMIR_PLANNER_MODE:-static}" # legacy | static | cost
 export MIMIR_PLANNER_BUFFER_REUSE="${MIMIR_PLANNER_BUFFER_REUSE:-1}"
 export MIMIR_PLANNER_FUSION="${MIMIR_PLANNER_FUSION:-1}"
 export MIMIR_PLANNER_COST_MODEL="${MIMIR_PLANNER_COST_MODEL:-1}"
@@ -91,7 +91,7 @@ if [ "${MIMIR_LAUNCH_VERBOSE:-0}" = "1" ]; then
 	echo "  MIMIR_DISABLE_ROCM=$MIMIR_DISABLE_ROCM"
 	echo "  RUSTICL_ENABLE=$RUSTICL_ENABLE"
 else
-	echo "Mímir: threads=$OMP_NUM_THREADS/$NPROC rocm_disabled=$MIMIR_DISABLE_ROCM rusticl=$RUSTICL_ENABLE"
+	echo "\n\n\t→\tMímir: threads=$OMP_NUM_THREADS/$NPROC rocm_disabled=$MIMIR_DISABLE_ROCM rusticl=$RUSTICL_ENABLE"
 fi
 
 # Lancer mimir

@@ -13,6 +13,26 @@ ROOT=Path(__file__).resolve().parents[2]
 
 
 class EnvironmentDetection(unittest.TestCase):
+    def test_benchmark_cpu_reference_disables_tpu(self):
+        notebook=json.loads((ROOT/'Colab-bench-multi-framework.ipynb').read_text())
+        source=next(''.join(c['source']) for c in notebook['cells']
+                    if 'REFERENCE_ENV=dict(' in ''.join(c['source']))
+        assignment=next(n for n in ast.parse(source).body if isinstance(n,ast.Assign)
+                        and any(isinstance(t,ast.Name) and t.id=='REFERENCE_ENV' for t in n.targets))
+        for backend in ('cpu','cuda','tpu'):
+            with self.subTest(backend=backend):
+                runtime={'MIMIR_TPU':'1' if backend=='tpu' else '0',
+                         'MIMIR_DISABLE_CPU':'1','JAX_PLATFORMS':backend}
+                original=runtime.copy()
+                scope={'RUNTIME_ENV':runtime}
+                exec(compile(ast.Module(body=[assignment],type_ignores=[]),'<reference-env>','exec'),scope)
+                reference=scope['REFERENCE_ENV']
+                self.assertEqual(reference['MIMIR_TPU'],'0')
+                self.assertEqual(reference['MIMIR_DISABLE_CPU'],'0')
+                for device in ('CUDA','ROCM','VULKAN','OPENCL'):
+                    self.assertEqual(reference['MIMIR_DISABLE_'+device],'1')
+                self.assertEqual(runtime,original)
+
     def check_notebook(self,name):
         notebook=json.loads((ROOT/name).read_text())
         for cell in notebook['cells']:

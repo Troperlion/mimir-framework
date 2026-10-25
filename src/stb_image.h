@@ -7020,7 +7020,9 @@ static void *stbi__load_gif_main(stbi__context *s, int **delays, int *x, int *y,
             }
             memcpy( out + ((layers - 1) * stride), u, stride );
             if (layers >= 2) {
-               two_back = out - 2 * stride;
+               // Restore from the frame preceding the latest one, within the
+               // (possibly reallocated) output buffer.
+               two_back = out + (layers - 2) * stride;
             }
 
             if (delays) {

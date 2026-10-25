@@ -13,8 +13,8 @@
 | `main` | [![unit-tests main](https://github.com/brit45/mimir-framework/actions/workflows/unit-tests.yml/badge.svg?branch=main)](https://github.com/brit45/mimir-framework/actions/workflows/unit-tests.yml) | [![publish-wiki main](https://github.com/brit45/mimir-framework/actions/workflows/wiki.yml/badge.svg?branch=main)](https://github.com/brit45/mimir-framework/actions/workflows/wiki.yml) |
 | `develop` | [![unit-tests develop](https://github.com/brit45/mimir-framework/actions/workflows/unit-tests.yml/badge.svg?branch=develop)](https://github.com/brit45/mimir-framework/actions/workflows/unit-tests.yml) | [![publish-wiki develop](https://github.com/brit45/mimir-framework/actions/workflows/wiki.yml/badge.svg?branch=develop)](https://github.com/brit45/mimir-framework/actions/workflows/wiki.yml) |
 
-Version engine : **3.5.0**
-Révision documentation : **2026-10-22**
+Version engine : **3.6.0**
+Révision documentation : **2026-10-24**
 
 Consultez d'abord l'[état réel du projet](./docs/00-PROJECT-STATUS.md) : cette
 page distingue les chemins stables, partiels, expérimentaux, placeholders et
@@ -432,22 +432,30 @@ Loader multimodal intégré (image/texte actuellement, audio/vidéo prévu), ave
 
 ### Visualisation
 
-Interface SFML temps réel pour:
+Interface temps réel (backend SFML, Qt, GTK ou Web choisi à la compilation) pour:
 
 - loss et métriques,
 - reconstructions et activations,
 - heatmaps et latent,
 - progression d'entraînement.
 
-Nouveautés UI (v3.1.x):
+Fonctions Viz actuelles:
 
 - rendu `Blocks / Layers` en mode `HEATMAP` ou `REEL` (`M`),
 - palettes heatmap cyclables au clavier (`K`) : `CLASSIC`, `TURBO`, `INFERNO`, `VIRIDIS`,
-- mise à jour immédiate de la palette (sans attendre la step suivante),
+- palette appliquée à tous les tips de `Blocks / Layers`, sauf les layers `Identity`, avec mise à jour immédiate,
 - filtrage des tenseurs de packing final (`out_concat` / `out_pack`) pour éviter les faux aperçus,
 - ordre visuel forcé dans `Outputs`: `recon` affiché juste avant `diff/resdiff` quand les deux existent,
 - barre de progression globale (epochs) + barre dédiée batch courant (sous la globale),
-- couleur de la barre batch pilotée par `batch_time_ms` (rapide=vert, plus lent=orange/rouge).
+- couleur de la barre batch pilotée par `batch_time_ms` (rapide=vert, plus lent=orange/rouge),
+- graphe nodal interactif du modèle (`N`) avec export PNG complet (`X`), et export de snapshots configurables (`E`),
+- vue du graphe du modèle et du planner dans HTOP (`G`).
+
+Les connexions du graphe sont routées en lignes orthogonales distinctes :
+les embranchements ont des rails dédiés, les connexions simples alignées
+utilisent un segment, et les trajets ne passent pas sous les cartes ni ne se
+coupent. Les images PNG du graphe sont rendues par tuiles afin de conserver la
+topologie entière sans dépasser la limite de texture de rendu.
 
 ### Sérialisation
 
@@ -556,7 +564,7 @@ Main capabilities:
 - CPU-first runtime (OpenMP, SIMD, AVX2, FMA)
 - optional GPU backends (CUDA/ROCm/Vulkan/OpenCL paths)
 - integrated memory stack (`MemoryGuard`, `DynamicTensorAllocator`, spill/compression/LRU)
-- multimodal dataset pipeline and SFML real-time visualization
+- multimodal dataset pipeline and selectable SFML/Qt/GTK/Web real-time visualization
 - checkpoint/weights interoperability (SafeTensors, RawFolder, DebugJson)
 
 Primary docs entry points:

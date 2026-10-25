@@ -45,8 +45,35 @@ int main() {
         Mimir::Viz::TerminalModelGraphView view;auto lines=view.lines(&graph,100,30);
         CHECK(lines.size()==30);CHECK(lines[3].find("cost")!=std::string::npos);
         CHECK(lines[4].find("scratch=16")!=std::string::npos);
-        view.move(20,24);lines=view.lines(&graph,100,30);CHECK(view.pan_y>0);
-        CHECK(lines[24].find("layer-20")!=std::string::npos);
+        view.move(20,24);lines=view.lines(&graph,100,30);CHECK(view.pan_x>0);
+        CHECK(lines[24].find("layer-20")!=std::string::npos ||
+            lines[25].find("layer-20")!=std::string::npos);
+        Json routing=graph;
+        routing["nodes"]=Json::array();
+        for(const auto& [name,lane]:std::vector<std::pair<std::string,int>>{
+                {"source",0},{"upper",0},{"lower",2}})
+            routing["nodes"].push_back({{"name",name},{"type","Linear"},{"lane",lane},
+                {"depth",name=="source"?0:1},{"runtime","CPU"},{"capability","Native"},
+                {"parameters",1},{"inputs",Json::array({"x"})},{"output",name}});
+        routing["edges"]=Json::array({{{"from",0},{"to",1},{"tensor","a"}},
+            {{"from",0},{"to",2},{"tensor","b"}}});
+        Mimir::Viz::TerminalModelGraphView routing_view;
+        const auto routed=routing_view.lines(&routing,100,30);
+        CHECK(routed.size()==30);
+        CHECK(std::count(routed[9].begin(),routed[9].end(),'-')>0);
+        CHECK(std::count(routed[10].begin(),routed[10].end(),'-')>0);
+        Json simple=routing;
+        simple["nodes"].erase(2);
+        simple["edges"]=Json::array({{{"from",0},{"to",1},{"tensor","a"}}});
+        Mimir::Viz::TerminalModelGraphView simple_view;
+        const auto straight=simple_view.lines(&simple,100,30);
+        CHECK(straight[10].substr(34,3)=="-->");
+        Json long_label=simple;
+        const std::string full_name="layer-label-that-is-longer-than-the-old-terminal-card";
+        long_label["nodes"][0]["name"]=full_name;
+        Mimir::Viz::TerminalModelGraphView label_view;
+        const auto labeled=label_view.lines(&long_label,100,30);
+        CHECK(labeled[9].find(full_name)!=std::string::npos);
         CHECK(Mimir::Viz::TerminalModelGraphView::safe("bad\033name")=="bad?name");
         CHECK(!view.lines(nullptr,100,30).empty());
         int master=-1,slave=-1;winsize size{};size.ws_col=120;size.ws_row=40;

@@ -85,6 +85,29 @@ avec ceux de la Viz. Le bouton **Fermer** transmet la fermeture à Mímir ;
 fermer simplement l’onglet laisse la Viz disponible pour une reconnexion. Plusieurs
 onglets partagent le même état et les mêmes contrôles.
 
+## Graphe du modèle et exports PNG
+
+La touche `N` ouvre une vue arborescente du graphe nodal/planner du modèle actif.
+Les nœuds sont disposés par profondeur et par voie ; les arêtes orthogonales
+arrivent sur des ports séparés. Une connexion simple entre deux nœuds alignés
+est un segment horizontal. Les embranchements ont des ports et des rails
+distincts, sans traverser ni recouvrir les cartes ou les autres connexions.
+Les flèches ou la molette déplacent la vue, un clic sélectionne un nœud pour
+afficher ses détails, `R` revient à l’origine et `N`/`Esc` ferment la vue.
+
+Dans cette vue, `X` enregistre l'image PNG complète du graphe dans le dossier
+`snapshots/` sous le nom `model_graph_<horodatage>.png`. Le rendu est produit en
+tuiles pour éviter la limite de taille des textures de rendu ; l'export conserve
+toute la topologie, y compris pour les graphes trop larges ou trop hauts pour une
+seule texture.
+
+La touche `E` ouvre la sélection du snapshot PNG de la Viz. Elle permet
+d'inclure la fenêtre courante, les tips de couches, la projection et la sortie.
+Les éléments indisponibles sont signalés ; au moins un élément disponible doit
+être sélectionné. Les tips choisis sont présentés sous la capture de la fenêtre,
+groupés par catégorie, avec leurs labels complets renvoyés à la ligne. Le fichier
+est écrit dans `snapshots/viz_snapshot_<horodatage>.png`.
+
 ## Rendu et limites
 
 Les panneaux partagent un thème d'éditeur sombre inspiré de Blender : surfaces

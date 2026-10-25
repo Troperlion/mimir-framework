@@ -917,11 +917,18 @@ public:
         clearLine();
         {
             const int selected = std::clamp(
-                live_selected_parameter_.load(std::memory_order_relaxed), 0, 4);
-            const char* labels[] = {"LR", "LR-WU", "KL-BETA", "KL-WU", "RECON"};
+                live_selected_parameter_.load(std::memory_order_relaxed), 0, 6);
+            const char* labels[] = {"LR", "LR-WU", "KL-BETA", "KL-WU", "RECON", "MU x", "LOGVAR x"};
             const char* recon_losses[] = {"mse", "mae", "huber", "charbonnier", "gaussian_nll", "bce"};
             const int recon_index = std::clamp(
                 live_recon_loss_index_.load(std::memory_order_relaxed), 0, 5);
+            std::string selected_label = labels[selected];
+            if (selected >= 5) {
+                const char* key = selected == 5 ? "kl_mu_weight" : "kl_logvar_weight";
+                for (const auto& entry : std::atomic_load(&runtime_config_)->snapshot()) if (entry.key == key)
+                    selected_label += "=" + LiveModelConfig::display(entry.pending.value_or(entry.value)) +
+                                      (entry.pending ? " (en attente)" : "");
+            }
             std::ostringstream controls;
             const auto skips = std::atomic_load(&skip_control_);
             controls << "[S] SKIPS " << (!skips->available.load() ? "N/A" :
@@ -929,7 +936,7 @@ public:
                      << (live_overrides_enabled_.load(std::memory_order_relaxed) ? "ON" : "NATIVE")
                      << " | VAL "
                      << (validation_enabled_.load(std::memory_order_relaxed) ? "ON" : "OFF")
-                     << " | " << labels[selected] << " selected"
+                     << " | " << selected_label << " selected"
                      << " | lr=" << std::setprecision(6) << std::scientific
                      << live_lr_.load(std::memory_order_relaxed)
                      << " lr-wu=" << std::defaultfloat

@@ -63,7 +63,10 @@ def first_step_reference(config):
     z=x@p[0].T+p[1];activation=np.maximum(z,0);out=activation@p[2].T+p[3]
     delta=2*(out-target)/(b*10);dh=(delta@p[2])*(z>0)
     grads=[dh.T@x,dh.sum(0),delta.T@activation,delta.sum(0)]
-    updated=np.concatenate([(v-lr*g).ravel() for v,g in zip(p,grads)])
+    name=config.get('optimizer','sgd')
+    if name not in ('sgd','adam','adamw'):raise ValueError(name)
+    wd=config.get('weight_decay',0.) if name=='adamw' else 0.
+    updated=np.concatenate([(v*(1-lr*wd)-lr*(g if name=='sgd' else g/(np.sqrt(g*g)+1e-8))).ravel() for v,g in zip(p,grads)])
     return dict(prediction=out.ravel(),loss=np.mean((out-target)**2),probe=updated[config['probe_indices']])
 
 
@@ -130,6 +133,8 @@ def validate_result(result,config,gold,min_accuracy):
         actual=np.asarray(result[key],float);expected=np.asarray(expected,float)
         if actual.shape!=expected.shape or not np.all(np.isfinite(actual)) or not np.allclose(actual,expected,atol=3e-5,rtol=4e-4):
             raise RuntimeError('First real training step differs from independent NumPy reference: '+key)
+    for key in ('initialization_s','data_allocation_s','parameter_allocation_s','allocation_probe_s'):
+        if key in result and (not np.isfinite(result[key]) or result[key]<=0):raise RuntimeError('Invalid phase time: '+key)
     if result['steps_completed']!=config['steps'] or result['examples_trained']!=config['steps']*config['batch']:
         raise RuntimeError('Fixed work incomplete')
     for key,count in [('train_step_samples_ms',config['steps']),('train_losses',config['steps'])]:
@@ -200,7 +205,7 @@ def summarize(records,configs,frameworks,trials):
         for config in configs:
             group=[r for r in records if r['framework']==f and r['case']==config['case']]
             good=len(group)==trials and all(r['status']=='ok' for r in group)
-            row=dict(framework=f,case=config['case'],batch=config['batch'],hidden=config['hidden'],status='ok' if good else 'incomplete',
+            row=dict(framework=f,case=config['case'],batch=config['batch'],hidden=config['hidden'],optimizer=config.get('optimizer','sgd'),status='ok' if good else 'incomplete',
                 trials_ok=sum(r['status']=='ok' for r in group),trials_requested=trials)
             if good:
                 training=np.concatenate([r['train_step_samples_ms'] for r in group]);inference=np.concatenate([r['test']['samples_ms'] for r in group])
@@ -218,6 +223,11 @@ def summarize(records,configs,frameworks,trials):
                     goal_reached_all=all(r['time_to_goal_s'] is not None for r in group),
                     time_to_goal_s=float(np.median([r['time_to_goal_s'] for r in group])) if all(r['time_to_goal_s'] is not None for r in group) else None,
                     mode=group[0]['mode'],version=group[0]['version'],device=group[0]['device'])
+            if good:
+                for metric in ('data_allocation_s','initialization_s','parameter_allocation_s','allocation_probe_s','allocation_probe_rss_delta_mib','rss_after_initialization_mib'):
+                    values=[r[metric] for r in group if metric in r]
+                    if len(values)==trials:row[metric]=float(np.median(values))
+                row['allocation_probe_device']=group[0].get('allocation_probe_device','unknown')
             if good and f=='mimir':
                 import re
                 inference=group[0].get('inference_plan',{})
@@ -243,9 +253,21 @@ def summarize(records,configs,frameworks,trials):
                 for metric in ('train_examples_per_s','inference_examples_per_s'):
                     ratios.append(row[metric]/max(r[metric] for r in contenders))
             score=float(100*np.exp(np.mean(np.log(ratios))))
-        board.append(dict(framework=f,coverage=f'{sum(r["status"]=="ok" for r in own)}/{len(configs)}',score_100=score,
+        lifecycle_score=None
+        if f in eligible and len(eligible)>=2:
+            # Cold process wall includes startup, initialization, allocation,
+            # compilation, training and inference. Pair it with observed RSS.
+            ratios=[]
+            for row in own:
+                contenders=[r for r in rows if r['case']==row['case'] and r['framework'] in eligible]
+                for metric in ('process_wall_s','peak_tree_rss_mib'):
+                    if any(r[metric]<=0 for r in contenders):break
+                    ratios.append(min(r[metric] for r in contenders)/row[metric])
+            if len(ratios)==2*len(configs):lifecycle_score=float(100*np.exp(np.mean(np.log(ratios))))
+        board.append(dict(lifecycle_score_100=lifecycle_score,framework=f,coverage=f'{sum(r["status"]=="ok" for r in own)}/{len(configs)}',score_100=score,
                           status='ranked' if score is not None else 'incomplete' if f not in eligible else 'not enough complete contenders'))
     board=pd.DataFrame(board).sort_values('score_100',ascending=False,na_position='last').reset_index(drop=True)
+    board['lifecycle_rank']=board['lifecycle_score_100'].rank(method='min',ascending=False)
     board['rank']=board['score_100'].rank(method='min',ascending=False)
     detail=pd.DataFrame(rows)
     for config in configs:

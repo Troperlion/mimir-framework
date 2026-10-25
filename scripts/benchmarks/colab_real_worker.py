@@ -7,9 +7,27 @@ import time
 import traceback
 
 
+def rss_mib():
+    # Resident host memory, never an allocator counter or VRAM estimate.
+    for line in Path('/proc/self/status').read_text().splitlines():
+        if line.startswith('VmRSS:'):return int(line.split()[1])/1024
+    return 0.
+
+
+def allocation_probe(allocate, synchronize):
+    before=rss_mib();started=time.perf_counter()
+    value=allocate();synchronize(value)
+    return dict(allocation_probe_s=time.perf_counter()-started,
+                allocation_probe_rss_delta_mib=rss_mib()-before,
+                allocation_probe_bytes=16*1024*1024)
+
+
+
 def make_adapter(framework, backend, config, initial):
     import numpy as np
     h=config['hidden'];lr=config['lr']
+    name=config.get('optimizer','sgd');wd=config.get('weight_decay',0.)
+    if name not in ('sgd','adam','adamw'):raise ValueError(name)
     if framework=='pytorch':
         if backend=='tpu':os.environ['PJRT_DEVICE']='TPU'
         import torch
@@ -28,21 +46,23 @@ def make_adapter(framework, backend, config, initial):
             device=xm.xla_device()
         else:device=torch.device('cpu')
         class Adapter:
-            mode='torch.nn.Sequential + autograd + torch.optim.SGD'
+            mode='torch.nn.Sequential + autograd + '+name
             version=torch.__version__
             device_name=str(device)
             def __init__(self):
                 self.model=torch.nn.Sequential(torch.nn.Linear(784,h),torch.nn.ReLU(),torch.nn.Linear(h,10)).to(device)
-                self.optimizer=torch.optim.SGD(self.model.parameters(),lr=lr,momentum=0,weight_decay=0)
+                self.optimizer=({'sgd':torch.optim.SGD,'adam':torch.optim.Adam,'adamw':torch.optim.AdamW}[name])(self.model.parameters(),lr=lr,weight_decay=wd,**({} if name=='sgd' else dict(betas=(.9,.999),eps=1e-8)))
                 if any(p.device.type!=device.type for p in self.model.parameters()):raise RuntimeError('Wrong parameter device')
                 self.reset()
+            def allocation(self):
+                return allocation_probe(lambda:torch.ones(4*1024*1024,device=device),lambda value:self.sync())
             def sync(self):
                 if xm is not None:xm.mark_step();xm.wait_device_ops()
                 elif backend=='cuda':torch.cuda.synchronize(device)
             def reset(self):
                 with torch.no_grad():
                     for p,v in zip(self.model.parameters(),initial):p.copy_(torch.from_numpy(v.copy()).to(device))
-                self.optimizer.zero_grad(set_to_none=True);self.sync()
+                self.optimizer.state.clear();self.optimizer.zero_grad(set_to_none=True);self.sync()
             def train(self,x,y,probe=False):
                 self.model.train();self.optimizer.zero_grad(set_to_none=True)
                 xx=torch.from_numpy(x).to(device);yy=torch.from_numpy(y).to(device)
@@ -61,20 +81,30 @@ def make_adapter(framework, backend, config, initial):
         wanted={'cpu':'cpu','cuda':'gpu','tpu':'tpu'}[backend];device=jax.devices(wanted)[0]
         if device.platform!=wanted:raise RuntimeError('Wrong JAX device')
         def forward(p,x):return jax.nn.relu(x@p[0].T+p[1])@p[2].T+p[3]
-        def train(p,x,y):
+        def train(p,m,v,step,x,y):
             def objective(v):
                 out=forward(v,x);return jnp.mean((out-y)**2),out
             (loss,out),grads=jax.value_and_grad(objective,has_aux=True)(p)
-            return tuple(v-lr*g for v,g in zip(p,grads)),loss,out
+            step=step+1
+            if name=='sgd':updated=tuple(a-lr*g for a,g in zip(p,grads))
+            else:
+                m=tuple(.9*a+.1*g for a,g in zip(m,grads))
+                v=tuple(.999*a+.001*g*g for a,g in zip(v,grads))
+                updated=tuple(a*(1-lr*wd)-lr*(mm/(1-.9**step))/(jnp.sqrt(vv/(1-.999**step))+1e-8) for a,mm,vv in zip(p,m,v))
+            return updated,m,v,step,loss,out
         compiled_train=jax.jit(train);compiled_predict=jax.jit(forward)
         class Adapter:
-            mode='JAX persistent parameter pytree + jit(value_and_grad) + SGD'
+            mode='JAX persistent parameter pytree + jit(value_and_grad) + '+name
             version=jax.__version__;device_name=str(device)
+            def allocation(self):
+                return allocation_probe(lambda:jax.device_put(np.ones(4*1024*1024,np.float32),device),jax.block_until_ready)
             def __init__(self):self.reset()
             def reset(self):
                 self.p=tuple(jax.device_put(v.copy(),device) for v in initial);jax.block_until_ready(self.p)
+                self.m=tuple(jnp.zeros_like(p) for p in self.p) if name!='sgd' else ();self.v=tuple(jnp.zeros_like(p) for p in self.p) if name!='sgd' else ();self.step=jax.device_put(0,device)
+                jax.block_until_ready((self.p,self.m,self.v,self.step))
             def train(self,x,y,probe=False):
-                self.p,loss,out=compiled_train(self.p,jax.device_put(x,device),jax.device_put(y,device))
+                self.p,self.m,self.v,self.step,loss,out=compiled_train(self.p,self.m,self.v,self.step,jax.device_put(x,device),jax.device_put(y,device))
                 jax.block_until_ready((self.p,loss))
                 return float(loss),np.asarray(out) if probe else None
             def predict(self,x):
@@ -104,7 +134,15 @@ def make_adapter(framework, backend, config, initial):
             scope=tf.device('/GPU:0' if backend=='cuda' else '/CPU:0')
         with scope:
             model=tf.keras.Sequential([tf.keras.Input(shape=(784,)),tf.keras.layers.Dense(h,activation='relu'),tf.keras.layers.Dense(10)])
-            optimizer=tf.keras.optimizers.SGD(learning_rate=lr,momentum=0.0)
+            # Keras uses epsilon-hat; correct it each step to match Algorithm 1.
+            class ComparableAdam(tf.keras.optimizers.Adam):
+                def update_step(self,gradient,variable,learning_rate):
+                    original=self.epsilon
+                    self.epsilon=original*tf.sqrt(1-tf.pow(tf.cast(self.beta_2,variable.dtype),tf.cast(self.iterations+1,variable.dtype)))
+                    try:return super().update_step(gradient,variable,learning_rate)
+                    finally:self.epsilon=original
+            optimizer=(tf.keras.optimizers.SGD(learning_rate=lr) if name=='sgd' else
+                       ComparableAdam(learning_rate=lr,beta_1=.9,beta_2=.999,epsilon=1e-8,weight_decay=wd if name=='adamw' else None))
             optimizer.build(model.trainable_variables)
         wanted='TPU' if backend=='tpu' else 'GPU' if backend=='cuda' else 'CPU'
         if backend!='tpu' and any(wanted not in v.value.device.upper() for v in model.trainable_variables):raise RuntimeError('Wrong TensorFlow parameter device')
@@ -128,12 +166,25 @@ def make_adapter(framework, backend, config, initial):
                 with tf.device('/GPU:0' if backend=='cuda' else '/CPU:0'):return predict(x)
         def local(value):return strategy.experimental_local_results(value)[0] if strategy else value
         class Adapter:
-            mode='Keras Sequential + tf.function/GradientTape + Keras SGD'+(' + TPUStrategy' if strategy else '')
+            mode='Keras Sequential + tf.function/GradientTape + '+name+(' + TPUStrategy' if strategy else '')
             version=tf.__version__;device_name=wanted
+            def allocation(self):
+                def allocate():
+                    if strategy:
+                        @tf.function
+                        def filled():
+                            value=tf.ones((4*1024*1024,),tf.float32)
+                            return value,tf.reduce_sum(value)
+                        return strategy.run(filled)
+                    with tf.device('/'+wanted+':0'):
+                        value=tf.ones((4*1024*1024,),tf.float32)
+                        return value,tf.reduce_sum(value)
+                return allocation_probe(allocate,lambda value:local(value[1]).numpy())
             def __init__(self):self.placement_checked=False;self.reset()
             def reset(self):
                 model.set_weights([initial[0].T,initial[1],initial[2].T,initial[3]])
-                optimizer.iterations.assign(0)
+                for variable in optimizer.variables:
+                    if variable is not optimizer.learning_rate:variable.assign(tf.zeros_like(variable))
             def train(self,x,y,probe=False):
                 xx,yy=tf.convert_to_tensor(x),tf.convert_to_tensor(y)
                 loss,out=compiled_train(xx,yy)
@@ -158,7 +209,7 @@ def make_adapter(framework, backend, config, initial):
 def main(framework,backend,config_path,result_path):
     import numpy as np
     config=json.loads(Path(config_path).read_text());directory=Path(config['data_dir'])
-    initial=[]
+    data_started=time.perf_counter();initial=[]
     for i,shape in enumerate([(config['hidden'],784),(config['hidden'],),(10,config['hidden']),(10,)]):
         initial.append(np.fromfile(directory/f'weights-{config["hidden"]}-{i}.f32',dtype='<f4').reshape(shape))
     data={split:(np.fromfile(directory/f'{split}.images.u8',dtype=np.uint8).reshape(-1,784),
@@ -167,10 +218,16 @@ def main(framework,backend,config_path,result_path):
     def get_batch(split,offset):
         images,labels=data[split];index=(np.arange(batch)+offset)%len(images)
         return images[index].astype(np.float32)/np.float32(255),eye[labels[index]]
-    adapter=make_adapter(framework,backend,config,initial)
+    data_allocation_s=time.perf_counter()-data_started
+    started=time.perf_counter();adapter=make_adapter(framework,backend,config,initial)
+    initialization_s=time.perf_counter()-started
     report=dict(framework=framework,backend=backend,case=config['case'],status='measured',
                 mode=adapter.mode,version=adapter.version,device=adapter.device_name,
-                optimizer='SGD(momentum=0, weight_decay=0)',loss='mean squared error over batch*10')
+                initialization_s=initialization_s,optimizer=config.get('optimizer','sgd'),loss='mean squared error over batch*10')
+    report.update(data_allocation_s=data_allocation_s,rss_after_initialization_mib=rss_mib())
+    report.update(adapter.allocation())
+    report['allocation_probe_device']=adapter.device_name
+    report['allocation_probe_note']='16 MiB filled tensor, synchronized; allocator caches may be reused; JAX includes host staging'
     first_x,first_y=get_batch('train',0)
     started=time.perf_counter();first_loss,first_prediction=adapter.train(first_x,first_y,True)
     report['cold_step_ms']=(time.perf_counter()-started)*1000

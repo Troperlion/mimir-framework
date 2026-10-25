@@ -16,6 +16,13 @@
 
 namespace {
 
+float kl_component_weight(const json& config, const char* key) {
+    const float weight = config.value(key, 1.0f);
+    if (!std::isfinite(weight) || weight < 0.0f)
+        throw std::invalid_argument(std::string(key) + " must be finite and non-negative");
+    return weight;
+}
+
 struct DistMoments {
     double mean = 0.0;
     double var = 0.0;
@@ -558,14 +565,20 @@ Model::TrainStepResult VAETraining::trainImage(Model& model,
 
     const int mu_offset = image_dim;
     const int logvar_offset = image_dim + latent_dim;
-    double kl = 0.0;
+    const float mu_weight = kl_component_weight(model.modelConfig, "kl_mu_weight");
+    const float logvar_weight = kl_component_weight(model.modelConfig, "kl_logvar_weight");
+    double kl = 0.0, weighted_kl = 0.0;
     for (int i = 0; i < latent_dim; ++i) {
         const float mu = prediction[static_cast<size_t>(mu_offset + i)];
         const float raw_logvar = prediction[static_cast<size_t>(logvar_offset + i)];
         const float logvar = std::clamp(raw_logvar, logvar_min, logvar_max);
-        kl += 0.5 * (static_cast<double>(mu) * mu + std::exp(static_cast<double>(logvar)) - 1.0 - logvar);
+        const double mu_kl = 0.5 * static_cast<double>(mu) * mu;
+        const double logvar_kl = 0.5 * (std::exp(static_cast<double>(logvar)) - 1.0 - logvar);
+        kl += mu_kl + logvar_kl;
+        weighted_kl += mu_weight * mu_kl + logvar_weight * logvar_kl;
     }
     kl /= static_cast<double>(std::max(1, latent_dim));
+    weighted_kl /= static_cast<double>(std::max(1, latent_dim));
 
     const auto prediction_moments = compute_moments_prefix(prediction, 0, recon_count);
     const auto target_moments = compute_moments_prefix(expected, 0, recon_count);
@@ -597,16 +610,19 @@ Model::TrainStepResult VAETraining::trainImage(Model& model,
         const float raw_logvar = prediction[static_cast<size_t>(logvar_offset + i)];
         const float logvar = std::clamp(raw_logvar, logvar_min, logvar_max);
         const float in_range = raw_logvar >= logvar_min && raw_logvar <= logvar_max ? 1.0f : 0.0f;
-        packed_gradient[static_cast<size_t>(mu_offset + i)] = kl_scale * mu;
-        packed_gradient[static_cast<size_t>(logvar_offset + i)] = kl_scale * 0.5f * (std::exp(logvar) - 1.0f) * in_range;
+        packed_gradient[static_cast<size_t>(mu_offset + i)] = kl_scale * mu_weight * mu;
+        packed_gradient[static_cast<size_t>(logvar_offset + i)] = kl_scale * logvar_weight * 0.5f * (std::exp(logvar) - 1.0f) * in_range;
     }
     apply_accumulation_scale(packed_gradient, mode, grad_scale);
     model.backwardPass(packed_gradient);
 
     Model::TrainStepResult result;
+    result.metrics["kl_mu_beta_effective"] = beta_effective * mu_weight;
+    result.metrics["kl_logvar_beta_effective"] = beta_effective * logvar_weight;
+    result.metrics["kl_weighted"] = static_cast<float>(weighted_kl);
     result.metrics["relation_loss"] = static_cast<float>(relation_loss);
     result.metrics["relation_count"] = relations ? static_cast<float>(relations->size()) : 0.0f;
-    result.loss = static_cast<float>(static_cast<double>(marker_scale) * reconstruction + static_cast<double>(beta_effective) * kl);
+    result.loss = static_cast<float>(static_cast<double>(marker_scale) * reconstruction + static_cast<double>(beta_effective) * weighted_kl);
     gradient_diagnostics(model, result.grad_norm, result.grad_max_abs);
     if (mode == Model::TrainStepMode::Optimize) model.optimizerStep(optimizer, learning_rate);
     const float timestep = std::clamp(static_cast<float>(optimizer.step + 1) / static_cast<float>(std::max(1, optimizer.total_steps)), 0.0f, 1.0f);
@@ -766,13 +782,19 @@ Model::TrainStepResult VAETraining::trainText(Model& model,
 
     const int mu_offset = image_dim;
     const int logvar_offset = image_dim + latent_dim;
-    double kl = 0.0;
+    const float mu_weight = kl_component_weight(model.modelConfig, "kl_mu_weight");
+    const float logvar_weight = kl_component_weight(model.modelConfig, "kl_logvar_weight");
+    double kl = 0.0, weighted_kl = 0.0;
     for (int i = 0; i < latent_dim; ++i) {
         const float mu = prediction[static_cast<size_t>(mu_offset + i)];
         const float logvar = std::clamp(prediction[static_cast<size_t>(logvar_offset + i)], logvar_min, logvar_max);
-        kl += 0.5 * (static_cast<double>(mu) * mu + std::exp(static_cast<double>(logvar)) - 1.0 - logvar);
+        const double mu_kl = 0.5 * static_cast<double>(mu) * mu;
+        const double logvar_kl = 0.5 * (std::exp(static_cast<double>(logvar)) - 1.0 - logvar);
+        kl += mu_kl + logvar_kl;
+        weighted_kl += mu_weight * mu_kl + logvar_weight * logvar_kl;
     }
     kl /= static_cast<double>(std::max(1, latent_dim));
+    weighted_kl /= static_cast<double>(std::max(1, latent_dim));
 
     const size_t image_projection_offset = static_cast<size_t>(image_dim + 2 * latent_dim);
     const size_t text_projection_offset = image_projection_offset + static_cast<size_t>(projection_dim);
@@ -816,8 +838,8 @@ Model::TrainStepResult VAETraining::trainText(Model& model,
         const float mu = prediction[static_cast<size_t>(mu_offset + i)];
         const float raw_logvar = prediction[static_cast<size_t>(logvar_offset + i)];
         const float logvar = std::clamp(raw_logvar, logvar_min, logvar_max);
-        packed_gradient[static_cast<size_t>(mu_offset + i)] = kl_scale * mu;
-        packed_gradient[static_cast<size_t>(logvar_offset + i)] = kl_scale * 0.5f * (std::exp(logvar) - 1.0f) *
+        packed_gradient[static_cast<size_t>(mu_offset + i)] = kl_scale * mu_weight * mu;
+        packed_gradient[static_cast<size_t>(logvar_offset + i)] = kl_scale * logvar_weight * 0.5f * (std::exp(logvar) - 1.0f) *
             (raw_logvar >= logvar_min && raw_logvar <= logvar_max ? 1.0f : 0.0f);
     }
     if (align_weight > 0.0f) {
@@ -848,10 +870,13 @@ Model::TrainStepResult VAETraining::trainText(Model& model,
     model.backwardPass(packed_gradient);
 
     Model::TrainStepResult result;
+    result.metrics["kl_mu_beta_effective"] = beta_effective * mu_weight;
+    result.metrics["kl_logvar_beta_effective"] = beta_effective * logvar_weight;
+    result.metrics["kl_weighted"] = static_cast<float>(weighted_kl);
     result.metrics["relation_loss"] = static_cast<float>(relation_loss);
     result.metrics["relation_count"] = relations ? static_cast<float>(relations->size()) : 0.0f;
     result.loss = static_cast<float>(static_cast<double>(marker_scale) * reconstruction +
-                                     static_cast<double>(beta_effective) * kl + alignment +
+                                     static_cast<double>(beta_effective) * weighted_kl + alignment +
                                      static_cast<double>(semantic_weight) * semantic_loss +
                                      static_cast<double>(thematic_weight) * thematic_loss +
                                      static_cast<double>(dialog_weight) * dialog_loss);

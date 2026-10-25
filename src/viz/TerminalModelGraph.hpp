@@ -1,6 +1,8 @@
 #pragma once
 #include "include/json.hpp"
 #include <algorithm>
+#include <cstddef>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -41,17 +43,95 @@ struct TerminalModelGraphView {
                 " pic="+stats.at("tensor_physical_peak").dump()+" reuse="+stats.at("buffer_reuse_saved").dump()+
                 " transferts="+stats.at("transfer_bytes").dump()+" scratch="+stats.at("scratch_peak").dump());
         } else result.push_back("Topologie seule : plan indisponible.");
-        result.push_back("Connexions nommees ; > layer selectionne ; placements PREVUS (pas une trace GPU).");
+        result.push_back("Arbre nodal ; fleches distinctes ; > layer selectionne ; placements PREVUS (pas une trace GPU).");
+
+        size_t card_width_size=32;
+        for(size_t i=0;i<nodes.size();++i) {
+            const auto& node=nodes[i];
+            const std::string name=std::to_string(i)+" "+node.value("name",std::string());
+            const std::string details=node.value("type",std::string())+" / "+
+                node.value("runtime",std::string());
+            card_width_size=std::max({card_width_size,name.size()+2,details.size()+2});
+        }
+        const int card_width=static_cast<int>(std::min(card_width_size,
+            static_cast<size_t>(std::numeric_limits<int>::max()-1)));
+        struct Edge { size_t from,to; };
+        std::vector<Edge> edges;
+        std::vector<size_t> depths,lanes;
+        depths.reserve(nodes.size());lanes.reserve(nodes.size());
+        size_t max_degree=0,max_depth=0;
+        for(const auto& node:nodes) {
+            const size_t depth=node.value("depth",size_t(0));
+            const size_t lane=node.value("lane",size_t(0));
+            depths.push_back(depth);lanes.push_back(lane);
+            max_depth=std::max(max_depth,depth);
+        }
+        for(const auto& edge:graph.at("edges")) {
+            const size_t from=edge.at("from"),to=edge.at("to");
+            if(from>=nodes.size() || to>=nodes.size())continue;
+            edges.push_back({from,to});
+        }
+        std::vector<std::vector<size_t>> outgoing(nodes.size()),incoming(nodes.size());
+        for(size_t i=0;i<edges.size();++i) {
+            outgoing[edges[i].from].push_back(i);
+            incoming[edges[i].to].push_back(i);
+        }
+        for(size_t i=0;i<nodes.size();++i)
+            max_degree=std::max({max_degree,outgoing[i].size(),incoming[i].size()});
+        const int card_height=std::max(4,static_cast<int>(max_degree)+2);
+        const int row_step=card_height+2;
+        size_t long_edge_count=0;
+        for(const auto& edge:edges)
+            if(depths[edge.to]>depths[edge.from]+1)++long_edge_count;
+        const int graph_top=2+static_cast<int>(long_edge_count)*2;
+
+        std::vector<size_t> edges_per_depth(max_depth+1,0);
+        for(const auto& edge:edges)
+            if(depths[edge.to]==depths[edge.from]+1)++edges_per_depth[depths[edge.from]];
+        const int gap_width=static_cast<int>(std::max<size_t>(3,
+            *std::max_element(edges_per_depth.begin(),edges_per_depth.end())+2));
+        const int column_step=card_width+gap_width;
         std::vector<std::pair<int,int>> pos;
+        pos.reserve(nodes.size());
         int max_x=0,max_y=0;
-        for(const auto& n:nodes) {
-            const int x=n.at("lane").get<int>()*32,y=n.at("depth").get<int>()*4;
-            pos.push_back({x,y});max_x=std::max(max_x,x+30);max_y=std::max(max_y,y+3);
+        for(size_t i=0;i<nodes.size();++i) {
+            const int x=2+static_cast<int>(depths[i])*column_step;
+            const int y=graph_top+static_cast<int>(lanes[i])*row_step;
+            pos.push_back({x,y});
+            max_x=std::max(max_x,x+card_width);
+            max_y=std::max(max_y,y+card_height);
+        }
+        std::vector<size_t> edge_channel(edges.size(),std::numeric_limits<size_t>::max());
+        for(size_t depth=0;depth<edges_per_depth.size();++depth) {
+            std::vector<size_t> group;
+            for(size_t i=0;i<edges.size();++i)
+                if(depths[edges[i].to]==depths[edges[i].from]+1 &&
+                   depths[edges[i].from]==depth)group.push_back(i);
+            std::sort(group.begin(),group.end(),[&](size_t a,size_t b) {
+                const auto [ax,ay]=pos[edges[a].from];
+                const auto [bx,by]=pos[edges[b].from];
+                const auto [atx,aty]=pos[edges[a].to];
+                const auto [btx,bty]=pos[edges[b].to];
+                if(ay!=by)return ay<by;
+                if(aty!=bty)return aty<bty;
+                if(ax!=bx)return ax<bx;
+                return atx<btx;
+            });
+            for(size_t rank=0;rank<group.size();++rank)
+                edge_channel[group[rank]]=group.size()-rank-1;
+        }
+        for(size_t i=0;i<nodes.size();++i) {
+            std::sort(outgoing[i].begin(),outgoing[i].end(),[&](size_t a,size_t b) {
+                return pos[edges[a].to].second<pos[edges[b].to].second;
+            });
+            std::sort(incoming[i].begin(),incoming[i].end(),[&](size_t a,size_t b) {
+                return pos[edges[a].from].second<pos[edges[b].from].second;
+            });
         }
         if(follow && !nodes.empty()) {
             const auto [x,y]=pos[selected];
-            if(x<pan_x || x+30>pan_x+columns)pan_x=std::max(0,x-columns/2+15);
-            if(y<pan_y || y+3>pan_y+body)pan_y=std::max(0,y-body/2+1);
+            if(x<pan_x || x+card_width>pan_x+columns)pan_x=std::max(0,x-columns/2+card_width/2);
+            if(y<pan_y || y+card_height>pan_y+body)pan_y=std::max(0,y-body/2+card_height/2);
             follow=false;
         }
         pan_x=std::clamp(pan_x,0,std::max(0,max_x-columns));
@@ -65,23 +145,67 @@ struct TerminalModelGraphView {
             text=safe(std::move(text));
             for(size_t i=0;i<text.size() && i<static_cast<size_t>(limit);++i)put(x+int(i),y,text[i]);
         };
-        for(const auto& edge:graph.at("edges")) {
-            const size_t a=edge.at("from"),b=edge.at("to");
-            if(a>=pos.size() || b>=pos.size())continue;
-            const auto [ax,ay]=pos[a];const auto [bx,by]=pos[b];
-            const int source=ax+15,target=bx+15,mid=by-1;
-            // Clip loops before rasterizing even very long skip connections.
-            for(int y=std::max(ay+3,pan_y);y<=std::min(mid,pan_y+body-1);++y)put(source,y,'|');
-            for(int x=std::max(std::min(source,target),pan_x);x<=std::min(std::max(source,target),pan_x+columns-1);++x)put(x,mid,'-');
-            put(source,mid,'+');put(target,mid,'v');
-            if(a==selected || b==selected)write(std::min(source,target)+2,mid,edge.at("tensor"),24);
+        auto port_row=[&](size_t rank,size_t count) {
+            return 1+static_cast<int>((rank+1)*static_cast<size_t>(card_height-2)/(count+1));
+        };
+        auto segment=[&](int x1,int y1,int x2,int y2) {
+            if(y1==y2) {
+                const int first=std::max(std::min(x1,x2),pan_x);
+                const int last=std::min(std::max(x1,x2),pan_x+columns-1);
+                for(int x=first;x<=last;++x)put(x,y1,'-');
+            } else if(x1==x2) {
+                const int first=std::max(std::min(y1,y2),pan_y);
+                const int last=std::min(std::max(y1,y2),pan_y+body-1);
+                for(int y=first;y<=last;++y)put(x1,y,'|');
+            }
+        };
+        for(size_t i=0;i<edges.size();++i) {
+            const auto& edge=edges[i];
+            const auto [sx,sy]=pos[edge.from];const auto [tx,ty]=pos[edge.to];
+            const size_t out_rank=static_cast<size_t>(
+                std::find(outgoing[edge.from].begin(),outgoing[edge.from].end(),i)-outgoing[edge.from].begin());
+            const size_t in_rank=static_cast<size_t>(
+                std::find(incoming[edge.to].begin(),incoming[edge.to].end(),i)-incoming[edge.to].begin());
+            const int source_y=sy+port_row(out_rank,outgoing[edge.from].size());
+            const int target_y=ty+port_row(in_rank,incoming[edge.to].size());
+            const int source_x=sx+card_width-1,target_x=tx;
+            if(outgoing[edge.from].size()==1 && incoming[edge.to].size()==1 &&
+               depths[edge.to]==depths[edge.from]+1 && source_y==target_y) {
+                segment(source_x+1,source_y,target_x-1,target_y);
+                put(source_x,source_y,'>');
+                put(target_x-1,target_y,'>');
+                continue;
+            }
+            if(depths[edge.to]>depths[edge.from]+1) {
+                const size_t skip_rank=static_cast<size_t>(std::count_if(edges.begin(),
+                    edges.begin()+static_cast<std::ptrdiff_t>(i),[&](const Edge& previous) {
+                        return depths[previous.to]>depths[previous.from]+1;
+                    }));
+                const int route_y=1+static_cast<int>(skip_rank)*2;
+                segment(source_x+1,source_y,source_x+1,route_y);
+                segment(source_x+1,route_y,target_x-1,route_y);
+                segment(target_x-1,route_y,target_x-1,target_y);
+                put(source_x,source_y,'>');
+                put(target_x-1,target_y,'v');
+            } else {
+                const int route_x=sx+card_width+1+static_cast<int>(edge_channel[i]);
+                segment(source_x+1,source_y,route_x,source_y);
+                segment(route_x,source_y,route_x,target_y);
+                segment(route_x,target_y,target_x-1,target_y);
+                put(source_x,source_y,'>');
+                put(target_x-1,target_y,'v');
+            }
         }
         for(size_t i=0;i<nodes.size();++i) {
             const auto [x,y]=pos[i];const auto& n=nodes[i];
-            write(x,y,(i==selected?">":"+")+std::string(28,'-')+"+",30);
-            write(x,y+1,"|"+std::string(28,' ')+"|",30);
-            write(x+1,y+1,std::to_string(i)+" "+n.at("name").get<std::string>(),28);
-            write(x,y+2,"+"+std::string(28,'-')+"+",30);
+            write(x,y,(i==selected?">":"+")+std::string(card_width-2,'-')+"+",card_width);
+            for(int row=1;row<card_height-1;++row)
+                write(x,y+row,"|"+std::string(card_width-2,' ')+"|",card_width);
+            write(x+1,y+1,std::to_string(i)+" "+n.value("name",std::string()),card_width-2);
+            if(card_height>3)
+                write(x+1,y+2,n.value("type",std::string())+" / "+
+                    n.value("runtime",std::string()),card_width-2);
+            write(x,y+card_height-1,"+"+std::string(card_width-2,'-')+"+",card_width);
         }
         if(nodes.empty())canvas[0]="Le modele ne contient aucun layer.";
         result.insert(result.end(),canvas.begin(),canvas.end());

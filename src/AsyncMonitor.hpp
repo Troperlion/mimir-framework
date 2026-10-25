@@ -1286,7 +1286,7 @@ private:
                 resetHtopLiveControls();
                 return;
             case '\t':
-                live_selected_parameter_ = (live_selected_parameter_.load(std::memory_order_relaxed) + 1) % 5;
+                live_selected_parameter_ = (live_selected_parameter_.load(std::memory_order_relaxed) + 1) % htopLiveParameterCount();
                 refreshHtopControlState();
                 return;
             case '+': case '=':
@@ -1316,8 +1316,8 @@ private:
                              (arrow == 'D' || arrow == '5') ? -10 : 10);
             htop_->render();
         } else if (arrow == 'A' || arrow == 'B') {
-            const int delta = arrow == 'A' ? 4 : 1;
-            live_selected_parameter_ = (live_selected_parameter_.load() + delta) % 5;
+            const int delta = arrow == 'A' ? htopLiveParameterCount() - 1 : 1;
+            live_selected_parameter_ = (live_selected_parameter_.load() + delta) % htopLiveParameterCount();
             refreshHtopControlState();
         } else if (arrow == 'C' || arrow == 'D') adjustHtopSelectedParameter(arrow == 'C' ? 1 : -1);
     }
@@ -1370,7 +1370,27 @@ private:
         interrupt_signal_pending_ = 1;
     }
 
+    int htopLiveParameterCount() const {
+        for (const auto& entry : std::atomic_load(&runtime_config_)->snapshot())
+            if (entry.key == "kl_mu_weight") return 7;
+        return 5;
+    }
+
     void adjustHtopSelectedParameter(int direction) {
+        const int component = live_selected_parameter_.load(std::memory_order_relaxed);
+        if (component == 5 || component == 6) {
+            const auto config = std::atomic_load(&runtime_config_);
+            const char* key = component == 5 ? "kl_mu_weight" : "kl_logvar_weight";
+            for (const auto& entry : config->snapshot()) if (entry.key == key) {
+                const double value = entry.pending.value_or(entry.value).get<double>();
+                std::string error;
+                config->request(key, std::to_string(std::clamp(value + direction * 0.1, 0.0, 1e6)), error);
+                break;
+            }
+            refreshHtopControlState();
+            return;
+        }
+
         const bool had_overrides = live_overrides_enabled_.load(std::memory_order_relaxed);
         if (!had_overrides) {
             live_lr_ = runtime_lr_.load(std::memory_order_relaxed);

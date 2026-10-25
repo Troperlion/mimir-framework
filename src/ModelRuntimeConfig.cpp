@@ -82,6 +82,10 @@ void Model::publishRuntimeConfiguration(Optimizer* optimizer) {
     }
     if (type == "vae" || type == "vae_conv" || type == "vae_text") {
         number("kl_beta", modelConfig.value("vae_kl_beta", 1.0), 0, 1e6);
+        number("kl_mu_weight", 1.0, 0, 1e6);
+        number("kl_logvar_weight", 1.0, 0, 1e6);
+        fields["kl_mu_weight"].note = "Direct; poids de MU uniquement (0 desactive); multiplie KL beta et son warmup";
+        fields["kl_logvar_weight"].note = "Direct; poids de logvar uniquement (0 desactive); multiplie KL beta et son warmup";
         live("kl_warmup_steps", modelConfig.value("kl_warmup_steps", 0), Owner::Model,
              0, 1000000000, "Direct; entier >= 0");
         live("recon_loss", modelConfig.value("recon_loss", "mse"), Owner::Model, 0, 0,

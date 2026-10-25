@@ -50,6 +50,20 @@ démarrage pour restaurer le graphe, puis les nouvelles métriques sont ajoutée
 sans effacer l’historique. Les options `csv`, `csv_enabled`, `csv_path` et
 `csv_file` de `Htop.create()` configurent cet export commun.
 
+### Graphe du modèle dans HTOP
+
+Pendant un run, `G` ouvre ou ferme l'arbre nodal du modèle et du planner actif.
+La vue utilise le snapshot immuable publié par la configuration runtime ; elle
+n'inspecte pas directement les layers en cours d'exécution. Les nœuds indiquent
+leurs dépendances, runtime, capacité, fusion et tailles disponibles. Le panneau
+signale explicitement quand le planner n'a fourni que la topologie, et les
+placements ne représentent pas une trace GPU.
+
+Dans cette vue, `↑`/`↓` ou `Tab` sélectionnent un layer, `Page Up`/`Page Down`
+déplacent la sélection par page, `←`/`→` déplacent la vue horizontalement et
+`R` réinitialise sélection et position. `G` ou `Esc` ferme le graphe et reprend
+l'affichage HTOP.
+
 ### Usage recommandé
 
 1. Créer/activer le monitor en début de run.
@@ -118,6 +132,11 @@ mais `set_enabled(true)` ne le redémarre pas : utiliser `create()`.
 - `A` : active/désactive le lissage des previews de blocks.
 - `B` : affiche/masque les encadrés de détection (`BOX ON/OFF`).
 - `R` : resynchronise/rebuild textures + reload hints architecture.
+- `N` : ouvre le graphe nodal du modèle ; `N` ou `Esc` le ferme.
+- Dans le graphe : flèches ou molette pour naviguer, clic sur un nœud pour
+  afficher ses détails, `R` pour revenir à l’origine et `X` pour exporter le
+  graphe complet en PNG.
+- `E` : ouvre la boîte de sélection du snapshot PNG.
 - `Tab`, `F1..F5`, `←/→` : navigation focus/éléments.
 - `Z`/`Entrée` : zoom, `Esc` : quitter zoom.
 - Survol d’un tip zoomé : bulle des valeurs brutes et des indices du tenseur,
@@ -185,6 +204,34 @@ Comportement de rendu important :
 
 - Les sorties de packing (`out_concat`, `out_pack`, etc.) sont exclues des previews image.
 - Dans la section `Outputs`, `recon` est priorisé juste avant `diff/resdiff` pour comparaison directe.
+- En mode `HEATMAP`, la palette choisie recolorise les tips de `Blocks / Layers`,
+  y compris les activations autres que `resdiff_abs`. Les layers `Identity`
+  restent non recolorisés ; le mode `REEL` montre les couleurs naturelles.
+- Les sections de tips sont regroupées par catégorie (par exemple `Encoder`,
+  `Latent`, `Decoder`, `Outputs`). La section `Outputs` ne reçoit pas de tip
+  artificiel `outputs` en tête : seuls les tips issus du modèle y apparaissent.
+
+### Graphe nodal et export PNG
+
+`N` affiche une vue arborescente du snapshot de graphe/planner associé au
+modèle actif. Les nœuds sont placés par profondeur et par voie ; les arêtes
+orthogonales entrent et sortent des cartes par des ports distincts. Les
+embranchements et les connexions longues utilisent des rails séparés afin que
+les trajets passent entre les cartes plutôt que sous elles. La sélection d'un
+nœud affiche ses entrées/sortie, le runtime, les paramètres, les formes et les
+informations de fusion. Les placements et octets sont des estimations du
+planner, pas une trace garantie des kernels effectivement exécutés.
+
+Dans cette vue, `X` exporte le graphe entier dans
+`snapshots/model_graph_<horodatage>.png`. Le rendu est assemblé par tuiles pour
+éviter la limite de dimension d'une texture de rendu unique ; l'image finale
+conserve les dimensions complètes de la topologie.
+
+`E` ouvre une boîte de dialogue permettant de choisir le contenu du snapshot :
+fenêtre actuelle, tips des couches, projection et sortie. Les éléments absents
+sont signalés comme indisponibles. Les tips sont ajoutés sous la capture de la
+fenêtre, groupés par catégorie et accompagnés de leurs labels complets, renvoyés
+à la ligne. L'export est écrit dans `snapshots/viz_snapshot_<horodatage>.png`.
 
 ### Annotations sur les sorties et correspondances de features
 

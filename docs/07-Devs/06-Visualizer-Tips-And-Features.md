@@ -178,6 +178,35 @@ Selon la feature:
 - upload textures: `createLayerBlockTexture(...)`, `createImageTexture(...)`
 - rendu panel: `renderLayerBlocks()`, `renderTrainingProgress()`, etc.
 
+### 3.5 Graphe nodal et snapshots
+
+La Viz affiche le snapshot du modèle/planner dans une vue nodale (`N`) et peut
+l'exporter en PNG (`X`). La disposition partagée est construite par
+`src/viz/ModelGraphLanes.hpp` ; gardez-y le routage déterministe des arêtes,
+les ports distincts des embranchements et les rails réservés aux connexions
+longues. Les arêtes doivent éviter toutes les cartes et ne pas se croiser ni se
+superposer. Une liaison simple entre deux cartes alignées reste un segment
+horizontal.
+
+L'export PNG du graphe (`Visualizer::saveModelGraphPng`) doit contenir toute la
+topologie. Il utilise des tuiles de rendu pour éviter de demander une texture
+unique plus grande que la limite graphique, puis assemble une seule image
+complète dans `snapshots/`.
+
+`E` ouvre le sélecteur du snapshot de la fenêtre. Il peut joindre les tips de
+couches, la projection et la sortie à l'image de la fenêtre. Les tips sont
+groupés par catégorie et les labels doivent rester complets (retour à la ligne,
+pas de troncature). Garder l'export tolérant aux catégories absentes, mais
+refuser explicitement une sélection vide.
+
+Tests de régression ciblés :
+
+- `VizTest.ModelGraphLanes` : branches, fusions, chemins simples et absence de
+  croisement, superposition ou passage sous une carte ;
+- `VizTest.HtopModelGraph` : navigation et fermeture de la vue graphe HTOP ;
+- `VizTest.ButtonEvents` : interactions Viz, vue graphe, export PNG et dialogue
+  de snapshot.
+
 ## 4. Configurer une nouvelle feature
 
 ### 4.1 Runtime config (JSON modelConfig)
@@ -216,7 +245,9 @@ Exemple de sequence complete:
 4. Ajouter la touche (`K`) dans `processEvents()`.
 5. Persister la palette dans le layout UI.
 6. Ajouter un badge `PAL ...` dans le header du panel.
-7. Documenter dans l'overlay aide et dans la doc utilisateur.
+7. Recoloriser tous les tips de `Blocks / Layers` sauf les layers `Identity`,
+   et vérifier l'effet avant la prochaine step.
+8. Documenter dans l'overlay aide et dans la doc utilisateur.
 
 ## 7. Validation rapide avant commit
 
@@ -232,7 +263,10 @@ Verification manuelle:
 2. les tips cibles apparaissent dans la bonne section,
 3. les toggles clavier ont un effet immediat,
 4. la progression training reste coherent (global + batch),
-5. pas d'artefact de texture evident (bande, repetition, couleurs incoherentes).
+5. pas d'artefact de texture evident (bande, repetition, couleurs incoherentes),
+6. l'export du graphe contient tous les nœuds, même lorsque la topologie dépasse
+   les dimensions d'une texture de rendu unique,
+7. les branches restent distinctes et les arêtes ne traversent pas les cartes.
 
 Verification hooks tips:
 

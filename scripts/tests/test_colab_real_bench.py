@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Focused integrity and resource-budget regression checks (no accelerator needed)."""
 import importlib.util
+import ast
+import json
 import os
 from pathlib import Path
 import sys
@@ -18,6 +20,25 @@ except ImportError:
 
 
 class Budgets(unittest.TestCase):
+    @unittest.skipIf(np is None,'requires numpy and pandas')
+    def test_report_keeps_optimizer_cases_separate(self):
+        notebook=json.loads((ROOT/'Colab-bench-multi-framework.ipynb').read_text())
+        source=next(''.join(c['source']) for c in notebook['cells']
+                    if 'valid.pivot(' in ''.join(c['source']))
+        generator=ast.parse((ROOT/'scripts/colab/add_real_benchmark.py').read_text())
+        report=next(n.value.value for n in generator.body if isinstance(n,ast.Assign)
+                    and any(isinstance(t,ast.Name) and t.id=='REPORT' for t in n.targets))
+        self.assertEqual(source.strip(),report.strip())
+        pivot=next(n for n in ast.walk(ast.parse(source)) if isinstance(n,ast.Call)
+                   and isinstance(n.func,ast.Attribute) and n.func.attr=='pivot')
+        valid=pandas.DataFrame([dict(batch=64,framework=f,case='batch-64-'+opt,
+                                    train_examples_per_s=i+1)
+                               for f in ('mimir','jax') for i,opt in enumerate(('sgd','adam','adamw'))])
+        table=eval(compile(ast.Expression(body=pivot),'<report-pivot>','eval'),
+                   dict(valid=valid,metric='train_examples_per_s'))
+        self.assertEqual(table.shape,(3,2))
+        self.assertEqual(set(table.index),{'batch-64-sgd','batch-64-adam','batch-64-adamw'})
+
     @unittest.skipUnless(sys.platform=='linux','requires Linux /proc and process groups')
     def test_timeout(self):
         with tempfile.TemporaryDirectory() as d:
@@ -51,6 +72,15 @@ class Ranking(unittest.TestCase):
         self.assertTrue(np.isnan(scores.loc['jax','score_100']))
         self.assertTrue(np.isnan(scores.loc['jax','rank']))
         self.assertTrue(detail[detail.framework=='mimir'].time_to_goal_s.isna().all())
+        self.assertTrue(np.isnan(scores.loc['jax','lifecycle_score_100']))
+        for row in records:
+            if row['framework'] in ('mimir','pytorch'):
+                row['process_wall_s']=4. if row['framework']=='mimir' else 2.
+                row['peak_tree_rss_mib']=20. if row['framework']=='mimir' else 10.
+        _,costs=suite.summarize(records,[dict(case='toy',batch=64,hidden=4)],['mimir','pytorch','jax'],2)
+        costs=costs.set_index('framework')
+        self.assertAlmostEqual(costs.loc['mimir','lifecycle_score_100'],50.)
+        self.assertAlmostEqual(costs.loc['pytorch','lifecycle_score_100'],100.)
 
     def test_mimir_requires_the_requested_planner(self):
         config=dict(case='toy',mimir=dict(planner_mode='cost'))

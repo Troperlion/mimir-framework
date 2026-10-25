@@ -15,22 +15,24 @@ def cell(kind,source):
 CONFIG='''
 # Real workload: independent from the microbenchmark score.
 RUN_REAL_BENCH=True
-REAL_PROFILE='standard'  # quick = smoke on real data; standard = full MNIST split
+REAL_PROFILE=PROFILE  # quick = smoke on real data; standard = full MNIST split
 REAL_TRIALS=2 if REAL_PROFILE=='standard' else 1
 REAL_BATCHES=[32,128,512] if REAL_PROFILE=='standard' else [64]
 REAL_HIDDEN=128
 REAL_STEPS=400 if REAL_PROFILE=='standard' else 80
 REAL_EVAL_EVERY=50 if REAL_PROFILE=='standard' else 40
-REAL_LEARNING_RATE=.2
+REAL_OPTIMIZERS={'sgd':dict(lr=.2,weight_decay=0.),'adam':dict(lr=.001,weight_decay=0.),'adamw':dict(lr=.001,weight_decay=.01)}
 REAL_TARGET_ACCURACY=.85
 REAL_MIN_TEST_ACCURACY=.75 if REAL_PROFILE=='standard' else .4
-REAL_PROCESS_TIMEOUT_S=180
-REAL_HOST_MEMORY_MIB=4096  # monitored sum RSS+swap across process and its workers
+REAL_PROCESS_TIMEOUT_S=600 if BACKEND=='tpu' else 300
+_host_meminfo=dict(line.split(':',1) for line in Path('/proc/meminfo').read_text().splitlines())
+_available_mib=int(_host_meminfo['MemAvailable'].split()[0])/1024
+REAL_HOST_MEMORY_MIB=max(512,min(12288,int(_available_mib*.65)))  # monitored sum RSS+swap across process and its workers
 REAL_MIMIR_OPTIONS=dict(planner_mode='cost',fusion=True,fusion_train=True,
     buffer_reuse=True,device_residency=True,allow_cpu_fallback=True)
 assert REAL_PROFILE in {'quick','standard'} and REAL_TRIALS>=1
 assert all(isinstance(b,int) and b>0 for b in REAL_BATCHES) and len(set(REAL_BATCHES))==len(REAL_BATCHES)
-assert REAL_STEPS>0 and REAL_EVAL_EVERY>0 and REAL_HIDDEN>0 and REAL_LEARNING_RATE>0
+assert REAL_STEPS>0 and REAL_EVAL_EVERY>0 and REAL_HIDDEN>0
 assert 0<=REAL_MIN_TEST_ACCURACY<=1 and 0<=REAL_TARGET_ACCURACY<=1
 assert REAL_PROCESS_TIMEOUT_S>0 and REAL_HOST_MEMORY_MIB>0
 '''
@@ -52,11 +54,11 @@ if RUN_REAL_BENCH:
     probe_indices=[];offset=0
     for size in sizes:
         probe_indices.extend((offset+np.unique(np.linspace(0,size-1,min(32,size),dtype=int))).tolist());offset+=size
-    REAL_CASES=[dict(case=f'mnist-mlp-{REAL_HIDDEN}-batch-{batch}',backend=BACKEND,
-        data_dir=str(REAL_DATA),mimir_version=(REPO/'VERSION').read_text().strip(),hidden=REAL_HIDDEN,batch=batch,steps=REAL_STEPS,lr=REAL_LEARNING_RATE,
+    REAL_CASES=[dict(case=f'mnist-mlp-{REAL_HIDDEN}-batch-{batch}-{optimizer}',optimizer=optimizer,weight_decay=options['weight_decay'],backend=BACKEND,
+        data_dir=str(REAL_DATA),mimir_version=(REPO/'VERSION').read_text().strip(),hidden=REAL_HIDDEN,batch=batch,steps=REAL_STEPS,lr=options['lr'],
         eval_every=REAL_EVAL_EVERY,target_accuracy=REAL_TARGET_ACCURACY,probe_indices=probe_indices,mimir=REAL_MIMIR_OPTIONS,
         train_examples=(REAL_DATA/'train.labels.u8').stat().st_size,
-        test_examples=(REAL_DATA/'test.labels.u8').stat().st_size) for batch in REAL_BATCHES]
+        test_examples=(REAL_DATA/'test.labels.u8').stat().st_size) for batch in REAL_BATCHES for optimizer,options in REAL_OPTIMIZERS.items()]
     # Add a native public-Model driver to the existing deferred CMake hook.
     real_hook=''' + repr('''
 function(mimir_colab_add_real_benchmark)
@@ -80,9 +82,9 @@ cmake_language(DEFER CALL mimir_colab_add_real_benchmark)
         min_test_accuracy=REAL_MIN_TEST_ACCURACY,cpu_affinity=CPU_AFFINITY,threads=THREADS,
         seed=SEED,dataset=REAL_DATA_MANIFEST,source_snapshot_sha256=globals().get('SOURCE_SHA256'),
         sources={p.name:REAL_SUITE.sha256(p) for p in real_source.glob('colab_real_*') if p.is_file()},
-        contract='persistent weights; public whole-model APIs; host batch preprocessing and device transfer; synchronized SGD; fixed validation schedule; final held-out inference',
+        contract='persistent weights; public whole-model APIs; host batch preprocessing and device transfer; synchronized SGD/Adam/AdamW; fixed validation schedule; final held-out inference',
         fp32=True,tf32=False,mimir_options=REAL_MIMIR_OPTIONS,cmake_args=list(map(str,CMAKE_ARGS)),
-        mimir_layers='production planner; CPU/native accelerator placement allowed; native host loss; SGD dispatched by runtime router; see plans and runtime audit',
+        mimir_layers='production planner; CPU/native accelerator placement allowed; native host loss; optimizer dispatched by runtime router; see plans and runtime audit',
         gpu_memory_limit='physical capacity only; no artificial VRAM/HBM cap',memory_poll_s=.05)
     (REAL_DIR/'protocol.json').write_text(json.dumps(provenance,indent=2))
     (REAL_DIR/'sources').mkdir(exist_ok=True)
@@ -102,7 +104,7 @@ if RUN_REAL_BENCH:
 REPORT='''
 if RUN_REAL_BENCH:
     REAL_DETAIL,REAL_BOARD=REAL_SUITE.summarize(REAL_RECORDS,REAL_CASES,FRAMEWORKS,REAL_TRIALS)
-    display(REAL_BOARD[['rank','framework','coverage','score_100','status']])
+    display(REAL_BOARD[['rank','framework','coverage','score_100','lifecycle_rank','lifecycle_score_100','status']])
     with pd.option_context('display.max_colwidth',None):display(REAL_DETAIL)
     REAL_DETAIL.to_csv(REAL_DIR/'real-detail.csv',index=False)
     REAL_BOARD.to_csv(REAL_DIR/'real-leaderboard.csv',index=False)
@@ -122,7 +124,7 @@ if RUN_REAL_BENCH:
         import matplotlib.pyplot as plt
         fig,axes=plt.subplots(1,2,figsize=(13,5))
         for ax,metric,title in zip(axes,['train_examples_per_s','inference_examples_per_s'],['Entrainement + validation','Inference tenue a part']):
-            valid.pivot(index='batch',columns='framework',values=metric).plot.bar(ax=ax,logy=True)
+            valid.pivot(index='case',columns='framework',values=metric).plot.bar(ax=ax,logy=True)
             ax.set_title(title);ax.set_ylabel('Images/s (log)')
         plt.tight_layout();plt.savefig(REAL_DIR/'throughput.png',dpi=160);plt.show()
     # The existing final archive includes this entire subdirectory and its logs.
@@ -140,15 +142,21 @@ def main():
     index=next(i for i,c in enumerate(notebook['cells']) if c['cell_type']=='markdown' and ''.join(c['source']).startswith('## Visualisation et export'))
     cells=[cell('markdown','''## Usage réel : entraînement et inférence MNIST sous contraintes
 
-Ce second tableau mesure une utilisation complète des API : **Mímir `Model.trainStep`/`forwardPass`**, PyTorch `nn.Sequential`/autograd/SGD, Keras `Sequential`/`GradientTape`/SGD et JAX `jit(value_and_grad)`. Les poids persistent entre les mises à jour. Il ne réinitialise pas le modèle à chaque pas.
+Ce second tableau mesure une utilisation complète des API : **Mímir `Model.trainStep`/`forwardPass`**, PyTorch `nn.Sequential`/autograd/SGD/Adam/AdamW, Keras `Sequential`/`GradientTape`/SGD/Adam/AdamW et JAX `jit(value_and_grad)`. Les poids persistent entre les mises à jour. Il ne réinitialise pas le modèle à chaque pas.
 
-- MLP `784 → 128 → ReLU → 10`, FP32, MSE sur labels one-hot, SGD sans momentum ni weight decay. Même initialisation, mêmes images, mêmes batches cycliques après un mélange initial commun. Batchs comparés séparément ; aucun score ne mélange des charges différentes au sein d'un cas.
+- MLP `784 → 128 → ReLU → 10`, FP32, MSE sur labels one-hot, SGD sans momentum, Adam, AdamW avec décroissance découplée .01. Même initialisation, mêmes images, mêmes batches cycliques après un mélange initial commun. Batchs comparés séparément ; aucun score ne mélange des charges différentes au sein d'un cas.
 - MNIST est téléchargé et contrôlé par le [SHA256 publié par Keras](https://github.com/keras-team/keras/blob/master/keras/src/datasets/mnist.py). Le train officiel est conservé ; les 2 000 premières images du test officiel servent à la validation périodique, les 8 000 autres à l'évaluation finale. Le profil `quick` utilise des sous-ensembles et sert au contrôle fonctionnel.
 - **Contraintes appliquées** : même affinité et nombre de threads CPU, plafond mémoire hôte RSS+swap cumulé du processus et de ses workers, délai total par essai (imports, compilation et données compris). Un watchdog externe termine tout le groupe de processus en cas de dépassement. Échantillonnage à 50 ms : une pointe entre deux mesures peut échapper au moniteur ; les pages partagées peuvent être comptées plusieurs fois. Pas de quota VRAM/HBM artificiel ; les limites physiques et OOM restent visibles.
-- Les étapes chaudes incluent préparation du batch, transferts, forward, loss, backward, SGD et synchronisation. Les frameworks conservent leurs paramètres selon leur API native. Chez Mímir, loss/SGD restent côté hôte et les transferts du runtime TPU sont inclus ; le planner `cost` peut choisir des routes CPU et accélérateur, comme en utilisation réelle. Fusions, réutilisation des buffers et résidence sur le device sont autorisées ; la compilation native active SIMD et OpenMP. Les plans et la trace de diagnostic indiquent ce qui est applicable : une option activée ne garantit pas une fusion de kernel ou une résidence effective sur chaque runtime. Les fusions d'entraînement restent limitées à celles prises en charge par le framework. Ce scénario mesure ces chemins publics et ce MLP ; il ne résume pas tous les usages ou optimisations des frameworks.
+- Les étapes chaudes incluent préparation du batch, transferts, forward, loss, backward, SGD/Adam/AdamW et synchronisation. Les frameworks conservent leurs paramètres selon leur API native. Chez Mímir, loss/SGD/Adam/AdamW restent côté hôte et les transferts du runtime TPU sont inclus ; le planner `cost` peut choisir des routes CPU et accélérateur, comme en utilisation réelle. Fusions, réutilisation des buffers et résidence sur le device sont autorisées ; la compilation native active SIMD et OpenMP. Les plans et la trace de diagnostic indiquent ce qui est applicable : une option activée ne garantit pas une fusion de kernel ou une résidence effective sur chaque runtime. Les fusions d'entraînement restent limitées à celles prises en charge par le framework. Ce scénario mesure ces chemins publics et ce MLP ; il ne résume pas tous les usages ou optimisations des frameworks.
 - Première étape vérifiée contre une référence NumPy float64 (prédictions, loss et sondes de paramètres après update, biais inclus). Une précision minimale sur le test tenu à part est obligatoire pour classer un essai. L'entraînement continue jusqu'au travail fixe demandé, même si le seuil de validation est atteint.
 - Mesures : débit d'entraînement **validation périodique incluse**, débit d'inférence, p50/p95/IQR des étapes, latences à froid, temps total, pic mémoire du groupe, précision/MSE et temps observé pour atteindre la précision cible. Les deux modes s'évaluent sur le même unique accélérateur, dans des processus isolés et un ordre aléatoire.
 - La note d'usage réel est indépendante de celle des opérations : moyenne géométrique des débits relatifs au meilleur, poids égaux entre entraînement, inférence et batchs. Tous les cas et essais doivent passer les budgets, la vérification numérique et le seuil de qualité ; il faut deux frameworks complets. Dépassements, OOM, erreurs et qualité insuffisante restent non classés. Les médianes et p95 ne constituent pas à eux seuls une preuve de significativité statistique.
+
+Les essais croisent chaque batch avec SGD, Adam et AdamW. Les états des optimiseurs sont remis à zéro après les passes froides. Les taux sont communs aux frameworks pour chaque optimiseur (.2 / .001 / .001), AdamW utilise une décroissance .01. Initialisation (import/runtime/modèle), allocation dédiée, premier pas, durée totale du processus et RSS sont exportés séparément. La note existante mesure le débit ; les coûts froids et mémoire restent des axes de comparaison distincts.
+
+La sonde d’allocation remplit 16 Mio et attend la fin du travail. Elle mesure le chemin public (cache éventuel compris), sans prétendre isoler un appel système. Mímir alloue les tenseurs publics en RAM ; ses allocations accélérateur différées sont incluses dans le premier pas. JAX inclut le staging hôte. Le delta RSS de la sonde peut être nul ou négatif ; le pic RSS surveillé couvre aussi les processus enfants. RSS ne mesure pas la VRAM/HBM. Les budgets RAM et délai sont ajustés automatiquement à la machine et au backend.
+
+Un second score `lifecycle_score_100` compare à parts égales le temps total du processus et son pic RSS (moyenne géométrique des ratios au meilleur, par cas). Il intègre les coûts froids dans le temps total, conserve les contrôles numériques et de qualité, et exclut les frameworks incomplets. Le score de débit existant reste affiché séparément. La sonde d’allocation hôte/appareil est descriptive et ne participe pas directement au score.
 '''),cell('code',CONFIG),cell('markdown','### Données communes, modèle natif et provenance'),cell('code',PREPARE),cell('markdown','### Essais isolés sous budgets effectifs'),cell('code',MEASURE),cell('markdown','### Comparaison d’usage réel et écarts avec Mímir'),cell('code',REPORT)]
     notebook['cells'][index:index]=cells
     intro=notebook['cells'][0]

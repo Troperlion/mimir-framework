@@ -3,6 +3,7 @@
 #include "viz/AnnotationFeatureOverlay.hpp"
 #include "viz/FeatureProbe.hpp"
 #include "viz/LumenOutputRole.hpp"
+#include "viz/ModelGraphLanes.hpp"
 #include <deque>
 #include <cstdlib>
 #include <filesystem>
@@ -44,6 +45,52 @@ protected:
     vizgfx::RenderTarget& renderTarget() override {return canvas_;}
 };
 struct VisualizerEventTestAccess {
+    static void runKlControls() {
+        Visualizer v(json{{"visualization",{{"enabled",true},{"window_width",1400},{"window_height",1800}}}});
+        v.setLossLogEnabled(false);
+        auto window=std::make_unique<EventWindow>(); auto* events=window.get();v.window=std::move(window);
+        TASSERT_TRUE(v.font.openFromFile("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"));v.font_loaded=true;
+        v.initDefaultPanelsIfNeeded();
+        using P=Visualizer::PanelId;
+        for (auto& panel:v.panels_) panel.visible=false;
+        v.panels_[size_t(P::Metrics)].visible=true;
+        auto key=[&](vizgfx::Keyboard::Key k) {events->events.emplace_back(vizgfx::Event::KeyPressed{k});v.processEvents();};
+        auto click=[&](const std::optional<vizgfx::FloatRect>& rect) {
+            TASSERT_TRUE(rect);const auto b=*rect;
+            events->events.emplace_back(vizgfx::Event::MouseButtonPressed{vizgfx::Mouse::Button::Left,
+                {int(b.position.x+b.size.x/2),int(b.position.y+b.size.y/2)}});
+            v.processEvents();
+        };
+        // Component controls submit independent requests without switching LR/KL
+        // scheduling to manual mode or overwriting the other component.
+        auto kl_config=std::make_shared<LiveModelConfig>();
+        kl_config->publish({
+            {"kl_mu_weight",1.0,LiveModelConfig::Owner::Model,0,1e6,{},"",std::nullopt},
+            {"kl_logvar_weight",1.0,LiveModelConfig::Owner::Model,0,1e6,{},"",std::nullopt}});
+        auto pending_kl = [&](const std::string& key) -> std::optional<json> {
+            for (const auto& entry : kl_config->snapshot()) if (entry.key == key) return entry.pending;
+            throw std::runtime_error("missing KL control");
+        };
+        v.setRuntimeConfiguration(kl_config);
+        v.panels_[size_t(P::Metrics)].pos={10,10};
+        v.panels_[size_t(P::Metrics)].size={700,1400};
+        v.panel_scroll_y_[size_t(P::Metrics)]=0;
+        v.live_overrides_enabled_.store(false);
+        v.renderMetrics();
+        TASSERT_TRUE(v.last_live_mu_value_box_ && v.last_live_logvar_value_box_);
+        click(v.last_live_mu_value_box_);
+        TASSERT_TRUE(v.live_input_target_==Visualizer::LiveInputTarget::KLMu);
+        v.live_input_buffer_="0";key(vizgfx::Keyboard::Key::Enter);
+        TASSERT_TRUE(pending_kl("kl_mu_weight")==0.0);
+        TASSERT_TRUE(!pending_kl("kl_logvar_weight"));
+        TASSERT_TRUE(!v.live_overrides_enabled_.load());
+        click(v.last_live_logvar_value_box_);
+        v.live_input_buffer_="2";key(vizgfx::Keyboard::Key::Enter);
+        TASSERT_TRUE(pending_kl("kl_logvar_weight")==2.0);
+        TASSERT_TRUE(pending_kl("kl_mu_weight")==0.0);
+        TASSERT_TRUE(!v.live_overrides_enabled_.load());
+    }
+
     static void run() {
         Visualizer v(json{{"visualization",{{"enabled",true},{"window_width",1400},{"window_height",1800}}}});
         v.setLossLogEnabled(false);
@@ -152,6 +199,24 @@ struct VisualizerEventTestAccess {
         click(v.last_blocks_hide_act_box_);TASSERT_TRUE(v.layer_block_images.size()==remaining+norm_types.size()+1);
         v.setLayerBlockImages(filter_frames);TASSERT_TRUE(v.layer_block_images.size()==remaining+norm_types.size()+1);
         click(v.last_blocks_hide_norm_box_);TASSERT_TRUE(v.layer_block_images.size()==remaining);
+        v.setLayerBlockImages({});
+        Visualizer::BlockFrame palette_encoder;palette_encoder.w=palette_encoder.h=2;palette_encoder.channels=1;
+        palette_encoder.pixels={0,64,128,255};palette_encoder.label="model/blocks/encoder/Conv2d";
+        auto palette_diff=palette_encoder;palette_diff.label="model/blocks/resdiff_abs/Conv2d";
+        auto palette_identity=palette_encoder;palette_identity.label="model/blocks/identity/Identity";
+        const bool previous_heatmap_mode=v.heatmap_mode_;
+        const auto previous_palette=v.heatmap_palette_;
+        v.heatmap_mode_=true;v.heatmap_palette_=Visualizer::HeatmapPalette::Classic;
+        v.setLayerBlockImages({palette_encoder,palette_diff,palette_identity});
+        const auto encoder_classic=v.layer_block_images[0].pixels;
+        const auto diff_classic=v.layer_block_images[1].pixels;
+        const auto identity_classic=v.layer_block_images[2].pixels;
+        v.heatmap_palette_=Visualizer::HeatmapPalette::Turbo;
+        v.setLayerBlockImages({palette_encoder,palette_diff,palette_identity});
+        TASSERT_TRUE(v.layer_block_images[0].pixels!=encoder_classic);
+        TASSERT_TRUE(v.layer_block_images[1].pixels!=diff_classic);
+        TASSERT_TRUE(v.layer_block_images[2].pixels==identity_classic);
+        v.heatmap_mode_=previous_heatmap_mode;v.heatmap_palette_=previous_palette;
         v.setLayerBlockImages({});
         click(v.last_blocks_tips_limit_box_);TASSERT_TRUE(v.blocks_tips_limit_editing_);
         events->events.emplace_back(vizgfx::Event::TextEntered{U'2'});v.processEvents();key(vizgfx::Keyboard::Key::Enter);TASSERT_TRUE(v.blocks_tips_visible_limit_==2);
@@ -510,6 +575,7 @@ struct VisualizerEventTestAccess {
         key(vizgfx::Keyboard::Key::Escape);TASSERT_TRUE(!v.show_help_overlay_);
         key(vizgfx::Keyboard::Key::H);TASSERT_TRUE(v.show_help_overlay_ && v.help_scroll_y_==0.f);
         v.renderHelpOverlay();click(v.help_close_rect_);TASSERT_TRUE(!v.show_help_overlay_);
+        events->events.emplace_back(vizgfx::Event::Resized{{1000,800}});v.processEvents();
         // The graph is modal and receives immutable metadata from the model.
         auto graph_config=std::atomic_load(&v.runtime_config_);
         graph_config->publishModelGraph(json{{"mode","desactive"},{"planned",false},
@@ -519,7 +585,7 @@ struct VisualizerEventTestAccess {
             {"edges",json::array()},{"external_inputs",json::array()}});
         auto graph_sample=*graph_config->modelGraph();
         auto second=graph_sample["nodes"][0];
-        second["index"]=1;second["name"]="activation";second["type"]="ReLU";
+        second["index"]=1;second["name"]="activation_with_a_long_descriptive_name";second["type"]="ReLU";
         second["depth"]=1;second["inputs"]=json::array({"y"});second["output"]="z";
         graph_sample["nodes"].push_back(second);
         graph_sample["edges"].push_back(json{{"from",0},{"to",1},{"tensor","y"}});
@@ -533,19 +599,56 @@ struct VisualizerEventTestAccess {
         click(v.model_graph_hits_[1].first);
         TASSERT_TRUE(v.model_graph_selected_==1);
         v.renderModelGraphOverlay();
+        key(vizgfx::Keyboard::Key::X);TASSERT_TRUE(v.model_graph_png_requested_);
+        v.model_graph_png_requested_=false;events->display();
+        TASSERT_TRUE(v.saveModelGraphPng());
+        const auto graph_layout=Mimir::Viz::modelGraphTree(*graph_config->modelGraph());
+        vizgfx::Image graph_image;
+        TASSERT_TRUE(graph_image.loadFromFile(v.last_model_graph_path_));
+        TASSERT_TRUE(graph_image.getSize().x>=graph_layout.width()+32.f);
+        TASSERT_TRUE(graph_image.getSize().y>=graph_layout.height()+112.f);
+        TASSERT_TRUE(graph_image.getSize().x>events->getSize().x);
+        json large_graph=*graph_config->modelGraph();
+        large_graph["nodes"]=json::array();
+        large_graph["edges"]=json::array();
+        for(size_t i=0;i<55;++i) {
+            large_graph["nodes"].push_back({{"index",i},{"name","linear layer "+std::to_string(i)},
+                {"type","Linear"},{"depth",i},{"lane",0},{"runtime","CPU"},{"parameters",4},
+                {"inputs",json::array()},{"output","tensor_"+std::to_string(i)},
+                {"capability","connue"},{"graph_fused",false},{"kernel_fused",false},{"skip",false}});
+            if(i>0) large_graph["edges"].push_back({{"from",i-1},{"to",i},
+                {"tensor","tensor_"+std::to_string(i-1)}});
+        }
+        graph_config->publishModelGraph(std::move(large_graph));
+        v.renderModelGraphOverlay();
+        const auto large_layout=Mimir::Viz::modelGraphTree(*graph_config->modelGraph());
+        TASSERT_TRUE(large_layout.width()+32.f>16384.f);
+        TASSERT_TRUE(v.saveModelGraphPng());
+        TASSERT_TRUE(graph_image.loadFromFile(v.last_model_graph_path_));
+        TASSERT_TRUE(graph_image.getSize().x>=large_layout.width()+32.f);
+        TASSERT_TRUE(graph_image.getSize().x>16384);
         if(const char* capture=std::getenv("MIMIR_GRAPH_TEST_CAPTURE")) {
             events->display();TASSERT_TRUE(events->captureImage().saveToFile(capture));
         }
-        key(vizgfx::Keyboard::Key::Down);
-        TASSERT_TRUE(v.model_graph_y_>0.f);
-        key(vizgfx::Keyboard::Key::R);TASSERT_TRUE(v.model_graph_y_==0.f);
+        key(vizgfx::Keyboard::Key::Right);
+        TASSERT_TRUE(v.model_graph_x_>0.f);
+        key(vizgfx::Keyboard::Key::R);TASSERT_TRUE(v.model_graph_x_==0.f && v.model_graph_y_==0.f);
         key(vizgfx::Keyboard::Key::Escape);
         TASSERT_TRUE(!v.show_model_graph_ && !graph_config->modelGraphRequested());
+        key(vizgfx::Keyboard::Key::E);TASSERT_TRUE(v.snapshot_dialog_visible_);
+        key(vizgfx::Keyboard::Key::Space);TASSERT_TRUE(!v.snapshot_include_window_);
+        key(vizgfx::Keyboard::Key::Escape);TASSERT_TRUE(!v.snapshot_dialog_visible_);
+        v.snapshot_include_window_=true;v.snapshot_include_layer_tips_=false;
+        v.snapshot_include_projection_=v.snapshot_include_output_=false;
+        TASSERT_TRUE(v.saveSnapshotPng());
+        vizgfx::Image snapshot;
+        TASSERT_TRUE(snapshot.loadFromFile(v.last_snapshot_path_));
+        TASSERT_TRUE(snapshot.getSize().x==events->getSize().x && snapshot.getSize().y==events->getSize().y);
         v.shutdown();
     }
 };
 #endif
-int main() {
+int main(int argc, char** argv) {
 #ifndef ENABLE_VIZ
     return 77;
 #else
@@ -555,7 +658,10 @@ int main() {
     const auto dir=fs::temp_directory_path() / ("mimir_viz_events_"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     const auto previous=fs::current_path();fs::create_directories(dir);fs::current_path(dir);
     struct Cleanup {fs::path previous,dir;~Cleanup(){fs::current_path(previous);fs::remove_all(dir);}} cleanup{previous,dir};
-    try { VisualizerEventTestAccess::run(); }
+    try {
+        if (argc>1 && std::string(argv[1])=="--kl-only") VisualizerEventTestAccess::runKlControls();
+        else VisualizerEventTestAccess::run();
+    }
     catch(const std::exception& error) {std::cerr << error.what() << "\n"; return 1;}
     std::cout << "PASS VIZ button events, modal isolation and overlap routing\n";
 #endif

@@ -276,17 +276,18 @@ private:
     float live_ui_lr_ = 0.0f;
     int live_ui_lr_warmup_steps_ = 0;
     float live_ui_kl_beta_ = 0.0f;
+    float live_ui_kl_mu_weight_ = 1.0f, live_ui_kl_logvar_weight_ = 1.0f;
     int live_ui_kl_warmup_steps_ = 0;
     bool live_ui_kl_enabled_ = false;
     int live_ui_recon_loss_index_ = 0;
     uint64_t live_ui_external_version_ = 0;
 
     // Drag des sliders live.
-    enum class LiveDragTarget { None, LR, LRWarmup, KLBeta, KLWarmup };
+    enum class LiveDragTarget { None, LR, LRWarmup, KLBeta, KLWarmup, KLMu, KLLogvar };
     LiveDragTarget live_dragging_ = LiveDragTarget::None;
 
     // Saisie clavier directe des sliders live.
-    enum class LiveInputTarget { None, LR, LRWarmup, KLBeta, KLWarmup };
+    enum class LiveInputTarget { None, LR, LRWarmup, KLBeta, KLWarmup, KLMu, KLLogvar };
     LiveInputTarget live_input_target_ = LiveInputTarget::None;
     std::string live_input_buffer_;
     uint64_t live_input_error_until_ms_ = 0;
@@ -298,6 +299,8 @@ private:
     std::optional<vizgfx::FloatRect> last_live_lr_thumb_;
     std::optional<vizgfx::FloatRect> last_live_lrwu_track_;
     std::optional<vizgfx::FloatRect> last_live_lrwu_thumb_;
+    std::optional<vizgfx::FloatRect> last_live_mu_track_, last_live_mu_thumb_, last_live_mu_value_box_;
+    std::optional<vizgfx::FloatRect> last_live_logvar_track_, last_live_logvar_thumb_, last_live_logvar_value_box_;
     std::optional<vizgfx::FloatRect> last_live_klb_track_;
     std::optional<vizgfx::FloatRect> last_live_klb_thumb_;
     std::optional<vizgfx::FloatRect> last_live_klwu_track_;
@@ -562,12 +565,16 @@ private:
     void renderScriptControls();
     void renderConfigurationOverlay();
     void renderModelGraphOverlay();
+    void renderSnapshotDialog();
+    bool saveModelGraphPng();
     bool show_model_graph_ = false;
     float model_graph_x_ = 0.f, model_graph_y_ = 0.f;
     float model_graph_max_x_ = 0.f, model_graph_max_y_ = 0.f;
     size_t model_graph_selected_ = 0;
     std::vector<std::pair<vizgfx::FloatRect,size_t>> model_graph_hits_;
     std::shared_ptr<const json> model_graph_display_;
+    bool model_graph_png_requested_ = false;
+    std::string last_model_graph_path_;
 
     std::vector<std::pair<vizgfx::FloatRect, size_t>> config_row_rects_;
     void emitScriptEvent(const json& event);
@@ -722,6 +729,13 @@ private:
     // Capture PNG demandee par la touche E. Le rendu est effectue dans update()
     // afin de rester sur le thread qui possede le contexte graphique.
     bool snapshot_requested_ = false;
+    bool snapshot_dialog_visible_ = false;
+    bool snapshot_include_window_ = true;
+    bool snapshot_include_layer_tips_ = true;
+    bool snapshot_include_projection_ = false;
+    bool snapshot_include_output_ = false;
+    size_t snapshot_dialog_selected_ = 0;
+    std::string snapshot_dialog_error_;
     std::string last_snapshot_path_;
     bool saveSnapshotPng();
 

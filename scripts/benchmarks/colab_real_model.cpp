@@ -10,6 +10,11 @@
 #include <sstream>
 using Json=nlohmann::json;
 using Clock=std::chrono::steady_clock;
+static double rss_mib(){
+    std::ifstream f("/proc/self/status");std::string line;
+    while(std::getline(f,line))if(line.rfind("VmRSS:",0)==0){std::istringstream value(line.substr(6));double kb=0;value>>kb;return kb/1024.;}
+    return 0.;
+}
 static double seconds(Clock::time_point t){return std::chrono::duration<double>(Clock::now()-t).count();}
 void framework_log_write_file_only(const char*,size_t){}
 void framework_log_write(const char*,size_t){}
@@ -46,6 +51,7 @@ int main(int argc,char** argv){
         {"fusion_train",options.value("fusion_train",true)},{"buffer_reuse",options.value("buffer_reuse",true)},
         {"device_residency",options.value("device_residency",true)},{"allow_cpu_fallback",allow_cpu}};
     Model::setFrameworkLogsSuppressed(true);
+    const auto data_started=Clock::now();
     std::vector<std::vector<float>> initial;
     for(int i=0;i<4;++i)initial.push_back(read<float>(dir+"/weights-"+std::to_string(hidden)+"-"+std::to_string(i)+".f32"));
     struct Data{std::vector<uint8_t> x,y;};std::map<std::string,Data> data;
@@ -53,6 +59,8 @@ int main(int argc,char** argv){
         auto& d=data[split];d.x=read<uint8_t>(dir+"/"+split+".images.u8");d.y=read<uint8_t>(dir+"/"+split+".labels.u8");
         if(d.y.empty() || d.x.size()!=d.y.size()*784)throw std::runtime_error("Dataset shape mismatch");
     }
+    report["data_allocation_s"]=seconds(data_started);
+    const auto initialization=Clock::now();
     Model model;model.modelConfig={{"loss","mse"},{"grad_clip_norm",0}};
     model.push("hidden","Linear",hidden*784+hidden);
     model.push("relu","ReLU",0);model.push("logits","Linear",10*hidden+10);
@@ -62,15 +70,18 @@ int main(int argc,char** argv){
     layers[1].inputs={"hidden"};layers[1].output="activation";
     layers[2].inputs={"activation"};layers[2].output="x";
     layers[2].in_features=hidden;layers[2].out_features=10;layers[2].seq_len=batch;layers[2].use_bias=true;
-    model.allocateParams();
-    Optimizer opt;opt.type=OptimizerType::SGD;opt.initial_lr=lr;opt.min_lr=lr;
-    opt.decay_strategy=LRDecayStrategy::NONE;opt.weight_decay=0;opt.warmup_steps=0;
+    const auto allocation=Clock::now();model.allocateParams();
+    report["parameter_allocation_s"]=seconds(allocation);
+    Optimizer opt;const std::string optimizer=c.value("optimizer",std::string("sgd"));
+    if(optimizer!="sgd" && optimizer!="adam" && optimizer!="adamw")throw std::runtime_error("Invalid optimizer");
+    opt.type=optimizer=="sgd"?OptimizerType::SGD:optimizer=="adam"?OptimizerType::ADAM:OptimizerType::ADAMW;opt.initial_lr=lr;opt.min_lr=lr;
+    opt.decay_strategy=LRDecayStrategy::NONE;opt.weight_decay=c.value("weight_decay",0.f);opt.warmup_steps=0;
     auto reset=[&]{
         for(int block=0;block<2;++block){auto& l=layers[block==0?0:2];
             if(l.getWeightsSize()!=initial[2*block].size()+initial[2*block+1].size())throw std::runtime_error("Parameter shape mismatch");
             std::copy(initial[2*block].begin(),initial[2*block].end(),l.getWeights());
             std::copy(initial[2*block+1].begin(),initial[2*block+1].end(),l.getWeights()+initial[2*block].size());
-        }opt.step=0;
+        }opt.step=0;opt.mv_by_param_ptr.clear();opt.m.clear();opt.v.clear();
     };
     auto probe=[&]{
         std::vector<float> flat;
@@ -91,6 +102,17 @@ int main(int argc,char** argv){
         auto result=model.trainStep(request);if(!result)throw std::runtime_error("Model.trainStep unavailable");
         if(!std::isfinite(result->loss))throw std::runtime_error("Non-finite loss");return *result;
     };
+    report["initialization_s"]=seconds(initialization);
+    report["rss_after_initialization_mib"]=rss_mib();
+    // Native public model tensors reside on host; accelerator scratch is lazy
+    // and therefore included in the first synchronized trainStep.
+    {
+        const double before=rss_mib();const auto tick=Clock::now();std::vector<float> probe_allocation(4*1024*1024,1.f);
+        volatile float touched=probe_allocation.back();(void)touched;
+        report["allocation_probe_s"]=seconds(tick);report["allocation_probe_bytes"]=16*1024*1024;
+        report["allocation_probe_rss_delta_mib"]=rss_mib()-before;
+        report["allocation_probe_device"]="host; lazy device scratch included in cold_step_ms";
+    }
     reset();get_batch("train",0);auto cold=Clock::now();auto first=train();
     report["cold_step_ms"]=seconds(cold)*1000;report["first_loss"]=first.loss;
     report["first_prediction"]=model.getTensor("x");report["first_parameter_probe"]=probe();
@@ -153,7 +175,7 @@ int main(int argc,char** argv){
     started=Clock::now();report["test"]=evaluate("test");report["inference_wall_s"]=seconds(started);
     report["final_parameter_probe"]=probe();report["case"]=c.at("case");report["status"]="measured";
     report["mode"]="Model.trainStep + Model.forwardPass; planner="+planner+"; production optimizations (see plans/audit)";
-    report["device"]="target="+backend+(allow_cpu?"; CPU routes allowed by planner":"; CPU routes disabled");report["optimizer"]="SGD via runtime router (automatic selection)";
+    report["device"]="target="+backend+(allow_cpu?"; CPU routes allowed by planner":"; CPU routes disabled");report["optimizer"]=optimizer;
     report["reconstruction_loss_runtime_counts"]=RuntimeRouter::instance().reconstructionLossDispatchCounts();
     report["optimizer_runtime_counts"]=RuntimeRouter::instance().optimizerDispatchCounts();
     report["version"]=c.value("mimir_version",std::string("see protocol"));

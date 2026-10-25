@@ -14,6 +14,26 @@ struct AsyncMonitorPreviewTestAccess {
         monitor.processHtopKey('D');
     }
     static void key(AsyncMonitor& monitor, char key) { monitor.processHtopKey(key); }
+    static bool independentKlControls() {
+        AsyncMonitor monitor;
+        auto config=std::make_shared<LiveModelConfig>();
+        config->publish({
+            {"kl_mu_weight",1.0,LiveModelConfig::Owner::Model,0,1e6,{},"",std::nullopt},
+            {"kl_logvar_weight",1.0,LiveModelConfig::Owner::Model,0,1e6,{},"",std::nullopt}});
+        monitor.bindRuntimeConfiguration(config);
+        if (monitor.htopLiveParameterCount()!=7) return false;
+        monitor.live_selected_parameter_=5;
+        monitor.adjustHtopSelectedParameter(-1);
+        for(const auto& e:config->snapshot()) {
+            if(e.key=="kl_mu_weight" && (!e.pending || std::abs(e.pending->get<double>()-.9)>1e-6)) return false;
+            if(e.key=="kl_logvar_weight" && e.pending) return false;
+        }
+        monitor.live_selected_parameter_=6;
+        monitor.adjustHtopSelectedParameter(1);
+        for(const auto& e:config->snapshot())
+            if(e.key=="kl_logvar_weight" && (!e.pending || std::abs(e.pending->get<double>()-1.1)>1e-6)) return false;
+        return !monitor.live_overrides_enabled_.load();
+    }
     static bool visible(AsyncMonitor& monitor) { return monitor.htop_->debugJsonVisible(); }
 };
 
@@ -23,6 +43,7 @@ static size_t index_of(const std::shared_ptr<LiveModelConfig>& config, const std
     throw std::runtime_error("missing row " + key);
 }
 int main(int argc, char** argv) {
+    TASSERT_TRUE(AsyncMonitorPreviewTestAccess::independentKlControls());
     Model model;
     model.modelConfig = {{"type","basic_mlp"},{"bbox_loss_weight",1.0},{"hidden_dim",16},{"training",{{"epochs",10}}}};
     model.push("linear", "Linear", 1);

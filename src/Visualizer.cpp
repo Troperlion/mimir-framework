@@ -2044,7 +2044,7 @@ void Visualizer::renderModelGraphOverlay() {
     };
     box(0,0,width,height,vizgfx::Color(16,23,32));
     text(20,12,"GRAPHE DU MODELE / PLANNER   [N / Esc] Fermer",accent,17);
-    text(20,38,"Fleches / molette : parcourir | R : origine | Clic ligne : details | Rails colores : branches / fusions",muted);
+    text(20,38,"Fleches / molette : parcourir | R : origine | Clic noeud : details | X : exporter PNG",muted);
     if(!model_graph_display_) {
         text(20,72,"Aucun modele attache. En attente d'un instantane du modele.",white);return;
     }
@@ -2066,11 +2066,10 @@ void Visualizer::renderModelGraphOverlay() {
     } else text(20,86,"Plan indisponible : topologie seule. Les placements ne sont pas mesures.",muted);
     const float top=114.f,bottom=std::max(top+1.f,height-174.f);
     const float view_h=bottom-top,view_w=std::max(1.f,width-40.f);
-    const auto layout=Mimir::Viz::modelGraphLanes(graph);
-    const float labels_x=layout.labelsX();
-    const float extent_x=labels_x+520.f,extent_y=float(nodes.size())*Mimir::Viz::ModelGraphLanes::row+30.f;
-    model_graph_max_x_=std::max(0.f,extent_x-view_w+20.f);
-    model_graph_max_y_=std::max(0.f,extent_y-view_h+20.f);
+    const auto layout=Mimir::Viz::modelGraphTree(graph);
+    const float extent_x=layout.width(),extent_y=layout.height();
+    model_graph_max_x_=std::max(0.f,extent_x-view_w);
+    model_graph_max_y_=std::max(0.f,extent_y-view_h);
     model_graph_x_=std::clamp(model_graph_x_,0.f,model_graph_max_x_);
     model_graph_y_=std::clamp(model_graph_y_,0.f,model_graph_max_y_);
     const auto old=window->getView();
@@ -2079,27 +2078,32 @@ void Visualizer::renderModelGraphOverlay() {
         view_w/std::max(1.f,width),view_h/std::max(1.f,height)));
     window->setView(view);
     if(!nodes.empty())model_graph_selected_=std::min(model_graph_selected_,nodes.size()-1);
-    // Row highlights stay behind the colored branch rails and merge markers.
+    Mimir::Viz::drawModelGraphTreeEdges(*window,layout,model_graph_selected_);
     for(size_t i=0;i<nodes.size();++i) {
-        const float y=layout.position(i).y-25.f;
-        if(y+56<model_graph_y_ || y>model_graph_y_+view_h)continue;
-        box(0,y,extent_x,56.f,i==model_graph_selected_?vizgfx::Color(36,48,65):
-            (i%2?vizgfx::Color(19,27,38):vizgfx::Color(16,23,32)));
-    }
-    Mimir::Viz::drawModelGraphLanes(*window,layout,model_graph_selected_,model_graph_y_,model_graph_y_+view_h);
-    for(size_t i=0;i<nodes.size();++i) {
-        const auto& n=nodes[i];const float y=layout.position(i).y-25.f;
-        if(y+56<model_graph_y_ || y>model_graph_y_+view_h)continue;
+        const auto& n=nodes[i];
+        const auto center=layout.position(i);
+        const float x=center.x-layout.card_width*.5f;
+        const float y=center.y-layout.card_height*.5f;
+        if(x+layout.card_width<model_graph_x_ ||
+           x>model_graph_x_+view_w || y+layout.card_height<model_graph_y_ ||
+           y>model_graph_y_+view_h) continue;
         const auto color=Mimir::Viz::graphLaneColor(layout.lanes[i]);
-        auto clip=[](std::string v,size_t limit){return v.size()>limit?v.substr(0,limit-3)+"...":v;};
-        text(labels_x,y+3,std::to_string(i)+"  "+clip(n.at("name"),44),white,14);
-        text(labels_x,y+25,clip(n.at("type"),22)+"  |  "+n.at("runtime").get<std::string>(),color,12);
+        vizgfx::RectangleShape card({layout.card_width,layout.card_height});
+        card.setPosition({x,y});
+        card.setFillColor(i==model_graph_selected_?vizgfx::Color(43,57,76):vizgfx::Color(24,33,46));
+        card.setOutlineColor(color);
+        card.setOutlineThickness(i==model_graph_selected_?2.f:1.f);
+        window->draw(card);
+        text(x+8.f,y+5.f,std::to_string(i)+"  "+n.at("name").get<std::string>(),white,13);
+        text(x+8.f,y+25.f,n.at("type").get<std::string>()+"  |  "+
+            n.at("runtime").get<std::string>(),color,11);
         std::string badges="params "+n.at("parameters").dump();
         if(n.value("graph_fused",false))badges+="  | fusion";
         if(n.value("kernel_fused",false))badges+="  | kernel";
         if(n.value("skip",false))badges+="  | skip";
-        text(labels_x+270.f,y+27,badges,muted,11);
-        const auto rect=make_rect(20-model_graph_x_,top+y-model_graph_y_,extent_x,56.f);
+        text(x+8.f,y+45.f,badges,muted,10);
+        const auto rect=make_rect(20.f+x-model_graph_x_,top+y-model_graph_y_,
+            layout.card_width,layout.card_height);
         if(auto hit=rect.findIntersection(make_rect(20,top,view_w,view_h)))model_graph_hits_.push_back({*hit,i});
     }
     window->setView(old);
@@ -2118,6 +2122,52 @@ void Visualizer::renderModelGraphOverlay() {
         text(20,bottom+113,"Entrees externes : "+std::to_string(graph.at("external_inputs").size())+
             " | mise a jour au prochain forward actif (max 2/s)",muted,12);
     } else text(20,bottom+32,"Le modele ne contient aucun layer.",white);
+}
+
+void Visualizer::renderSnapshotDialog() {
+    if (!snapshot_dialog_visible_ || !font_loaded) return;
+    const float width=460.f,height=292.f;
+    const float left=(float(window_width)-width)*.5f;
+    const float top=(float(window_height)-height)*.5f;
+    auto box=[&](float x,float y,float w,float h,vizgfx::Color color) {
+        vizgfx::RectangleShape shape({w,h});shape.setPosition({x,y});shape.setFillColor(color);window->draw(shape);
+    };
+    auto text=[&](float x,float y,const std::string& value,vizgfx::Color color,unsigned size=14) {
+        vizgfx::Text label(font);label.setCharacterSize(size);label.setPosition({x,y});
+        label.setFillColor(color);label.setString(vizgfx::String::fromUtf8(value.begin(),value.end()));window->draw(label);
+    };
+    box(0,0,float(window_width),float(window_height),vizgfx::Color(0,0,0,175));
+    box(left,top,width,height,vizgfx::Color(25,33,45));
+    vizgfx::RectangleShape border({width,height});border.setPosition({left,top});
+    border.setFillColor(vizgfx::Color::Transparent);border.setOutlineColor(vizgfx::Color(100,215,210));
+    border.setOutlineThickness(2.f);window->draw(border);
+    text(left+18.f,top+14.f,"Exporter un snapshot",vizgfx::Color(100,215,210),18);
+    text(left+18.f,top+40.f,"Espace : selectionner | Entree : confirmer | Echap : annuler",
+         vizgfx::Color(175,188,202),11);
+
+    struct Option { const char* label; bool* checked; bool available; };
+    Option options[]={{"Fenetre actuelle",&snapshot_include_window_,true},
+        {"Tips des couches (par categorie)",&snapshot_include_layer_tips_,!layer_block_images.empty()},
+        {"Projection",&snapshot_include_projection_,has_projection_thumb_},
+        {"Sortie",&snapshot_include_output_,has_output_thumb_}};
+    for(size_t i=0;i<std::size(options);++i) {
+        const float y=top+70.f+float(i)*34.f;
+        if(snapshot_dialog_selected_==i)box(left+12.f,y-3.f,width-24.f,30.f,vizgfx::Color(48,61,78));
+        box(left+22.f,y+3.f,18.f,18.f,vizgfx::Color(38,48,61));
+        if(*options[i].checked)text(left+25.f,y,"x",vizgfx::Color(100,215,210),15);
+        std::string label=options[i].label;
+        if(!options[i].available)label+=" (indisponible)";
+        text(left+50.f,y,label,options[i].available?vizgfx::Color(230,237,244):vizgfx::Color(120,130,142));
+    }
+    const float buttons_y=top+220.f;
+    const bool confirm_selected=snapshot_dialog_selected_==4;
+    const bool cancel_selected=snapshot_dialog_selected_==5;
+    box(left+width-214.f,buttons_y,104.f,34.f,confirm_selected?vizgfx::Color(58,116,112):vizgfx::Color(42,66,70));
+    box(left+width-100.f,buttons_y,82.f,34.f,cancel_selected?vizgfx::Color(83,68,68):vizgfx::Color(54,51,54));
+    text(left+width-197.f,buttons_y+8.f,"Exporter",vizgfx::Color(238,244,247),13);
+    text(left+width-87.f,buttons_y+8.f,"Annuler",vizgfx::Color(238,244,247),13);
+    if(!snapshot_dialog_error_.empty())
+        text(left+18.f,top+264.f,snapshot_dialog_error_,vizgfx::Color(255,155,130),12);
 }
 
 void Visualizer::renderConfigurationOverlay() {
@@ -2184,6 +2234,15 @@ void Visualizer::processEvents() {
         }
     };
 
+    auto request_kl_weight = [&](bool mu, const std::string& value) {
+        std::string error;
+        return std::atomic_load(&runtime_config_)->request(
+            mu ? "kl_mu_weight" : "kl_logvar_weight", value, error);
+    };
+    auto split_kl_drag = [](LiveDragTarget target) {
+        return target == LiveDragTarget::KLMu || target == LiveDragTarget::KLLogvar;
+    };
+
     auto apply_live_slider_from_mouse = [&](LiveDragTarget target, const vizgfx::Vector2f& mouse) {
         auto apply_t_on_track = [&](const std::optional<vizgfx::FloatRect>& track, auto fn) {
             if (!track.has_value()) return;
@@ -2192,7 +2251,14 @@ void Visualizer::processEvents() {
             fn(t);
         };
 
-        if (target == LiveDragTarget::LR) {
+        if (split_kl_drag(target)) {
+            const bool mu = target == LiveDragTarget::KLMu;
+            apply_t_on_track(mu ? last_live_mu_track_ : last_live_logvar_track_, [&](float t) {
+                const float weight = t * 4.0f;
+                if (request_kl_weight(mu, std::to_string(weight)))
+                    (mu ? live_ui_kl_mu_weight_ : live_ui_kl_logvar_weight_) = weight;
+            });
+        } else if (target == LiveDragTarget::LR) {
             apply_t_on_track(last_live_lr_track_, [&](float t) { live_ui_lr_ = lr_from_t(t); });
         } else if (target == LiveDragTarget::LRWarmup) {
             apply_t_on_track(last_live_lrwu_track_, [&](float t) { live_ui_lr_warmup_steps_ = warmup_from_t(t); });
@@ -2242,7 +2308,9 @@ void Visualizer::processEvents() {
         bool ok = false;
 
         try {
-            if (live_input_target_ == LiveInputTarget::LR) {
+            if (live_input_target_ == LiveInputTarget::KLMu || live_input_target_ == LiveInputTarget::KLLogvar) {
+                ok = request_kl_weight(live_input_target_ == LiveInputTarget::KLMu, trimmed);
+            } else if (live_input_target_ == LiveInputTarget::LR) {
                 const float v = std::stof(trimmed);
                 if (std::isfinite(v)) {
                     live_ui_lr_ = std::clamp(v, kLiveLRMin, kLiveLRMax);
@@ -2268,8 +2336,10 @@ void Visualizer::processEvents() {
         }
 
         if (ok) {
-            live_overrides_enabled_.store(true, std::memory_order_relaxed);
-            publish_live_params(true);
+            if (live_input_target_ != LiveInputTarget::KLMu && live_input_target_ != LiveInputTarget::KLLogvar) {
+                live_overrides_enabled_.store(true, std::memory_order_relaxed);
+                publish_live_params(true);
+            }
             live_input_target_ = LiveInputTarget::None;
             live_input_buffer_.clear();
             live_input_error_until_ms_ = 0;
@@ -2292,6 +2362,57 @@ void Visualizer::processEvents() {
             window_width = static_cast<int>(resized->size.x);
             window_height = static_cast<int>(resized->size.y);
             syncUIView();
+            continue;
+        }
+
+        if (snapshot_dialog_visible_) {
+            auto toggle_option=[&](size_t index) {
+                if(index==0) snapshot_include_window_=!snapshot_include_window_;
+                else if(index==1 && !layer_block_images.empty()) snapshot_include_layer_tips_=!snapshot_include_layer_tips_;
+                else if(index==2 && has_projection_thumb_) snapshot_include_projection_=!snapshot_include_projection_;
+                else if(index==3 && has_output_thumb_) snapshot_include_output_=!snapshot_include_output_;
+                snapshot_dialog_error_.clear();
+            };
+            auto confirm_snapshot=[&]() {
+                if(!snapshot_include_window_ &&
+                   !(snapshot_include_layer_tips_ && !layer_block_images.empty()) &&
+                   !(snapshot_include_projection_ && has_projection_thumb_) &&
+                   !(snapshot_include_output_ && has_output_thumb_)) {
+                    snapshot_dialog_error_="Selectionne au moins un element disponible.";
+                    return;
+                }
+                snapshot_requested_=true;
+                snapshot_dialog_visible_=false;
+            };
+            if(const auto* key=event.getIf<vizgfx::Event::KeyPressed>()) {
+                if(key->code==vizgfx::Keyboard::Key::Escape) {
+                    snapshot_dialog_visible_=false;
+                    snapshot_dialog_error_.clear();
+                } else if(key->code==vizgfx::Keyboard::Key::Up) {
+                    snapshot_dialog_selected_=(snapshot_dialog_selected_+5)%6;
+                } else if(key->code==vizgfx::Keyboard::Key::Down || key->code==vizgfx::Keyboard::Key::Tab) {
+                    snapshot_dialog_selected_=(snapshot_dialog_selected_+1)%6;
+                } else if(key->code==vizgfx::Keyboard::Key::Space) {
+                    if(snapshot_dialog_selected_<4) toggle_option(snapshot_dialog_selected_);
+                } else if(key->code==vizgfx::Keyboard::Key::Enter) {
+                    if(snapshot_dialog_selected_<4) toggle_option(snapshot_dialog_selected_);
+                    else if(snapshot_dialog_selected_==4) confirm_snapshot();
+                    else snapshot_dialog_visible_=false;
+                }
+            } else if(const auto* click=event.getIf<vizgfx::Event::MouseButtonPressed>()) {
+                if(click->button==vizgfx::Mouse::Button::Left) {
+                    const float left=(float(window_width)-460.f)*.5f;
+                    const float top=(float(window_height)-292.f)*.5f;
+                    const float x=float(click->position.x),y=float(click->position.y);
+                    if(x>=left+12.f && x<=left+448.f && y>=top+67.f && y<top+207.f) {
+                        const size_t option=static_cast<size_t>((y-(top+67.f))/34.f);
+                        if(option<4) { snapshot_dialog_selected_=option;toggle_option(option); }
+                    } else if(y>=top+220.f && y<=top+254.f && x>=left+246.f && x<=left+442.f) {
+                        if(x<left+360.f) { snapshot_dialog_selected_=4;confirm_snapshot(); }
+                        else { snapshot_dialog_selected_=5;snapshot_dialog_visible_=false; }
+                    }
+                }
+            }
             continue;
         }
 
@@ -2321,6 +2442,7 @@ void Visualizer::processEvents() {
                 else if (key->code==vizgfx::Keyboard::Key::Right) model_graph_x_+=150.f;
                 else if (key->code==vizgfx::Keyboard::Key::Left) model_graph_x_-=150.f;
                 else if (key->code==vizgfx::Keyboard::Key::R) model_graph_x_=model_graph_y_=0.f;
+                else if (key->code==vizgfx::Keyboard::Key::X) model_graph_png_requested_=true;
                 continue;
             }
             if (!show_help_overlay_ && !config_editor_.visible && !zoom_active_ &&
@@ -2516,19 +2638,32 @@ void Visualizer::processEvents() {
                     continue;
                 }
 
+                if (metrics_content_hit && last_live_mu_value_box_ && last_live_mu_value_box_->contains(mouse)) {
+                    begin_live_text_edit(LiveInputTarget::KLMu, format_decimal(live_ui_kl_mu_weight_, 8));
+                    continue;
+                }
+                if (metrics_content_hit && last_live_logvar_value_box_ && last_live_logvar_value_box_->contains(mouse)) {
+                    begin_live_text_edit(LiveInputTarget::KLLogvar, format_decimal(live_ui_kl_logvar_weight_, 8));
+                    continue;
+                }
+
                 auto begin_live_drag_if_hit = [&](LiveDragTarget target,
                                                   const std::optional<vizgfx::FloatRect>& track,
                                                   const std::optional<vizgfx::FloatRect>& thumb) -> bool {
                     if ((thumb.has_value() && thumb->contains(mouse)) || (track.has_value() && track->contains(mouse))) {
                         live_dragging_ = target;
-                        live_overrides_enabled_.store(true, std::memory_order_relaxed);
                         apply_live_slider_from_mouse(target, mouse);
-                        publish_live_params(true);
+                        if (!split_kl_drag(target)) {
+                            live_overrides_enabled_.store(true, std::memory_order_relaxed);
+                            publish_live_params(true);
+                        }
                         return true;
                     }
                     return false;
                 };
 
+                if (metrics_content_hit && begin_live_drag_if_hit(LiveDragTarget::KLMu, last_live_mu_track_, last_live_mu_thumb_)) continue;
+                if (metrics_content_hit && begin_live_drag_if_hit(LiveDragTarget::KLLogvar, last_live_logvar_track_, last_live_logvar_thumb_)) continue;
                 if (metrics_content_hit && begin_live_drag_if_hit(LiveDragTarget::LR, last_live_lr_track_, last_live_lr_thumb_)) continue;
                 if (metrics_content_hit && begin_live_drag_if_hit(LiveDragTarget::LRWarmup, last_live_lrwu_track_, last_live_lrwu_thumb_)) continue;
                 if (metrics_content_hit && begin_live_drag_if_hit(LiveDragTarget::KLBeta, last_live_klb_track_, last_live_klb_thumb_)) continue;
@@ -2735,7 +2870,7 @@ void Visualizer::processEvents() {
 
             if (live_dragging_ != LiveDragTarget::None) {
                 apply_live_slider_from_mouse(live_dragging_, mouse);
-                publish_live_params(true);
+                if (!split_kl_drag(live_dragging_)) publish_live_params(true);
             }
             if (dragging_detection_threshold_) {
                 apply_detection_threshold_from_mouse(mouse);
@@ -2892,7 +3027,11 @@ void Visualizer::processEvents() {
             }
             if (code == vizgfx::Keyboard::Key::D)
                 debug_json_dialog_.open();
-            if (code == vizgfx::Keyboard::Key::E) snapshot_requested_ = true;
+            if (code == vizgfx::Keyboard::Key::E) {
+                snapshot_dialog_visible_=true;
+                snapshot_dialog_selected_=0;
+                snapshot_dialog_error_.clear();
+            }
             if (code == vizgfx::Keyboard::Key::G) {
                 show_loss_graph = !show_loss_graph;
                 panels_[static_cast<size_t>(PanelId::Graph)].visible = show_loss_graph;
@@ -3257,6 +3396,8 @@ void Visualizer::update() {
         last_live_lr_thumb_.reset();
         last_live_lrwu_track_.reset();
         last_live_lrwu_thumb_.reset();
+        last_live_mu_track_.reset(); last_live_mu_thumb_.reset(); last_live_mu_value_box_.reset();
+        last_live_logvar_track_.reset(); last_live_logvar_thumb_.reset(); last_live_logvar_value_box_.reset();
         last_live_klb_track_.reset();
         last_live_klb_thumb_.reset();
         last_live_klwu_track_.reset();
@@ -3282,9 +3423,14 @@ void Visualizer::update() {
     if (config_editor_.visible) renderConfigurationOverlay();
     if (show_model_graph_) renderModelGraphOverlay();
     if (debug_json_dialog_.visible) renderDebugJsonDialog();
+    if (snapshot_dialog_visible_) renderSnapshotDialog();
 
     window->display();
 
+    if (model_graph_png_requested_) {
+        saveModelGraphPng();
+        model_graph_png_requested_=false;
+    }
     if (snapshot_requested_) {
         saveSnapshotPng();
         snapshot_requested_ = false;
@@ -3295,76 +3441,132 @@ bool Visualizer::saveSnapshotPng() {
     if (!window || !window->isOpen()) return false;
     try {
         const vizgfx::Vector2u base_size = window->getSize();
-        const vizgfx::Image base_image = window->captureImage();
+        const bool include_window=snapshot_include_window_;
+        const vizgfx::Image base_image=include_window ? window->captureImage() : vizgfx::Image{};
 
-        struct TipRef { const ImageData* image; std::string label; };
+        struct TipRef { const ImageData* image; std::string label,category; };
         std::vector<TipRef> tips;
-        tips.reserve(layer_block_images.size() + 2);
-        for (size_t i = 0; i < layer_block_images.size(); ++i) {
-            tips.push_back(TipRef{&layer_block_images[i],
-                i < layer_block_labels.size() ? layer_block_labels[i] : std::string("tip")});
-        }
-        if (has_projection_thumb_ && !projection_thumb_.pixels.empty())
-            tips.push_back(TipRef{&projection_thumb_, projection_label});
-        if (has_output_thumb_ && !output_thumb_.pixels.empty())
-            tips.push_back(TipRef{&output_thumb_, output_thumb_label_});
-
-        constexpr unsigned thumb = 120;
-        constexpr unsigned cell_w = 140;
-        constexpr unsigned cell_h = 158;
-        constexpr unsigned margin = 16;
-        constexpr unsigned header_h = 42;
-        const unsigned sheet_width = std::max(base_size.x, 640u);
-        const unsigned columns = std::max(1u, (sheet_width - 2 * margin) / cell_w);
-        const unsigned rows = std::max(1u, static_cast<unsigned>(
-            (tips.size() + columns - 1) / columns));
-        const unsigned sheet_height = header_h + rows * cell_h + margin;
-
-        vizgfx::RenderTexture sheet(vizgfx::Vector2u(sheet_width, sheet_height));
-        sheet.clear(vizgfx::Color(24, 24, 30));
-        if (font_loaded) {
-            vizgfx::Text title(font, "Toutes les tips", 18);
-            title.setPosition(vizgfx::Vector2f(static_cast<float>(margin), 8.0f));
-            title.setFillColor(vizgfx::Color(240, 240, 245));
-            sheet.draw(title);
-        }
-
-        for (size_t i = 0; i < tips.size(); ++i) {
-            const unsigned column = static_cast<unsigned>(i) % columns;
-            const unsigned row = static_cast<unsigned>(i) / columns;
-            const float x = static_cast<float>(margin + column * cell_w);
-            const float y = static_cast<float>(header_h + row * cell_h);
-
-            vizgfx::RectangleShape frame(vizgfx::Vector2f(static_cast<float>(thumb + 4),
-                                                   static_cast<float>(thumb + 4)));
-            frame.setPosition(vizgfx::Vector2f(x - 2.0f, y - 2.0f));
-            frame.setFillColor(vizgfx::Color::Transparent);
-            frame.setOutlineColor(vizgfx::Color(150, 150, 175));
-            frame.setOutlineThickness(1.0f);
-            sheet.draw(frame);
-
-            vizgfx::Sprite sprite(tips[i].image->texture);
-            sprite.setScale(tips[i].image->sprite.getScale());
-            position_sprite_centered_in_box(sprite, x, y, static_cast<float>(thumb));
-            sheet.draw(sprite);
-
-            if (font_loaded) {
-                const ParsedVizLabel parsed = parse_viz_label(tips[i].label);
-                std::string label = clamp_text_end(format_tip_display_label(parsed), 20);
-                vizgfx::Text text(font, vizgfx::String::fromUtf8(label.begin(), label.end()), 12);
-                text.setPosition(vizgfx::Vector2f(x + 2.0f, y + thumb + 5.0f));
-                text.setFillColor(vizgfx::Color(235, 235, 240));
-                sheet.draw(text);
+        auto category_for=[](const std::string& label) {
+            const auto lumen=Mimir::Viz::lumenTipSection(label);
+            if(!lumen.empty()) return std::string(lumen);
+            std::string key=label;
+            std::transform(key.begin(),key.end(),key.begin(),[](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            if(key.find("encoder")!=std::string::npos || key.find("/enc")!=std::string::npos) return std::string("Encoder");
+            if(key.find("latent")!=std::string::npos || key.find("/mu")!=std::string::npos ||
+               key.find("logvar")!=std::string::npos || key.find("reparam")!=std::string::npos) return std::string("Latent");
+            if(key.find("decoder")!=std::string::npos || key.find("/dec")!=std::string::npos) return std::string("Decoder");
+            if(key.find("diffusion")!=std::string::npos || key.find("/diff")!=std::string::npos) return std::string("Diffusion");
+            if(key.find("recon")!=std::string::npos) return std::string("Reconstruction");
+            if(key.find("output")!=std::string::npos || key.find("/out")!=std::string::npos) return std::string("Outputs");
+            if(key.find("input")!=std::string::npos || key.find("/in")!=std::string::npos) return std::string("Inputs");
+            return std::string("Blocks");
+        };
+        if(snapshot_include_layer_tips_) {
+            tips.reserve(layer_block_images.size()+2);
+            for(size_t i=0;i<layer_block_images.size();++i) {
+                const std::string label=i<layer_block_labels.size()?layer_block_labels[i]:"tip";
+                tips.push_back({&layer_block_images[i],label,category_for(label)});
             }
         }
-        sheet.display();
+        if(snapshot_include_projection_ && has_projection_thumb_ && !projection_thumb_.pixels.empty())
+            tips.push_back({&projection_thumb_,projection_label,"Projection"});
+        if(snapshot_include_output_ && has_output_thumb_ && !output_thumb_.pixels.empty())
+            tips.push_back({&output_thumb_,output_thumb_label_,"Outputs"});
 
-        const vizgfx::Image sheet_image = sheet.getTexture().copyToImage();
-        vizgfx::Image snapshot(vizgfx::Vector2u(sheet_width, base_size.y + sheet_height),
-                           vizgfx::Color(24, 24, 30));
-        if (!snapshot.copy(base_image, vizgfx::Vector2u(0, 0)) ||
-            !snapshot.copy(sheet_image, vizgfx::Vector2u(0, base_size.y))) {
-            std::cerr << "[Viz] Echec assemblage du snapshot PNG" << std::endl;
+        vizgfx::Image sheet_image;
+        if(!tips.empty()) {
+            constexpr unsigned margin=18,thumb=112,cell_w=196,label_chars=26,label_line_h=15;
+            auto wrap_label=[=](const std::string& label) {
+                std::vector<std::string> lines;
+                for(size_t start=0;start<label.size();) {
+                    size_t end=std::min(label.size(),start+label_chars);
+                    if(end<label.size()) {
+                        while(end>start &&
+                              (static_cast<unsigned char>(label[end])&0xC0u)==0x80u) --end;
+                    }
+                    lines.push_back(label.substr(start,end-start));
+                    start=end;
+                }
+                if(lines.empty()) lines.emplace_back();
+                return lines;
+            };
+            std::vector<std::vector<std::string>> wrapped_labels;
+            wrapped_labels.reserve(tips.size());
+            for(const auto& tip:tips)wrapped_labels.push_back(wrap_label(tip.label));
+            const unsigned sheet_width=std::max(base_size.x,800u);
+            const unsigned columns=std::max(1u,(sheet_width-2*margin)/cell_w);
+            std::vector<std::string> categories;
+            for(const auto& tip:tips)
+                if(std::find(categories.begin(),categories.end(),tip.category)==categories.end())
+                    categories.push_back(tip.category);
+            struct Row { std::vector<size_t> items; size_t label_lines=1; unsigned y=0; };
+            struct Group { std::string name; unsigned y=0; std::vector<Row> rows; };
+            std::vector<Group> groups;
+            unsigned sheet_height=52;
+            for(const auto& category:categories) {
+                Group group;group.name=category;group.y=sheet_height;sheet_height+=30;
+                std::vector<size_t> indexes;
+                for(size_t i=0;i<tips.size();++i)if(tips[i].category==category)indexes.push_back(i);
+                for(size_t begin=0;begin<indexes.size();begin+=columns) {
+                    Row row;row.y=sheet_height;
+                    const size_t end=std::min(indexes.size(),begin+columns);
+                    for(size_t i=begin;i<end;++i) {
+                        row.items.push_back(indexes[i]);
+                        row.label_lines=std::max(row.label_lines,wrapped_labels[indexes[i]].size());
+                    }
+                    sheet_height+=thumb+18+static_cast<unsigned>(row.label_lines)*label_line_h+14;
+                    group.rows.push_back(std::move(row));
+                }
+                groups.push_back(std::move(group));
+            }
+            vizgfx::RenderTexture sheet(vizgfx::Vector2u(sheet_width,sheet_height));
+            sheet.clear(vizgfx::Color(24,24,30));
+            if(font_loaded) {
+                vizgfx::Text title(font,"Tips du snapshot - labels complets",18);
+                title.setPosition({float(margin),8.f});title.setFillColor(vizgfx::Color(240,240,245));sheet.draw(title);
+            }
+            for(const auto& group:groups) {
+                if(font_loaded) {
+                    vizgfx::Text header(font,vizgfx::String::fromUtf8(group.name.begin(),group.name.end()),15);
+                    header.setPosition({float(margin),float(group.y+4)});header.setFillColor(vizgfx::Color(100,215,210));sheet.draw(header);
+                }
+                for(const auto& row:group.rows) {
+                    for(size_t column=0;column<row.items.size();++column) {
+                        const auto& tip=tips[row.items[column]];
+                        const float x=float(margin+column*cell_w),y=float(row.y);
+                        vizgfx::RectangleShape frame({float(thumb+4),float(thumb+4)});
+                        frame.setPosition({x-2.f,y-2.f});frame.setFillColor(vizgfx::Color::Transparent);
+                        frame.setOutlineColor(vizgfx::Color(150,150,175));frame.setOutlineThickness(1.f);sheet.draw(frame);
+                        vizgfx::Sprite sprite(tip.image->texture);
+                        sprite.setScale(tip.image->sprite.getScale());
+                        position_sprite_centered_in_box(sprite,x,y,float(thumb));sheet.draw(sprite);
+                        if(!font_loaded) continue;
+                        const auto& lines=wrapped_labels[row.items[column]];
+                        for(size_t line=0;line<lines.size();++line) {
+                            const std::string& part=lines[line];
+                            vizgfx::Text label(font,vizgfx::String::fromUtf8(part.begin(),part.end()),11);
+                            label.setPosition({x,y+float(thumb+7+line*label_line_h)});
+                            label.setFillColor(vizgfx::Color(235,235,240));sheet.draw(label);
+                        }
+                    }
+                }
+            }
+            sheet.display();
+            sheet_image=sheet.getTexture().copyToImage();
+        }
+        if(!include_window && tips.empty()) {
+            std::cerr<<"[Viz] Echec snapshot PNG: aucun contenu selectionne n'est disponible."<<std::endl;
+            return false;
+        }
+        const unsigned output_width=include_window?base_size.x:sheet_image.getSize().x;
+        const unsigned output_height=(include_window?base_size.y:0)+
+            (tips.empty()?0:sheet_image.getSize().y);
+        vizgfx::Image snapshot({output_width,output_height},vizgfx::Color(24,24,30));
+        if((include_window && !snapshot.copy(base_image,{0,0})) ||
+           (!tips.empty() && !snapshot.copy(sheet_image,{0,include_window?base_size.y:0}))) {
+            std::cerr<<"[Viz] Echec assemblage du snapshot PNG"<<std::endl;
             return false;
         }
 
@@ -3394,6 +3596,101 @@ bool Visualizer::saveSnapshotPng() {
         return true;
     } catch (const std::exception& e) {
         std::cerr << "[Viz] Echec snapshot PNG: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+bool Visualizer::saveModelGraphPng() {
+    if(!window || !window->isOpen()) return false;
+    const auto graph=model_graph_display_;
+    if(!graph) {
+        std::cerr<<"[Viz] Echec export PNG du graphe: aucune topologie disponible."<<std::endl;
+        return false;
+    }
+    try {
+        const auto& nodes=graph->at("nodes");
+        const auto layout=Mimir::Viz::modelGraphTree(*graph);
+        constexpr float header_height=100.f;
+        const auto width=static_cast<unsigned>(std::max(640.f,std::ceil(layout.width()+32.f)));
+        const auto height=static_cast<unsigned>(std::max(220.f,std::ceil(layout.height()+header_height+12.f)));
+        constexpr unsigned tile_width=4096,tile_height=2048;
+        const vizgfx::Color background(16,23,32);
+        vizgfx::Image image({width,height},background);
+        const vizgfx::Color white(230,240,246),muted(160,180,200),accent(100,215,210);
+        for(unsigned tile_y=0;tile_y<height;tile_y+=tile_height) {
+            const unsigned current_height=std::min(tile_height,height-tile_y);
+            for(unsigned tile_x=0;tile_x<width;tile_x+=tile_width) {
+                const unsigned current_width=std::min(tile_width,width-tile_x);
+                vizgfx::RenderTexture canvas({current_width,current_height});
+                canvas.clear(background);
+                auto text=[&](float x,float y,const std::string& value,vizgfx::Color color,unsigned size=13) {
+                    vizgfx::Text label(font);label.setCharacterSize(size);label.setPosition({x,y});
+                    label.setFillColor(color);
+                    label.setString(vizgfx::String::fromUtf8(value.begin(),value.end()));
+                    canvas.draw(label);
+                };
+                canvas.setView(vizgfx::View(make_rect(float(tile_x),
+                    float(tile_y)-header_height,float(current_width),float(current_height))));
+                if(tile_x==0 && tile_y==0) {
+                    text(20,-header_height+14.f,"GRAPHE COMPLET DU MODELE",accent,20);
+                    text(20,-header_height+44.f,"Planner : "+graph->value("mode",std::string("inconnu"))+
+                        " | "+(graph->value("training",false)?"training":"inference")+
+                        " | "+std::to_string(nodes.size())+" nodes",white,13);
+                    text(20,-header_height+68.f,
+                        "Connections orthogonales, fleches vers les nodes cibles.",muted,12);
+                }
+                Mimir::Viz::drawModelGraphTreeEdges(canvas,layout,std::numeric_limits<size_t>::max());
+                for(size_t i=0;i<nodes.size();++i) {
+                    const auto& node=nodes[i];
+                    const auto center=layout.position(i);
+                    const float x=center.x-layout.card_width*.5f;
+                    const float y=center.y-layout.card_height*.5f;
+                    const auto color=Mimir::Viz::graphLaneColor(layout.lanes[i]);
+                    vizgfx::RectangleShape card({layout.card_width,layout.card_height});
+                    card.setPosition({x,y});card.setFillColor(vizgfx::Color(24,33,46));
+                    card.setOutlineColor(color);card.setOutlineThickness(1.f);canvas.draw(card);
+                    text(x+8.f,y+5.f,std::to_string(i)+"  "+node.value("name",std::string()),white,13);
+                    text(x+8.f,y+25.f,node.value("type",std::string())+"  |  "+
+                        node.value("runtime",std::string("non planifie")),color,11);
+                    std::string badges="params "+node.value("parameters",nlohmann::json(0)).dump();
+                    if(node.value("graph_fused",false))badges+="  | fusion";
+                    if(node.value("kernel_fused",false))badges+="  | kernel";
+                    if(node.value("skip",false))badges+="  | skip";
+                    text(x+8.f,y+45.f,badges,muted,10);
+                }
+                canvas.display();
+                const auto tile=canvas.getTexture().copyToImage();
+                if(!image.copy(tile,{tile_x,tile_y})) {
+                    std::cerr<<"[Viz] Echec assemblage des tuiles du graphe."<<std::endl;
+                    return false;
+                }
+            }
+        }
+        const auto now=std::chrono::system_clock::now();
+        const auto time=std::chrono::system_clock::to_time_t(now);
+        std::tm local_time{};
+#ifdef _WIN32
+        localtime_s(&local_time,&time);
+#else
+        localtime_r(&time,&local_time);
+#endif
+        std::ostringstream filename;
+        const auto millis=std::chrono::duration_cast<std::chrono::milliseconds>(
+            now.time_since_epoch()).count()%1000;
+        filename<<"model_graph_"<<std::put_time(&local_time,"%Y%m%d_%H%M%S")
+            <<'_'<<std::setw(3)<<std::setfill('0')<<millis<<".png";
+        const std::filesystem::path directory("snapshots");
+        std::error_code ec;std::filesystem::create_directories(directory,ec);
+        const auto path=directory/filename.str();
+        if(ec || !image.saveToFile(path)) {
+            std::cerr<<"[Viz] Echec export PNG du graphe: "<<path.string()<<std::endl;
+            return false;
+        }
+        last_model_graph_path_=path.string();
+        std::cout<<"[Viz] Graphe du modele exporte: "<<path.string()<<std::endl;
+        return true;
+    } catch(const std::exception& error) {
+        std::cerr<<"[Viz] Echec export PNG du graphe: "<<error.what()<<std::endl;
         return false;
     }
 }
@@ -3598,7 +3895,7 @@ void Visualizer::renderHelpOverlay() {
         {"Commandes et configuration",{{"Commandes","En haut de Metrics : Play/Pause, Stop, Validation, Skips, Live/Native, KL et Recon."},
             {"Play / Pause","Suspendre ou reprendre entre deux étapes de calcul."},
             {"C","Ouvrir ou fermer la configuration du modèle."},
-            {"N","Graphe du modele et planner actif. Fleches/molette : parcourir, clic : inspecter."},
+            {"N / X","Graphe nodal du modele / exporter le graphe en PNG."},
             {"D / DebugJSON","Choisir le dossier et le fichier dans la boite modale, puis exporter."},
             {"Entrée / Esc","Valider une édition ou l'annuler."},
             {"Reglages","Cliquer sur une valeur pour la saisir, ou utiliser les curseurs."}}},
@@ -3612,7 +3909,7 @@ void Visualizer::renderHelpOverlay() {
             {"S + 0-9","Sauvegarder un slot de disposition."},
             {"0-9","Charger un slot de disposition."},
             {"Ctrl + fleches","Modifier la taille de la fenêtre."},
-            {"E","Capturer la scene en PNG."}}},
+            {"E","Choisir les éléments à exporter dans un snapshot PNG."}}},
         {"Contrôles du script",{{"Viz.configure","Définir les panneaux et les boutons du script."},
             {"Viz.poll_events","Recevoir les événements du script."},
             {"Aide du script",script_scene_.value("help",std::string("Les contrôles du script apparaissent au-dessus des panneaux."))}}}
@@ -4567,13 +4864,29 @@ void Visualizer::setLayerBlockImages(const std::vector<BlockFrame>& frames) {
             img.pixels_alt  = f.pixels_real;
             img.channels_alt = (real_channels == 1 || real_channels == 3 || real_channels == 4) ? real_channels : 1;
 
-            // En mode heatmap, éviter l'aspect noir/blanc sur les tips 1 canal:
-            // on colorise en RGB tout en conservant la version brute pour debug.
-            if (heatmap_mode_ && img.channels == 1) {
-                img.pixels_alt = img.pixels;
-                img.channels_alt = 1;
-                img.pixels = colorize_gray_heatmap_rgb(img.pixels, static_cast<int>(heatmap_palette_));
-                img.channels = 3;
+            const bool identity_layer=LayerRegistry::normalize_type(p.layer_type)=="Identity";
+            if(heatmap_mode_ && !identity_layer) {
+                const std::vector<uint8_t> source=img.pixels;
+                const int source_channels=img.channels;
+                const size_t pixel_count=source.size()/static_cast<size_t>(source_channels);
+                std::vector<uint8_t> gray(pixel_count);
+                if(source_channels==1) {
+                    gray=source;
+                    img.pixels_alt=source;
+                    img.channels_alt=1;
+                } else {
+                    for(size_t i=0;i<pixel_count;++i) {
+                        const size_t offset=i*static_cast<size_t>(source_channels);
+                        const unsigned r=source[offset],g=source[offset+1],b=source[offset+2];
+                        gray[i]=static_cast<uint8_t>((77u*r+150u*g+29u*b)>>8);
+                    }
+                    if(f.pixels_real.empty()) {
+                        img.pixels_alt=source;
+                        img.channels_alt=source_channels;
+                    }
+                }
+                img.pixels=colorize_gray_heatmap_rgb(gray,static_cast<int>(heatmap_palette_));
+                img.channels=3;
             }
         }
 
@@ -5119,13 +5432,9 @@ void Visualizer::renderDetectionOverlay(const ImageData& image, float x, float y
 
 void Visualizer::renderLayerBlocks() {
     const bool has_blocks = (has_layer_blocks && !layer_block_images.empty());
-    const bool show_projection = has_projection_thumb_ && has_projection_image && !projection_thumb_.pixels.empty() &&
-        !hidden_block_tip(parse_viz_label(projection_label), hide_activation_blocks, hide_normalisation_blocks);
-    const bool show_output = has_output_thumb_ && !output_thumb_.pixels.empty() &&
-        !hidden_block_tip(parse_viz_label(output_thumb_label_), hide_activation_blocks, hide_normalisation_blocks);
 
     const int blocks_count = has_blocks ? static_cast<int>(layer_block_images.size()) : 0;
-    if (!show_projection && !show_output && blocks_count <= 0) return;
+    if (blocks_count <= 0) return;
 
     last_block_rects_.clear();
 
@@ -5191,13 +5500,10 @@ void Visualizer::renderLayerBlocks() {
 
     struct BlockPanelEntry {
         bool is_header = false;
-        bool is_extra = false;
         int block_index = -1;
         ImageData* img = nullptr;
         ParsedVizLabel parsed;
         std::string section;
-        std::string text_override;
-        std::string tag_override;
     };
 
     auto starts_with = [](const std::string& s, const std::string& prefix) {
@@ -5227,8 +5533,7 @@ void Visualizer::renderLayerBlocks() {
         return vizgfx::Color(100, 100, 112, 210);
     };
 
-    auto section_for = [&](const ParsedVizLabel& p, bool is_extra) -> std::string {
-        if (is_extra) return "Outputs";
+    auto section_for = [&](const ParsedVizLabel& p) -> std::string {
         const auto lumen_section = Mimir::Viz::lumenTipSection(p.path + " " + p.layer_path + " " + p.extra);
         if (!lumen_section.empty()) return std::string(lumen_section);
         const std::string lp = !p.layer_path.empty() ? p.layer_path : p.short_text;
@@ -5412,36 +5717,6 @@ void Visualizer::renderLayerBlocks() {
         entries.push_back(std::move(h));
     };
 
-    if (show_projection || show_output) {
-        if (show_projection) {
-            const bool text_projection = Mimir::Viz::lumenTipSection(projection_label) == "Text / Cond";
-            const std::string section = text_projection ? "Text / Cond" : "Outputs";
-            push_header(section);
-            BlockPanelEntry e;
-            e.is_extra = true;
-            e.img = &projection_thumb_;
-            e.parsed = parse_viz_label(projection_label.empty() ? std::string("mimir/output/projection") : projection_label);
-            e.section = section;
-            e.text_override = "Projection";
-            e.tag_override = text_projection ? "TX" : "OUT";
-            entries.push_back(std::move(e));
-        }
-        if (show_output) {
-            const bool validation_output = Mimir::Viz::lumenTipSection(output_thumb_label_) == "Validation";
-            const std::string section = validation_output ? "Validation" : "Outputs";
-            push_header(section);
-            BlockPanelEntry e;
-            e.is_extra = true;
-            e.img = &output_thumb_;
-            e.parsed = parse_viz_label(output_thumb_label_.empty() ? std::string("mimir/output") : output_thumb_label_);
-            e.section = section;
-            e.text_override = validation_output ? "Validation" : "Sortie";
-            e.tag_override = validation_output ? "VAL" :
-                (Mimir::Viz::isLumenModelOutput(output_thumb_label_) ? "ST" : "OUT");
-            entries.push_back(std::move(e));
-        }
-    }
-
     for (int bi = 0; bi < blocks_count; ++bi) {
         const std::string parsed_label = (bi >= 0 && bi < static_cast<int>(layer_block_labels.size()))
             ? layer_block_labels[static_cast<size_t>(bi)]
@@ -5449,7 +5724,7 @@ void Visualizer::renderLayerBlocks() {
         ParsedVizLabel parsed = parse_viz_label(parsed_label);
         apply_arch_hint(parsed);
         const std::string section = parsed.path.find("annotation_")!=std::string::npos && !entries.empty()
-            ? entries.back().section : section_for(parsed, false);
+            ? entries.back().section : section_for(parsed);
         push_header(section);
 
         BlockPanelEntry e;
@@ -5469,7 +5744,7 @@ void Visualizer::renderLayerBlocks() {
         return s;
     };
     auto entry_key = [&](const BlockPanelEntry& e) -> std::string {
-        return to_lower(e.parsed.layer_path + " " + e.parsed.path + " " + e.parsed.short_text + " " + e.text_override);
+        return to_lower(e.parsed.layer_path + " " + e.parsed.path + " " + e.parsed.short_text);
     };
     auto is_diff_entry = [&](const BlockPanelEntry& e) -> bool {
         if (e.is_header) return false;
@@ -5568,7 +5843,7 @@ void Visualizer::renderLayerBlocks() {
                 continue;
             }
 
-            const bool keep = entry.is_extra || (remaining > 0);
+            const bool keep = remaining > 0;
             if (!keep) continue;
 
             if (pending_header.has_value()) {
@@ -5577,9 +5852,7 @@ void Visualizer::renderLayerBlocks() {
             }
 
             limited.push_back(entry);
-            if (!entry.is_extra && remaining > 0) {
-                --remaining;
-            }
+            --remaining;
         }
 
         entries.swap(limited);
@@ -5669,12 +5942,7 @@ void Visualizer::renderLayerBlocks() {
         if ((y + 2 * cell_h) < static_cast<int>(area.position.y)) continue;
 
         ParsedVizLabel display_parsed = entry.parsed;
-        if (entry.is_extra) {
-            // Projection/Sortie ajoutées ici sont des tips de présentation créés
-            // par le Visualizer, pas des nœuds provenant du graphe du modèle.
-            display_parsed.tag = "VIZ";
-            if (display_parsed.extra.empty()) display_parsed.extra = entry.text_override;
-        } else if (entry.section.rfind("VAE / ", 0) == 0) {
+        if (entry.section.rfind("VAE / ", 0) == 0) {
             if (display_parsed.layer_path.rfind("vae_conv/", 0) == 0) {
                 display_parsed.layer_path.erase(0, std::string("vae_conv/").size());
             }
@@ -5697,15 +5965,13 @@ void Visualizer::renderLayerBlocks() {
         frame.setOutlineThickness(1);
         window->draw(frame);
 
-        if (!entry.is_extra) {
-            const int bi = entry.block_index;
-            if (bi >= 0 && bi < blocks_count) {
-                last_block_rects_[static_cast<size_t>(bi)] = make_rect(
-                    static_cast<float>(x - 2),
-                    static_cast<float>(y - 2),
-                    static_cast<float>(thumb + 4),
-                    static_cast<float>(thumb + 4));
-            }
+        const int bi = entry.block_index;
+        if (bi >= 0 && bi < blocks_count) {
+            last_block_rects_[static_cast<size_t>(bi)] = make_rect(
+                static_cast<float>(x - 2),
+                static_cast<float>(y - 2),
+                static_cast<float>(thumb + 4),
+                static_cast<float>(thumb + 4));
         }
 
         position_sprite_centered_in_box(entry.img->sprite, static_cast<float>(x), static_cast<float>(y), static_cast<float>(thumb));
@@ -6172,6 +6438,8 @@ void Visualizer::renderMetrics() {
     last_live_lr_thumb_.reset();
     last_live_lrwu_track_.reset();
     last_live_lrwu_thumb_.reset();
+    last_live_mu_track_.reset(); last_live_mu_thumb_.reset(); last_live_mu_value_box_.reset();
+    last_live_logvar_track_.reset(); last_live_logvar_thumb_.reset(); last_live_logvar_value_box_.reset();
     last_live_klb_track_.reset();
     last_live_klb_thumb_.reset();
     last_live_klwu_track_.reset();
@@ -6469,7 +6737,15 @@ void Visualizer::renderMetrics() {
         const float track_h = 10.f;
         const float thumb_w = 10.f;
         const float thumb_h = 16.f;
-        const int rows = 4;
+        bool split_kl_available = false;
+        for (const auto& entry : std::atomic_load(&runtime_config_)->snapshot()) {
+            if (entry.key == "kl_mu_weight" || entry.key == "kl_logvar_weight") {
+                split_kl_available = true;
+                const float value = entry.pending.value_or(entry.value).get<float>();
+                (entry.key == "kl_mu_weight" ? live_ui_kl_mu_weight_ : live_ui_kl_logvar_weight_) = value;
+            }
+        }
+        const int rows = split_kl_available ? 6 : 4;
 
         auto drawSliderRow = [&](int row,
                                  const std::string& label,
@@ -6657,6 +6933,15 @@ void Visualizer::renderMetrics() {
                           last_live_klwu_track_,
                           last_live_klwu_thumb_,
                           last_live_klwu_value_box_);
+        }
+
+        if (split_kl_available) {
+            drawSliderRow(4, "MU x", live_ui_kl_mu_weight_ / 4.f,
+                          format_decimal(live_ui_kl_mu_weight_, 8), LiveInputTarget::KLMu,
+                          "0 (off)", "4", last_live_mu_track_, last_live_mu_thumb_, last_live_mu_value_box_);
+            drawSliderRow(5, "Logvar x", live_ui_kl_logvar_weight_ / 4.f,
+                          format_decimal(live_ui_kl_logvar_weight_, 8), LiveInputTarget::KLLogvar,
+                          "0 (off)", "4", last_live_logvar_track_, last_live_logvar_thumb_, last_live_logvar_value_box_);
         }
 
         int extra_y = live_y0 + rows * live_row_h + 26;
