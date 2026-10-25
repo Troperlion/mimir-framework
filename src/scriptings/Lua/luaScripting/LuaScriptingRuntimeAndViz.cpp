@@ -25,8 +25,10 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <filesystem>
 #include <iomanip>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <type_traits>
@@ -54,13 +56,16 @@ public:
     ModelInitAnimation(const std::string& label, bool allow_animation)
         : label_(label), enabled_(allow_animation && isInteractiveStderr()) {
         if (!enabled_) return;
-        running_.store(true, std::memory_order_release);
         worker_ = std::thread([this]() {
             static constexpr char frames[] = {'|', '/', '-', '\\'};
             size_t frame = 0;
-            while (running_.load(std::memory_order_acquire)) {
+            while (true) {
                 std::cerr << '\r' << label_ << " [" << frames[frame++ % 4] << "]" << std::flush;
-                std::this_thread::sleep_for(std::chrono::milliseconds(90));
+                std::unique_lock<std::mutex> lock(mutex_);
+                if (stop_requested_.wait_for(lock, std::chrono::milliseconds(90),
+                                              [this]() { return stop_; })) {
+                    break;
+                }
             }
         });
     }
@@ -72,7 +77,11 @@ public:
     void finish(bool success) {
         if (!enabled_) return;
         enabled_ = false;
-        running_.store(false, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stop_ = true;
+        }
+        stop_requested_.notify_one();
         if (worker_.joinable()) worker_.join();
         std::cerr << "\r\033[2K" << label_ << (success ? " [ok]" : " [erreur]") << std::endl;
     }
@@ -80,7 +89,9 @@ public:
 private:
     std::string label_;
     bool enabled_ = false;
-    std::atomic<bool> running_{false};
+    std::mutex mutex_;
+    std::condition_variable stop_requested_;
+    bool stop_ = false;
     std::thread worker_;
 };
 

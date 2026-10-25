@@ -15,7 +15,11 @@ réduites pour la validation quotidienne. `core` conserve les charges normales,
 alias de `--suite quick`. Chaque script s'exécute dans un processus séparé.
 `--keep-going` poursuit après un échec, puis renvoie une erreur globale.
 Un résumé Markdown et les mesures JSON sont écrits dans
-`outputs/benchmarks/latest`. `--report-dir PATH` choisit un autre dossier.
+`outputs/benchmarks/latest`. `--report-dir PATH` choisit un autre dossier ;
+`--unique-run-dir` crée dedans un sous-dossier horodaté (avec suffixe si
+un dossier du même nom existe déjà) pour ne pas écraser les
+rapports précédents. La configuration `benchmarks-config.json` l'active par
+défaut pour chaque tâche.
 `ROOTWORK` désigne le projet ; `MIMIR_BIN` permet de choisir le binaire enfant.
 Les variables `env` du fichier de configuration sont appliquées et héritées.
 Aucun dataset n'est utilisé.
@@ -34,7 +38,9 @@ Aucun dataset n'est utilisé.
 
 Les scripts utilisant `common.lua` acceptent `--ram` (GiB), `--dtype`,
 `--no-compress` et `--no-accel` via leur configuration commune, sauf les contrôles
-spécialisés dtype/spill. Les forwards acceptent `--iters` et `--warmup`.
+spécialisés dtype/spill. Les forwards acceptent `--iters` et `--warmup` ; les variables
+`MIMIR_BENCH_ITERS` et `MIMIR_BENCH_WARMUP` fixent les valeurs par défaut
+communes quand l'option CLI correspondante est absente.
 `--report rapport.json` ou `--report rapport.md` produit un rapport autonome.
 Les paramètres propres à chaque script figurent dans ses commentaires de tête.
 Les variables `MIMIR_BENCH_RAM_GB`, `MIMIR_BENCH_ITERS` et `MIMIR_DTYPE`

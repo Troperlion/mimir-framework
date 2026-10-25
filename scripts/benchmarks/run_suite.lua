@@ -36,7 +36,8 @@ for i, value in ipairs(arg or {}) do
     assert(arg[i+1] and not arg[i+1]:match("^%-%-"), "--suite: valeur manquante")
   elseif value:match("^%-%-") then
     assert(value == "--" or value == "--keep-going" or value == "--quick"
-      or value == "--report-dir", "option inconnue: " .. value)
+      or value == "--report-dir" or value == "--unique-run-dir",
+      "option inconnue: " .. value)
   end
 end
 for i = 1, #(arg or {}) do
@@ -64,10 +65,10 @@ local groups = {
   },
   quick = {
     {"NMS", "scripts/benchmarks/benchmark_nms.lua", "--quick"},
-    {"attention", "scripts/benchmarks/benchmark_attention.lua", "--quick"},
+    {"attention", "scripts/benchmarks/benchmark_attention.lua", "--quick", "--iters", "2", "--warmup", "1"},
     {"convolution training", "scripts/benchmarks/benchmark_conv_train.lua", "--quick"},
-    {"général", "scripts/benchmarks/benchmark.lua", "--quick"},
-    {"complet", "scripts/benchmarks/benchmark_complet.lua", "--quick"},
+    {"général", "scripts/benchmarks/benchmark.lua", "--quick", "--iters", "2", "--warmup", "1"},
+    {"complet", "scripts/benchmarks/benchmark_complet.lua", "--quick", "--iters", "2", "--warmup", "1"},
     {"officiel", "scripts/benchmarks/benchmark_official.lua", "--quick", "--iters", "1"},
   },
   stress = {
@@ -99,6 +100,16 @@ local is_absolute = FS.is_windows()
   and (report_dir:match("^%a:[/\\]") ~= nil or report_dir:match("^[/\\][/\\]") ~= nil)
   or report_dir:sub(1, 1) == "/"
 if not is_absolute then report_dir = FS.join(root, report_dir) end
+if has("--unique-run-dir") then
+  local run_id = os.date("!%Y%m%dT%H%M%SZ")
+  local candidate = FS.join(report_dir, run_id)
+  local suffix = 1
+  while FS.exists(candidate) do
+    candidate = FS.join(report_dir, string.format("%s-%02d", run_id, suffix))
+    suffix = suffix + 1
+  end
+  report_dir = candidate
+end
 assert(FS.mkdir_p(report_dir), "impossible de créer le dossier de rapports: " .. report_dir)
 local failures = {}
 local summary = {}

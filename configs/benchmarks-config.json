@@ -20,8 +20,8 @@
     ],
     "isolation": "Chaque benchmark est lancé dans un processus Mimir distinct afin de réinitialiser le modèle, les runtimes et l'allocateur.",
     "reports": {
-      "format": "Un résumé Markdown et un rapport JSON détaillé par benchmark.",
-      "location": "outputs/benchmarks/<suite>",
+      "format": "Un résumé Markdown par suite et un rapport JSON par benchmark mesurable.",
+      "location": "outputs/benchmarks/<suite>/<date-de-run>",
       "metrics": ["minimum", "moyenne", "médiane", "p95", "maximum", "débit"]
     },
     "notes": [
@@ -29,9 +29,10 @@
       "La suite complète peut consommer plusieurs gigaoctets de RAM.",
       "MIMIR_BIN peut désigner un autre exécutable Mimir.",
       "La section env est appliquée par Mimir et héritée par les processus enfants.",
-      "Conserver OMP_NUM_THREADS identique pour comparer deux exécutions.",
+      "Conserver le même binaire, OMP_NUM_THREADS et les mêmes options pour comparer deux exécutions.",
       "Toutes les durées utilisent l'horloge murale monotone steady_clock, avec une résolution inférieure à la seconde.",
-      "Les forwards GPU sont chronométrés jusqu'au retour des sorties matérialisées côté hôte."
+      "Les forwards accélérés sont chronométrés jusqu'au retour des sorties matérialisées côté hôte.",
+      "Chaque exécution crée un dossier horodaté distinct afin de conserver les rapports précédents."
     ]
   },
 
@@ -39,6 +40,8 @@
     "MIMIR_ACCEL_VERBOSE": 0,
     "MIMIR_PLANNER_TRACE": 0,
     "MIMIR_PLANNER_DUMP": 0,
+    "MIMIR_BENCH_ITERS": 20,
+    "MIMIR_BENCH_WARMUP": 3,
     "OMP_NUM_THREADS": 10
   },
 
@@ -55,7 +58,7 @@
     "scripts": [
       {
         "script": "scripts/benchmarks/run_suite.lua",
-        "args": ["--suite", "core", "--keep-going", "--report-dir", "outputs/benchmarks/core"]
+        "args": ["--suite", "core", "--keep-going", "--unique-run-dir", "--report-dir", "outputs/benchmarks/core"]
       }
     ]
   },
@@ -67,7 +70,7 @@
         "scripts": [
           {
             "script": "scripts/benchmarks/run_suite.lua",
-            "args": ["--suite", "all", "--keep-going", "--report-dir", "outputs/benchmarks/all"]
+            "args": ["--suite", "all", "--keep-going", "--unique-run-dir", "--report-dir", "outputs/benchmarks/all"]
           }
         ]
       }
@@ -78,7 +81,7 @@
         "scripts": [
           {
             "script": "scripts/benchmarks/run_suite.lua",
-            "args": ["--suite", "smoke", "--report-dir", "outputs/benchmarks/smoke"]
+            "args": ["--suite", "smoke", "--unique-run-dir", "--report-dir", "outputs/benchmarks/smoke"]
           }
         ]
       }
@@ -89,7 +92,7 @@
         "scripts": [
           {
             "script": "scripts/benchmarks/run_suite.lua",
-            "args": ["--suite", "core", "--keep-going", "--report-dir", "outputs/benchmarks/core"]
+            "args": ["--suite", "core", "--keep-going", "--unique-run-dir", "--report-dir", "outputs/benchmarks/core"]
           }
         ]
       }
@@ -100,7 +103,7 @@
         "scripts": [
           {
             "script": "scripts/benchmarks/run_suite.lua",
-            "args": ["--suite", "quick", "--keep-going", "--report-dir", "outputs/benchmarks/quick"]
+            "args": ["--suite", "quick", "--keep-going", "--unique-run-dir", "--report-dir", "outputs/benchmarks/quick"]
           }
         ]
       }
@@ -111,7 +114,7 @@
         "scripts": [
           {
             "script": "scripts/benchmarks/run_suite.lua",
-            "args": ["--suite", "stress", "--report-dir", "outputs/benchmarks/stress"]
+            "args": ["--suite", "stress", "--unique-run-dir", "--report-dir", "outputs/benchmarks/stress"]
           }
         ]
       }

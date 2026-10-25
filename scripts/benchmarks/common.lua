@@ -122,7 +122,7 @@ function B.forward(input, training, expected)
   return B.vector(assert(Mimir.Model.forward(input, training or false)), expected)
 end
 function B.bench_forward(input, expected)
-  local warmup = B.number('--warmup', nil, 1, 0, true)
+  local warmup = B.number('--warmup', 'MIMIR_BENCH_WARMUP', 1, 0, true)
   local iters = B.number('--iters', 'MIMIR_BENCH_ITERS', B.has('--quick') and 2 or 10, 1, true)
   for _ = 1, warmup do B.forward(input, false, expected) end
   local output, samples = nil, {}
